@@ -1,0 +1,9 @@
+# Never commit secrets
+.streamlit/secrets.toml
+.env
+
+# Local data (not needed when using Supabase)
+schedule_log.json
+__pycache__/
+*.pyc
+.DS_Store

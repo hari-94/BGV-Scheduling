@@ -1,0 +1,14 @@
+[[pages]]
+path = "cleaning_scheduler.py"
+name = "🧹 Schedule"
+icon = "🧹"
+
+[[pages]]
+path = "pages/1_Dashboard.py"
+name = "📊 Dashboard"
+icon = "📊"
+
+[[pages]]
+path = "pages/2_Admin.py"
+name = "👑 Admin"
+icon = "👑"
