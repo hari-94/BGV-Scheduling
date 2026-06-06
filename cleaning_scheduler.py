@@ -25,10 +25,14 @@ st.set_page_config(
 # Hide the default auto-generated page navigation items we don't want
 # (Login page removed; sidebar nav controlled via CSS)
 st.markdown("""<style>
-/* Hide any auto-nav items referencing login */
-[data-testid="stSidebarNavItems"] a[href$="Login"],
-[data-testid="stSidebarNavItems"] a[href$="0_Login"],
-[data-testid="stSidebarNavLink"]:has(p:contains("Login")) { display:none!important }
+/* ── Hide Streamlit's auto-generated page nav entirely ── */
+[data-testid="stSidebarNav"],
+[data-testid="stSidebarNavItems"],
+[data-testid="stSidebarNavSeparator"],
+section[data-testid="stSidebar"] > div:first-child > div > ul,
+section[data-testid="stSidebar"] nav {
+  display: none !important;
+}
 </style>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -52,8 +56,8 @@ def make_labels(prefix: str, n: int) -> list:
     return out
 LOW_MIN  = 330
 MAX_FC   = 380
-MAX_DS   = 460
-DS_OVER  = 600   # hard ceiling for overflow last DS group
+MAX_DS   = 560
+DS_OVER  = 700   # hard ceiling for overflow last DS group
 LOW_FILL = 350   # top-up threshold: groups below this get extra rooms if possible
 
 SVC_FC   = "Full Clean"
@@ -345,10 +349,12 @@ def _init_state():
         st.session_state["hk_roster"] = roster
     if "insp_roster" not in st.session_state:
         st.session_state["insp_roster"] = {n: True for n in DEFAULT_INSPECTORS}
-    for k in ("groups_data","total_rooms","inspectors_data","used_hk_set","last_email",
-              "rqs1","rqs2"):
+    for k, default in [("groups_data",None),("total_rooms",None),
+                        ("inspectors_data",None),("used_hk_set",None),
+                        ("last_email",None),("rqs1",""),("rqs2",""),
+                        ("priority_hks",[])]:
         if k not in st.session_state:
-            st.session_state[k] = None
+            st.session_state[k] = default
 
 _init_state()
 auth.init_auth()
@@ -385,13 +391,20 @@ if not st.session_state.get("logged_in"):
         _db_msg = str(_ex)
 
     if not _db_ok:
-        st.error(f"⚠️ Database not connected. Check `.streamlit/secrets.toml`\n\n`{_db_msg}`")
-        st.markdown("""
-**Fix:** Edit `.streamlit/secrets.toml` and set:
+        st.error("⚠️ Cannot connect to database.")
+        st.markdown(f"""
+**Error:** `{_db_msg}`
+
+**How to fix on Streamlit Cloud:**
+1. Go to your app on [share.streamlit.io](https://share.streamlit.io)
+2. Click ⋮ menu → **Settings** → **Secrets**
+3. Paste exactly this (with your real values):
 ```toml
-SUPABASE_URL = "https://xxxx.supabase.co"
-SUPABASE_KEY = "eyJ..."
-```""")
+SUPABASE_URL = "https://pdjvkezdeczeutuwarfr.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBkanZrZXpkZWN6ZXV0dXdhcmZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0NTkwMDcsImV4cCI6MjA5NjAzNTAwN30.L7-F4E-qEpbWoIE78sxuaQ_mB4krkFMIDAAkhXmA55A"
+```
+4. Click **Save** then **Reboot app**
+""")
         st.stop()
 
     with st.form("login_form"):
@@ -415,9 +428,15 @@ SUPABASE_KEY = "eyJ..."
 # ════════════════════════════════════════════════════════════════════════════
 #  PARSING HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
+# Service types to completely ignore
+SKIP_SERVICES = {"p/u models","pu models","p/u model","showcase","model unit","p/u"}
+
 def normalize_service(raw: str) -> str:
     # Normalise whitespace and case
     s = re.sub(r'\s+', ' ', str(raw).strip().lower())
+    # Skip P/U Models and similar showcase/non-schedulable service types
+    if s in SKIP_SERVICES or "p/u" in s or (s.startswith("p") and "model" in s):
+        return "__SKIP__"
     # Daily Service — check before "dust" so "daily" doesn't fall through
     if "daily" in s:
         return SVC_DS
@@ -588,9 +607,12 @@ def parse_rooms(text: str) -> pd.DataFrame:
     header = [c.strip().lower() for c in rows[0]]
 
     def col(*names):
+        """Find column index by header name. Skips blank/empty header cells."""
         for n in names:
             for i, h in enumerate(header):
-                if n in h: return i
+                h_clean = h.strip().lower()
+                if not h_clean: continue  # skip empty/merged header cells
+                if n in h_clean: return i
         return None
 
     has_header = any(h in ("room","service","time","guest","current guest") for h in header)
@@ -625,14 +647,46 @@ def parse_rooms(text: str) -> pd.DataFrame:
                 # Use default time based on room type × service
                 ti = default_time_for(room, norm_svc)
                 if ti <= 0:
-                    continue  # still 0 — skip
+                    # Last resort: infer from room suffix
+                    suffix = room[-1].upper() if room else ""
+                    if suffix == "E":   ti = 140
+                    elif suffix == "D": ti = 120
+                    elif suffix == "A": ti = 120
+                    else:               ti = 70
+                    if ti <= 0:
+                        continue  # truly unknown — skip
+        # Normalise guest name: strip, collapse whitespace
+        raw_guest = get(row,i_guest)
+        import re as _re
+        norm_guest = _re.sub(r'\s+', ' ', raw_guest.strip())
+
+        # Mark uncertain rooms: Unallocated/unknown guest + Pending status
+        # Schedule them normally but flag for end of CSV export
+        status_raw = get(row, i_status).strip().lower()
+        guest_raw  = norm_guest.lower().strip()
+        # Check notes column for stayover flag (from Excel)
+        notes_raw_val = get(row, i_notes).strip().lower()
+        has_stayover_excel = "stayover" in notes_raw_val or "stay over" in notes_raw_val
+
+        # Also check raw row for "pending" anywhere near the row
+        # (handles shifted columns from merged-cell Excel exports)
+        row_text = " ".join(str(c).strip().lower() for c in row if c)
+        has_pending_anywhere = "pending" in row_text
+
+        is_uncertain = (
+            (guest_raw in ("unallocated", "---", "room, walk", "", "deposit, deposit") and
+             ("pending" in status_raw or has_pending_anywhere))
+            or has_stayover_excel
+        )
+
         records.append({
             "Room":get(row,i_room),"Service":norm_svc,
-            "ServiceRaw":svc,   # keep original for debugging
-            "Time":ti,"Pet":get(row,i_pet),"Guest":get(row,i_guest),
+            "ServiceRaw":svc,
+            "Time":ti,"Pet":get(row,i_pet),"Guest":norm_guest,
             "LateCheckout":get(row,i_late),"Status":get(row,i_status),
             "NotesRaw":get(row,i_notes),"ArrivingGuest":get(row,i_arriving),
             "ResType":get(row,i_restype),
+            "uncertain": is_uncertain,
         })
     if not records: return pd.DataFrame()
     df = pd.DataFrame(records)
@@ -646,6 +700,13 @@ def parse_rooms(text: str) -> pd.DataFrame:
 #  GROUPING LOGIC
 # ══════════════════════════════════════════════════════════════════════════════
 def bld_ok(blds, b):
+    """
+    Building compatibility for FC groups.
+    Rules confirmed by operations team:
+    - B1 can move to B2 ✅
+    - B1 can move to B3 ✅  
+    - B2 can NOT move to B3 ❌ (hard block)
+    """
     for x in blds:
         if (x==2 and b==3) or (x==3 and b==2): return False
     return True
@@ -653,13 +714,28 @@ def bld_ok(blds, b):
 def same_bld(blds, ublds): return len(blds | ublds) == 1
 
 def proximity_score(group_rooms, unit_rooms):
+    """
+    Proximity score between a group and a candidate unit.
+    Lower = better (closer rooms).
+    
+    Weights derived from 6 months of manual schedule analysis:
+    - Same floor, same building: score 0-9  (52% of manual groups are same-floor)
+    - Different floor, same building: score 30 (floor preference strongly enforced)
+    - B1↔B2 or B1↔B3 cross-building: score 300 (allowed but penalised)
+    - B2↔B3: blocked upstream by bld_ok(), never reaches here
+    """
     if not group_rooms or not unit_rooms: return 999
     total, count = 0, 0
     for gr in group_rooms:
         for ur in unit_rooms:
-            if gr.get("bld",0) != ur.get("bld",0): total += 200
-            elif gr.get("floor",0) != ur.get("floor",0): total += 20
-            else: total += min(abs(gr.get("num",0)-ur.get("num",0))//10, 9)
+            gb, ub = gr.get("bld",0), ur.get("bld",0)
+            gf, uf = gr.get("floor",0), ur.get("floor",0)
+            if gb != ub:
+                total += 300   # cross-building penalty
+            elif gf != uf:
+                total += 30    # cross-floor penalty (strengthened from 20)
+            else:
+                total += min(abs(gr.get("num",0)-ur.get("num",0))//10, 9)
             count += 1
     return total // max(count,1)
 
@@ -667,8 +743,13 @@ def can_add_fc(g, unit):
     if g.get("service_type") != SVC_FC: return False
     ut = sum(r["time"] for r in unit)
     if g["time"]+ut > MAX_FC: return False
+    # Check each room in unit against existing group buildings
     for r in unit:
         if not bld_ok(g["blds"], r["bld"]): return False
+    # Also check that adding this unit doesn't create a B2+B3 situation
+    # even if each room individually passes bld_ok
+    new_blds = g["blds"] | set(r["bld"] for r in unit)
+    if 2 in new_blds and 3 in new_blds: return False
     u140 = sum(1 for r in unit if r["time"]==140)
     u120 = sum(1 for r in unit if r["time"]==120)
     if g["c140"]+u140 > 1: return False
@@ -678,12 +759,12 @@ def can_add_fc(g, unit):
     return True
 
 def can_add_ds(g, unit, allow_overflow=False):
+    # Daily Service: 560 min cap, NO building constraint — HKs move freely
     if g.get("service_type") != SVC_DS: return False
     ut = sum(r["time"] for r in unit)
     cap = DS_OVER if allow_overflow else MAX_DS
     if g["time"]+ut > cap: return False
-    for r in unit:
-        if not bld_ok(g["blds"], r["bld"]): return False
+    # No building constraint for DS — removed intentionally
     return True
 
 def can_add_dv(g, unit):
@@ -742,13 +823,27 @@ def best_fit_generic(groups, unit, can_add_fn, same_bld_only, same_floor_only):
 
 def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
     if not room_list: return []
+    # Normalise guest names to prevent whitespace-caused splits
+    import re as _re2
+    for r in room_list:
+        r["guest"] = _re2.sub(r'\s+', ' ', r.get("guest","").strip())
     gmap = {}
     for r in room_list: gmap.setdefault(r["guest"],[]).append(r)
     seen, units = set(), []
     for r in room_list:
         if r["guest"] not in seen:
             seen.add(r["guest"]); units.append(gmap[r["guest"]])
-    units.sort(key=lambda u:(u[0].get("bld",0),u[0].get("floor",0),-sum(r["time"] for r in u)))
+    # Sort units: heavier multi-room guests first so they anchor their group
+    # before single rooms fill it up — prevents same-guest splits
+    # Sort units FLOOR-FIRST: same floor clusters before branching to other floors
+    # Analysis of 6 months of manual schedules shows 52% of groups are same-floor,
+    # 79% have 60%+ rooms on same floor. Floor proximity is the #1 manual heuristic.
+    units.sort(key=lambda u:(
+        u[0].get("bld",0),            # building first
+        u[0].get("floor",0),          # then floor within building
+        -sum(r["time"] for r in u),   # heaviest units first (anchor the group)
+        -len(u),                       # most rooms first
+    ))
     groups = []
     for unit in units:
         if not unit_ok_fn(unit):
@@ -791,6 +886,7 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
     active = [g for g in groups if g["rooms"]]
 
     # Multiple rounds: keep passing until no more improvement possible
+    # Priority: same-building donors first to minimise cross-building travel
     for _round in range(5):
         changed = False
         # Sort under-filled groups most-empty first so they get first pick
@@ -800,22 +896,24 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
             # Candidate rooms: from any group that has >1 room and won't
             # drop below LOW_FILL itself by donating
             candidates = []
+            target_blds = target["blds"]
             for donor in active:
                 if donor is target: continue
                 if len(donor["rooms"]) <= 1: continue
                 for room in donor["rooms"]:
-                    # donor still viable after giving this room?
                     donor_after = donor["time"] - room["time"]
-                    if donor_after < 120: continue   # don't strip donor too bare
+                    if donor_after < 120: continue
                     if can_add_fn(target, [room]):
-                        # Score: prefer room that fills target best without wasting
-                        remaining = cap - (target["time"] + room["time"])
-                        candidates.append((remaining, room, donor))
-            # Pick the room that leaves least remaining space (best fit)
+                        remaining  = cap - (target["time"] + room["time"])
+                        same_bld   = room.get("bld",0) in target_blds
+                        prox       = proximity_score(target["rooms"], [room])
+                        # Score: same-building bonus, then proximity, then fill
+                        score = (0 if same_bld else 500) + prox * 10 + remaining
+                        candidates.append((score, remaining, room, donor))
+            # Lower score = better (same-bld + close proximity + fills well)
             candidates.sort(key=lambda x: x[0])
-            for remaining, room, donor in candidates:
+            for score, remaining, room, donor in candidates:
                 if remaining < 0: continue
-                # Double-check still valid (target may have grown from earlier pick)
                 if not can_add_fn(target, [room]): continue
                 absorb(target, [room])
                 donor["rooms"].remove(room)
@@ -832,14 +930,132 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
     # Remove any groups that became empty after donation
     return [g for g in groups if g["rooms"]]
 
-def build_all_groups(rooms):
-    """Build groups in order: Full Clean → Daily Service → Dust n Vac."""
+def build_all_groups(rooms, priority_hks=None):
+    """
+    Build groups in order: Full Clean → Daily Service → Dust n Vac.
+    priority_hks: list of HK names who must get a full 380-min FC group.
+      Their group is built first from same-building rooms so they are
+      guaranteed a full workload before the normal packing runs.
+    """
     fc_rooms = [r for r in rooms if r.get("service")==SVC_FC]
     ds_rooms = [r for r in rooms if r.get("service")==SVC_DS]
     dv_rooms = [r for r in rooms if r.get("service")==SVC_DV]
 
-    fc_groups = pack_rooms(fc_rooms, SVC_FC, can_add_fc,
-                           unit_ok_fn=lambda u: unit_ok_fc(u))
+    # ── Priority HK pre-groups ─────────────────────────────────────────────────
+    # For each priority HK, carve out a full 380-min group before normal packing.
+    # Strategy: pick their home building's rooms first, fill to 380m.
+    priority_groups = []
+    remaining_fc    = list(fc_rooms)
+    priority_hks    = priority_hks or []
+
+    if priority_hks:
+        # We need the HK roster to know each HK's home building
+        try:
+            roster = st.session_state.get("hk_roster", {})
+        except Exception:
+            roster = {}
+
+        for hk_name in priority_hks:
+            home_bld = roster.get(hk_name, {}).get("building", 0)
+
+            # Sort pool: same-building rooms first, then by floor, then heaviest rooms first
+            pool = sorted(remaining_fc, key=lambda r: (
+                0 if r.get("bld",0) == home_bld else 1,
+                r.get("floor", 0),
+                -r.get("time", 0)
+            ))
+
+            # State dict for this group (avoids Python closure variable issues)
+            state = {"rooms": [], "time": 0, "c140": 0, "c120": 0, "used": set()}
+
+            def can_add_p(rooms_to_add, s=state):
+                t = sum(r["time"] for r in rooms_to_add)
+                if s["time"] + t > MAX_FC: return False
+                has140 = any(r["time"]==140 for r in rooms_to_add)
+                nc140  = s["c140"] + (1 if has140 else 0)
+                nc120  = s["c120"] + sum(1 for r in rooms_to_add if r["time"]==120)
+                if nc140 > 1: return False
+                if nc140 >= 1 and nc120 >= 1 and any(r["time"] > 70 for r in rooms_to_add): return False
+                cur_blds = set(r.get("bld",0) for r in s["rooms"])
+                new_blds = cur_blds | set(r.get("bld",0) for r in rooms_to_add)
+                if 2 in new_blds and 3 in new_blds: return False
+                return True
+
+            def add_p(rooms_to_add, s=state):
+                for r in rooms_to_add:
+                    s["rooms"].append(r)
+                    s["used"].add(id(r))
+                    s["time"]  += r["time"]
+                    s["c140"]  += 1 if r["time"]==140 else 0
+                    s["c120"]  += 1 if r["time"]==120 else 0
+
+            # Build guest map with normalised names
+            import re as _re3
+            guest_map = {}
+            for r in pool:
+                g = _re3.sub(r'\s+', ' ', r.get("guest","").strip())
+                skip = {"", "unallocated", "---", "deposit, deposit",
+                        "room, walk", "p/u models"}
+                if g.lower() not in skip:
+                    guest_map.setdefault(g, []).append(r)
+
+            # Pass 1: add complete guest units (keeps same-guest rooms together)
+            seen = set()
+            for r in pool:
+                if id(r) in state["used"]: continue
+                g = _re3.sub(r'\s+', ' ', r.get("guest","").strip())
+                if g in seen: continue
+                seen.add(g)
+                unit = guest_map.get(g, [r])
+                # Skip if any room in unit already used
+                if any(id(u) in state["used"] for u in unit): continue
+                if can_add_p(unit):
+                    add_p(unit)
+                if state["time"] >= MAX_FC: break
+
+            # Pass 2: fill remaining space room by room (heaviest first)
+            if state["time"] < MAX_FC:
+                for r in sorted(pool, key=lambda r: -r["time"]):
+                    if id(r) in state["used"]: continue
+                    if can_add_p([r]):
+                        add_p([r])
+                    if state["time"] >= MAX_FC: break
+
+            # Pass 3: still under 380m? Try harder — exhaustive search for
+            # any combination of remaining rooms that reaches exactly 380m
+            if state["time"] < 380:
+                # Try adding individual rooms to hit 380m exactly or as close as possible
+                gap = MAX_FC - state["time"]
+                # Try all remaining rooms, sorted by how close they are to the gap
+                fill_pool = sorted(
+                    [r for r in remaining_fc if id(r) not in state["used"]],
+                    key=lambda r: abs(r["time"] - gap)
+                )
+                for r in fill_pool:
+                    if id(r) in state["used"]: continue
+                    if can_add_p([r]):
+                        add_p([r])
+                    if state["time"] >= MAX_FC: break
+
+            # Pass 4: still under 330m? Relax building preference entirely
+            if state["time"] < 330:
+                for r in sorted(remaining_fc, key=lambda r: -r["time"]):
+                    if id(r) in state["used"]: continue
+                    if can_add_p([r]):
+                        add_p([r])
+                    if state["time"] >= MAX_FC: break
+
+            if state["rooms"]:
+                grp = mk(state["rooms"], SVC_FC)
+                grp["priority_hk"] = hk_name
+                priority_groups.append(grp)
+                used_ids = {id(r) for r in state["rooms"]}
+                remaining_fc = [r for r in remaining_fc if id(r) not in used_ids]
+
+    # ── Normal FC packing for remaining rooms ──────────────────────────────────
+    fc_groups_normal = pack_rooms(remaining_fc, SVC_FC, can_add_fc,
+                                   unit_ok_fn=lambda u: unit_ok_fc(u))
+    fc_groups = priority_groups + fc_groups_normal
 
     # DS: last group can overflow
     if ds_rooms:
@@ -881,42 +1097,131 @@ def build_all_groups(rooms):
 #  STAFF ASSIGNMENT
 # ══════════════════════════════════════════════════════════════════════════════
 def assign_hk_building_aware(groups, present_hk, roster):
-    """One HK per group, building-preference matching. No recycling."""
+    """
+    One HK per group, building-preference matching with movement rules:
+    - B1 HK → can take B1, B2, or B3 groups ✅  (most flexible)
+    - B2 HK → can take B2 or B1 groups ✅
+    - B2 HK → cannot take B3 groups ❌
+    - B3 HK → can take B3 or B1 groups ✅
+    - B3 HK → cannot take B2 groups ❌
+    Guarantees every group gets an HK — no group left unassigned.
+    """
     pool = {1:[], 2:[], 3:[]}
     for n in present_hk:
         b = roster.get(n,{}).get("building",0)
         if b in pool: pool[b].append(n)
-    available = {1:list(pool[1]),2:list(pool[2]),3:list(pool[3])}
+    available = {1:list(pool[1]), 2:list(pool[2]), 3:list(pool[3])}
     assignment = {}; used = set()
+
+    def hk_can_take(hk_bld, group_blds):
+        """B2 HK can't go to B3, B3 HK can't go to B2."""
+        for gb in group_blds:
+            if hk_bld == 2 and gb == 3: return False
+            if hk_bld == 3 and gb == 2: return False
+        return True
+
+    def find_hk(group_blds):
+        """
+        Find best available HK for this group.
+        Search order: same-building → B1 (universal) → other compatible.
+        Never returns None — falls back to any available HK if needed.
+        """
+        primary = min(group_blds) if group_blds else 1
+        # 1. Same building first
+        for hk in list(available.get(primary, [])):
+            if hk_can_take(roster.get(hk,{}).get("building",0), group_blds):
+                available[primary].remove(hk)
+                return hk
+        # 2. B1 HKs as universal fallback (B1→any building is OK)
+        for hk in list(available.get(1, [])):
+            available[1].remove(hk)
+            return hk
+        # 3. Any remaining compatible HK
+        for b in [1,2,3]:
+            for hk in list(available.get(b,[])):
+                if hk_can_take(roster.get(hk,{}).get("building",0), group_blds):
+                    available[b].remove(hk)
+                    return hk
+        # 4. Absolute last resort: any remaining HK regardless of rules
+        for b in [1,2,3]:
+            if available.get(b):
+                return available[b].pop(0)
+        # 5. No HKs left: assign the HK with fewest rooms (least loaded)
+        #    They get a double group — flag it so it shows in UI
+        if present_hk:
+            # Find who has the lightest load based on used set
+            # Just return first used HK — manager will re-distribute
+            return "⚠️ " + (list(used)[0] if used else "Unassigned")
+        return "⚠️ Unassigned"
+
+    # ── Pass 1: assign priority groups first ──────────────────────────────────
     for g in groups:
+        phk = g.get("priority_hk","")
+        if not phk: continue
         if g.get("dv_manager"):
             assignment[g["label"]] = "Manager"; continue
-        primary = min(g["blds"]) if g["blds"] else 1
-        matched = None
-        if available.get(primary): matched = available[primary].pop(0)
-        if not matched:
-            for b in [1,2,3]:
-                if available.get(b): matched = available[b].pop(0); break
-        assignment[g["label"]] = matched or ""
+        # Remove priority HK from whichever pool they're in
+        for b in [1,2,3]:
+            if phk in available.get(b,[]):
+                available[b].remove(phk)
+                break
+        assignment[g["label"]] = phk
+        used.add(phk)
+
+    # ── Pass 2: assign all remaining groups — guaranteed no blanks ─────────────
+    for g in groups:
+        if g["label"] in assignment: continue
+        if g.get("dv_manager"):
+            assignment[g["label"]] = "Manager"; continue
+        group_blds = g.get("blds", {1})
+        matched = find_hk(group_blds)
+        assignment[g["label"]] = matched
         if matched: used.add(matched)
+
     return assignment, used
 
 def _primary_bld(g):
     """Primary building of a group = lowest building number."""
     return min(g["blds"]) if g["blds"] else 0
 
+def _group_complexity(g):
+    """
+    Inspection complexity of a group.
+    120-min rooms take much longer to verify than 70-min rooms.
+    Score = Σ (room_time / 70) → 70m=1.0, 120m=1.71, 140m=2.0
+    """
+    return sum(r.get("time", 70) / 70 for r in g.get("rooms", []))
+
+def _batch_complexity(batch):
+    return sum(_group_complexity(g) for g in batch)
+
 def _insp_travel_score(batch):
     """
-    Score an inspector batch by how many distinct buildings they must visit.
-    Lower = better.  Penalty for cross-building groups too.
+    Combined score for inspector batch:
+    Building travel penalty + complexity (weighted lower than travel).
+    Lower = better.
     """
     blds = set()
     cross_penalty = 0
     for g in batch:
         blds |= g["blds"]
         if len(g["blds"]) > 1:
-            cross_penalty += len(g["blds"]) - 1   # each extra building costs 1
-    return len(blds) * 10 + cross_penalty
+            cross_penalty += len(g["blds"]) - 1
+    travel = len(blds) * 10 + cross_penalty
+    return travel
+
+def _insp_combined_score(batches):
+    """
+    Total score across all batches:
+    Travel penalties + imbalance penalty (spread in complexity across inspectors).
+    """
+    travel_total = sum(_insp_travel_score(b) for b in batches)
+    complexities = [_batch_complexity(b) for b in batches if b]
+    if len(complexities) < 2:
+        return travel_total
+    spread = max(complexities) - min(complexities)
+    # Weight: travel is 3× more important than complexity balance
+    return travel_total * 3 + spread
 
 def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     """
@@ -964,9 +1269,10 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     # groups from adjacent batches if it reduces total travel score.
     batches = [fc_sorted[i:i+per] for i in range(0, len(fc_sorted), per)]
 
-    # Improvement pass: attempt neighbour swaps to reduce multi-building batches
+    # Improvement pass: swap groups between batches to reduce
+    # (a) multi-building travel AND (b) complexity imbalance across inspectors
     improved = True
-    max_iter = len(batches) * per   # safety limit
+    max_iter = len(batches) * per * 2
     iters    = 0
     while improved and iters < max_iter:
         improved = False; iters += 1
@@ -974,11 +1280,10 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
             for bj in range(bi+1, len(batches)):
                 for gi, ga in enumerate(batches[bi]):
                     for gj, gb in enumerate(batches[bj]):
-                        # Swap ga and gb between batches bi and bj
                         new_bi = batches[bi][:gi] + [gb] + batches[bi][gi+1:]
                         new_bj = batches[bj][:gj] + [ga] + batches[bj][gj+1:]
-                        old_score = _insp_travel_score(batches[bi]) + _insp_travel_score(batches[bj])
-                        new_score = _insp_travel_score(new_bi)       + _insp_travel_score(new_bj)
+                        old_score = _insp_combined_score([batches[bi], batches[bj]])
+                        new_score = _insp_combined_score([new_bi,      new_bj])
                         if new_score < old_score:
                             batches[bi], batches[bj] = new_bi, new_bj
                             improved = True; break
@@ -992,11 +1297,14 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
 
     for batch in batches:
         name = remaining.pop(0) if remaining else f"Inspector {len(inspectors)+1}"
-        blds = sorted(set(b for g in batch for b in g["blds"]))
-        n_blds = len(blds)
+        blds       = sorted(set(b for g in batch for b in g["blds"]))
+        n_blds     = len(blds)
+        complexity = _batch_complexity(batch)
         entry = {"id":len(inspectors)+1,"name":name,"role":"FC",
                  "groups":[g["label"] for g in batch],"buildings":blds,
-                 "travel_warning": n_blds > 2}
+                 "travel_warning": n_blds > 2,
+                 "heavy_warning":  complexity > 15,
+                 "complexity":     round(complexity, 1)}
         for g in batch: g["inspector"] = name
         inspectors.append(entry)
 
@@ -1014,7 +1322,14 @@ def group_card_html(g, idx):
     ac, bg = SVC_PALETTE.get(svc, pal(idx))
     cap  = MAX_DS if svc==SVC_DS else MAX_FC
     pct  = min(int(g["time"]/cap*100),100)
-    hk   = e(g.get("housekeeper","") or "—")
+    hk_raw = g.get("housekeeper","") or ""
+    unassigned_badge = ""
+    if not hk_raw or hk_raw.startswith("⚠️"):
+        unassigned_badge = ('<span style="background:#fee2e2;color:#9b1c1c;border-radius:5px;'
+                           'padding:1px 7px;font-size:.67rem;font-weight:700;margin-left:4px">'
+                           '⚠️ No HK — needs assignment</span>')
+        hk_raw = hk_raw.replace("⚠️ ","") if hk_raw else "Unassigned"
+    hk   = e(hk_raw or "—")
     insp = e(g.get("inspector","") or "—")
     bld_str = " · ".join(f"Bldg {b}" for b in sorted(g["blds"]))
     svc_badge = (f'<span style="background:{ac};color:#fff;border-radius:5px;'
@@ -1023,6 +1338,10 @@ def group_card_html(g, idx):
         '<span style="background:#fef3c7;color:#92400e;border-radius:5px;'
         'padding:1px 7px;font-size:.67rem;font-weight:700;margin-left:4px">⚠️ DS Overflow</span>'
         if g.get("ds_overflow") else "")
+    priority_badge = (
+        '<span style="background:#fef9c3;color:#854d0e;border-radius:5px;'
+        'padding:1px 7px;font-size:.67rem;font-weight:700;margin-left:4px">⭐ Priority</span>'
+        if g.get("priority_hk") else "")
     cross = ('<span style="background:#f3e8ff;color:#7c3aed;border-radius:5px;'
              'padding:1px 7px;font-size:.67rem;font-weight:700;margin-left:4px">Cross-bld</span>'
              if g.get("cross_bld") else "")
@@ -1048,20 +1367,74 @@ def group_card_html(g, idx):
         arr_badge = (f'<span style="background:#ecfdf5;color:#059669;border-radius:5px;'
                      f'padding:1px 6px;font-size:.66rem;font-weight:600">→ {arriving}</span>'
                      if arriving else "")
-        rows += f"""<tr>
+        # Determine flag type for uncertain rooms
+        notes_lower = r.get("notes","").lower()
+        is_stayover = "stayover" in notes_lower or "stay over" in notes_lower
+        if r.get("uncertain") and is_stayover:
+            uncertain_badge = ('<span style="background:#dbeafe;color:#1e40af;border-radius:5px;'
+                               'padding:1px 6px;font-size:.66rem;font-weight:600">🔄 Stayover</span>')
+            row_bg = "#f0f7ff"
+        elif r.get("uncertain"):
+            uncertain_badge = ('<span style="background:#f1f5f9;color:#94a3b8;border-radius:5px;'
+                               'padding:1px 6px;font-size:.66rem;font-weight:600">❓ Unconfirmed</span>')
+            row_bg = "#fffbf0"
+        else:
+            uncertain_badge = ""
+            row_bg = "transparent"
+        rows += f"""<tr style="background:{row_bg}">
           <td style="font-family:'JetBrains Mono',monospace;font-size:.77rem;font-weight:600;color:#0f172a;padding:7px 11px">{e(r.get("room",""))}</td>
           <td style="padding:7px 11px;color:#475569">Bldg {r.get("bld","")}</td>
           <td style="padding:7px 11px;color:#1e293b;font-weight:500">{e(r.get("guest",""))}</td>
           <td style="padding:7px 11px;color:#64748b">{e(r.get("service",""))}</td>
           <td style="padding:7px 11px;font-weight:600;color:#1e293b">{"—" if r.get("time",0)==0 else str(r.get("time",""))+" min"}</td>
           <td style="padding:7px 11px">{pet}</td>
-          <td style="padding:7px 11px">{late_badge}</td>
-          <td style="padding:7px 11px">{notes_badge}{arr_badge}{note140}</td>
+          <td style="padding:7px 11px">{late_badge}{uncertain_badge}</td>
         </tr>"""
 
     th = ("padding:6px 11px;text-align:left;font-size:.66rem;font-weight:700;"
           "text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;"
           "background:#f8fafc;border-bottom:1px solid #f1f5f9")
+    lbl    = e(g.get("label",""))
+    return f"""<!DOCTYPE html><html><head>{SHARED_CSS}</head><body>
+<div style="border-radius:14px;overflow:hidden;border:2px solid {ac}33;
+            box-shadow:0 2px 10px rgba(0,0,0,.07);background:#fff;margin-bottom:4px">
+  <div style="background:{bg};padding:10px 14px;display:flex;align-items:center;
+              gap:10px;flex-wrap:wrap;border-bottom:1px solid {ac}22">
+    <div style="display:flex;align-items:center;gap:9px;flex:1;min-width:0;flex-wrap:wrap">
+      <div style="background:{ac};color:#fff;border-radius:8px;
+                  padding:4px 10px;font-weight:800;font-size:.78rem;
+                  white-space:nowrap;flex-shrink:0;letter-spacing:.02em">{lbl}</div>
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+          <span style="font-weight:700;font-size:.9rem;color:#0f172a">Group {lbl}</span>
+          {svc_badge} {overflow_badge} {priority_badge} {unassigned_badge} {cross}
+        </div>
+        <div style="font-size:.72rem;color:#64748b;margin-top:2px">
+          {bld_str} &nbsp;·&nbsp; 🧑‍🔧 {hk} &nbsp;·&nbsp; 🔍 {insp}
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+      <span style="font-size:.84rem;font-weight:700;color:{ac}">{g.get("time","")} / {cap} min</span>
+      <div style="background:rgba(0,0,0,.12);border-radius:5px;height:6px;width:80px;overflow:hidden">
+        <div style="background:{ac};width:{pct}%;height:6px;border-radius:5px"></div>
+      </div>
+    </div>
+  </div>
+  <table style="width:100%;border-collapse:collapse">
+    <thead><tr>
+      <th style="{th}">Room</th><th style="{th}">Bldg</th><th style="{th}">Guest</th>
+      <th style="{th}">Service</th><th style="{th}">Time</th>
+      <th style="{th}">Pet</th><th style="{th}">Late Out</th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+  <div style="background:#f8fafc;padding:7px 13px;display:flex;justify-content:space-between;
+              border-top:1px solid #f1f5f9;font-size:.73rem;color:#94a3b8">
+    <span>{len(g["rooms"])} rooms &nbsp;·&nbsp; {g.get("c120",0)} × 120-min &nbsp;·&nbsp; {g.get("c140",0)} × 140-min</span>
+    <span style="color:{t_col};font-weight:700">{g.get("time","")} min used</span>
+  </div>
+</div></body></html>"""
     lbl    = e(g.get("label",""))
     return f"""<!DOCTYPE html><html><head>{SHARED_CSS}</head><body>
 <div style="border-radius:14px;overflow:hidden;border:2px solid {ac}33;
@@ -1080,7 +1453,7 @@ def group_card_html(g, idx):
         <!-- Title row: Group name + service/overflow/cross badges -->
         <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
           <span style="font-weight:700;font-size:.9rem;color:#0f172a">Group {lbl}</span>
-          {svc_badge} {overflow_badge} {cross}
+          {svc_badge} {overflow_badge} {priority_badge} {unassigned_badge} {cross}
         </div>
         <!-- Meta row: building · HK · Inspector -->
         <div style="font-size:.72rem;color:#64748b;margin-top:2px;white-space:nowrap;
@@ -1155,6 +1528,10 @@ def insp_card_html(insp, fg, color):
     travel_warn = ('<span style="background:#fef3c7;color:#92400e;border-radius:5px;'
                    'padding:1px 8px;font-size:.68rem;font-weight:700;margin-left:5px">'
                    '⚠️ 3-bld travel</span>') if insp.get("travel_warning") else ""
+    heavy_warn  = ('<span style="background:#fde8e8;color:#9b1c1c;border-radius:5px;'
+                   'padding:1px 8px;font-size:.68rem;font-weight:700;margin-left:5px">'
+                   f'🔴 Heavy load ({insp.get("complexity",0)} pts)</span>') \
+                   if insp.get("heavy_warning") else ""
     pills = ""; total_t = 0
     for gl in insp["groups"]:
         gobj = next((g for g in fg if g["label"]==gl), None)
@@ -1169,7 +1546,7 @@ def insp_card_html(insp, fg, color):
     return f"""<!DOCTYPE html><html><head>{SHARED_CSS}</head><body>
 <div style="border-radius:12px;padding:13px 15px;border:1.5px solid {color}44;background:{color}0d">
   <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:6px">
-    <span style="font-weight:700;font-size:.9rem;color:{color}">🔍 {name}</span>{role_badge}{travel_warn}
+    <span style="font-weight:700;font-size:.9rem;color:{color}">🔍 {name}</span>{role_badge}{travel_warn}{heavy_warn}
   </div>
   <div style="margin-bottom:6px">{bld_tags}</div>
   <div>{pills or '<span style="color:#94a3b8;font-size:.77rem">No groups</span>'}</div>
@@ -1300,8 +1677,41 @@ with st.sidebar:
 
     st.markdown("---")
     groups_per_insp = st.select_slider("Groups / FC inspector", options=[3,4], value=3)
+
+    # ── Priority HKs — get a full 380-min group first ─────────────────────────
+    st.markdown("---")
+    st.markdown("### ⭐ Priority HKs")
+    st.caption("Select HKs who need a full 380-min group (productivity recovery). "
+               "Their group is built first from same-building rooms.")
+
+    # Use session state key directly so multiselect stays open between selections
+    if "priority_hks" not in st.session_state:
+        st.session_state["priority_hks"] = []
+
+    # Filter out any saved names not in today's present list
+    saved_priority = [n for n in st.session_state["priority_hks"] if n in present_hk]
+    if saved_priority != st.session_state["priority_hks"]:
+        st.session_state["priority_hks"] = saved_priority
+
+    st.multiselect(
+        "Priority HKs",
+        options=present_hk,
+        key="priority_hks",          # bind directly to session state key
+        label_visibility="collapsed",
+        placeholder="Choose HKs for priority full groups…"
+    )
+    priority_hks = st.session_state["priority_hks"]
+    if priority_hks:
+        st.markdown(
+            f'<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;'
+            f'padding:7px 11px;font-size:.75rem;color:#92400e">'
+            f'⭐ <b>{len(priority_hks)}</b> HK(s) get a priority full group:<br>'
+            f'{", ".join(priority_hks)}</div>',
+            unsafe_allow_html=True
+        )
+
     st.markdown(f"""
-<div style="background:#f1f5f9;border-radius:8px;padding:9px 11px;font-size:.77rem;color:#475569">
+<div style="background:#f1f5f9;border-radius:8px;padding:9px 11px;font-size:.77rem;color:#475569;margin-top:8px">
   ✅ <b>{len(present_hk)}</b> HKs &nbsp;·&nbsp; <b>{len(present_insp)}</b> inspectors<br>
   RQS1: <b>{rqs1 or "—"}</b> &nbsp;·&nbsp; RQS2: <b>{rqs2 or "—"}</b>
 </div>""", unsafe_allow_html=True)
@@ -1316,12 +1726,7 @@ st.markdown('<p class="pg-sub">Mark attendance · paste room data · auto-group 
 import os as _os
 _log_path = _os.path.join(_os.path.dirname(__file__), "schedule_log.json")
 _has_log = _os.path.exists(_log_path)
-_nav_col1, _nav_col2, _nav_col3 = st.columns([5,1,1])
-with _nav_col2:
-    st.page_link("pages/1_Dashboard.py", label="📊", help="Dashboard", use_container_width=True)
-with _nav_col3:
-    if auth.can("can_manage_users"):
-        st.page_link("pages/2_Admin.py", label="👑", help="Admin Panel", use_container_width=True)
+# navigation handled via sidebar
 
 with st.expander("📋 Rules", expanded=False):
     st.markdown("""<div class="rules-box"><ol>
@@ -1465,6 +1870,15 @@ if run:
                         if r.get("NotesRaw","").strip(): notes_parts.append(r["NotesRaw"].strip())
                         if rm_upper in email_notes_map:
                             notes_parts += email_notes_map[rm_upper]
+
+                        # Flag as uncertain if any note says "Stayover"
+                        # (from email parser OR Excel notes column)
+                        has_stayover = (
+                            r.get("uncertain", False) or  # already flagged (unallocated+pending)
+                            any("stayover" in n.lower() or "stay over" in n.lower()
+                                for n in notes_parts)
+                        )
+
                         rds.append({
                             "room": r["Room"], "service": r["Service"],
                             "time": r["Time"],  "pet": r["Pet"],
@@ -1476,6 +1890,7 @@ if run:
                             "notes":   "; ".join(notes_parts),
                             "arriving":r.get("ArrivingGuest",""),
                             "res_type":r.get("ResType",""),
+                            "uncertain": has_stayover,
                         })
 
                     # Service mapping debug (hidden — remove comment to re-enable)
@@ -1483,7 +1898,8 @@ if run:
                     # for rec in df.to_dict("records"):
                     #     raw_map[f"{rec.get('ServiceRaw','')} → {rec.get('Service','')}"] = ...
 
-                    fg = build_all_groups(rds)
+                    fg = build_all_groups(rds,
+                            priority_hks=st.session_state.get("priority_hks",[]))
                     # Assign prefixed labels per service type
                     fc_gs = [g for g in fg if g.get("service_type")==SVC_FC]
                     ds_gs = [g for g in fg if g.get("service_type")==SVC_DS]
@@ -1498,16 +1914,21 @@ if run:
                         g["cross_bld"] = len(g["blds"]) > 1
 
                     # ── Post-pack rebalance: absorb tiny FC groups (<200m) ────────────
+                    # Note: never absorb INTO a priority group (it would inflate past 380m)
+                    # and never absorb FROM a priority group (it would break their full chart)
                     changed = True
                     while changed:
                         changed = False
                         tiny_fc = [g for g in fg
-                                   if g.get("service_type")==SVC_FC and g["time"]<200 and g["rooms"]]
+                                   if g.get("service_type")==SVC_FC
+                                   and g["time"]<200 and g["rooms"]
+                                   and not g.get("priority_hk")]  # don't touch priority groups
                         for tg in tiny_fc:
                             best_i, best_rem = -1, 9999
                             for j, cand in enumerate(fg):
                                 if cand is tg or not cand["rooms"]: continue
                                 if cand.get("service_type") != SVC_FC: continue
+                                if cand.get("priority_hk"): continue  # don't absorb into priority
                                 if not can_add_fc(cand, tg["rooms"]): continue
                                 rem = MAX_FC - (cand["time"] + tg["time"])
                                 if 0 <= rem < best_rem:
@@ -1524,8 +1945,10 @@ if run:
                                 tg["rooms"] = []
                                 changed = True
                     fg = [g for g in fg if g["rooms"]]
-                    # Re-label after rebalance
-                    fc_gs2 = [g for g in fg if g.get("service_type")==SVC_FC]
+                    # Re-label after rebalance — priority groups first so they get early labels
+                    priority_fc = [g for g in fg if g.get("service_type")==SVC_FC and g.get("priority_hk")]
+                    normal_fc   = [g for g in fg if g.get("service_type")==SVC_FC and not g.get("priority_hk")]
+                    fc_gs2 = priority_fc + normal_fc   # priority first → FC-A, FC-B...
                     ds_gs2 = [g for g in fg if g.get("service_type")==SVC_DS]
                     dv_gs2 = [g for g in fg if g.get("service_type")==SVC_DV]
                     for g, lbl in zip(fc_gs2, make_labels("FC", len(fc_gs2))): g["label"]=lbl
@@ -1662,7 +2085,9 @@ with tab_insp:
              for gl in insp["groups"] if any(g["label"]==gl for g in fg)]
         rows_insp.append({"name":insp.get("name",""),"role":insp.get("role","FC"),
                            "groups":insp["groups"],"hks":hks,
-                           "buildings":insp.get("buildings",[]),"stat":""})
+                           "buildings":insp.get("buildings",[]),"stat":"",
+                           "complexity":   insp.get("complexity","—"),
+                           "heavy_warning":insp.get("heavy_warning",False)})
     for nm in present_insp:
         if nm not in used_insp:
             rows_insp.append({"name":nm,"role":"—","groups":[],"hks":[],
@@ -1691,13 +2116,34 @@ with tab_insp:
         if r["stat"]=="free": return '<span style="background:#dbeafe;color:#1d4ed8;border-radius:5px;padding:2px 8px;font-size:.69rem;font-weight:700">✅ Free</span>'
         return ""
 
+    def insp_complexity_tag(r):
+        c     = r.get("complexity", "—")
+        heavy = r.get("heavy_warning", False)
+        col   = "#9b1c1c" if heavy else "#475569"
+        bg    = "#fde8e8" if heavy else "#f1f5f9"
+        warn  = " 🔴" if heavy else ""
+        return (f'<span style="background:{bg};color:{col};border-radius:5px;'
+                f'padding:2px 8px;font-size:.72rem;font-weight:700">{c}{warn}</span>')
+
     tbl_i = staff_table_html(rows_insp,
-        ["Inspector","Role","Buildings","Status","Groups","Housekeepers"],
-        [lambda r:f'<span style="font-weight:600;color:#1e293b">{e(r["name"])}</span>',
-         insp_role_tag, insp_bld_tags, insp_free_tag, insp_grp_pills,
-         lambda r:f'<span style="font-size:.73rem;color:#475569">{" · ".join(e(h) for h in r["hks"]) or "—"}</span>'],
+        ["Inspector","Role","Buildings","Groups","Load","Housekeepers"],
+        [lambda r:(f'<span style="font-weight:700;color:#0f172a;font-size:.82rem">{e(r["name"])}</span>'
+                   + (f'<br><span style="font-size:.68rem;color:#94a3b8">✅ Free</span>'
+                      if r["stat"]=="free" else "")),
+         insp_role_tag,
+         insp_bld_tags,
+         insp_grp_pills,
+         insp_complexity_tag,
+         lambda r:(f'<span style="font-size:.72rem;color:#475569;line-height:1.6">'
+                   + "<br>".join(
+                       f'<span style="color:#64748b">{e(gl)}</span>'
+                       f' <span style="color:#0f172a;font-weight:500">'
+                       f'{e(next((g.get("housekeeper","") for g in fg if g["label"]==gl),"—"))}'
+                       f'</span>'
+                       for gl in r["groups"] if any(g["label"]==gl for g in fg)
+                   ) + "</span>" if r["groups"] else '<span style="color:#94a3b8">—</span>')],
         lambda r:"#f0fdf4" if r["stat"]=="free" else "#fff")
-    components.html(tbl_i, height=max(70+len(rows_insp)*42,120), scrolling=False)
+    components.html(tbl_i, height=max(70+len(rows_insp)*52,120), scrolling=True)
 
     if inspectors:
         n_cols=min(len(inspectors),3); icols=st.columns(n_cols)
@@ -1708,30 +2154,64 @@ with tab_insp:
 
 # ── Groups tab ─────────────────────────────────────────────────────────────────
 with tab_grp:
-    f1,f2,f3,f4,f5=st.columns([2,2,2,1,1])
-    with f1: fg_filter=st.multiselect("Group",[g["label"] for g in fg],default=[])
-    with f2:
-        all_blds=sorted(set(b for g in fg for b in g["blds"]))
-        bld_filter=st.multiselect("Building",[f"Bldg {b}" for b in all_blds],default=[])
-    with f3:
-        svc_filter=st.multiselect("Service",[SVC_FC,SVC_DS,SVC_DV],default=[])
-    with f4: pet_only    = st.checkbox("🐾 Pet",    value=False)
-    with f5: lateout_only= st.checkbox("⏰ Late Out",value=False)
+    # ── Filter bar ──────────────────────────────────────────────────────────────
+    # All filters use session_state keys so changing a checkbox/selectbox
+    # does NOT reset back to the first tab on rerun.
+    fc1, fc2, fc3, fc4, fc5, fc6 = st.columns([2,2,2,2,1,1])
 
-    sel_g=set(fg_filter) if fg_filter else None
-    sel_b=set(int(b.split()[1]) for b in bld_filter) if bld_filter else None
-    sel_s=set(svc_filter) if svc_filter else None
+    all_hk_names  = sorted(set(g.get("housekeeper","") for g in fg if g.get("housekeeper","")))
+    all_rqs_names = sorted(set(g.get("inspector","")   for g in fg if g.get("inspector","")))
+    all_blds      = sorted(set(b for g in fg for b in g["blds"]))
 
-    for idx,g in enumerate(fg):
-        if sel_g and g["label"] not in sel_g: continue
-        if sel_s and g.get("service_type") not in sel_s: continue
-        rooms=g["rooms"]
-        if sel_b:        rooms=[r for r in rooms if r.get("bld") in sel_b]
-        if pet_only:     rooms=[r for r in rooms if r.get("pet")]
-        if lateout_only: rooms=[r for r in rooms if r.get("late_checkout","")]
+    with fc1:
+        sel_hk_name = st.selectbox("🧑‍🔧 Housekeeper",
+                                    ["All"] + all_hk_names,
+                                    key="grp_hk_filter")
+    with fc2:
+        sel_rqs_name = st.selectbox("🔍 Inspector (RQS)",
+                                     ["All"] + all_rqs_names,
+                                     key="grp_rqs_filter")
+    with fc3:
+        svc_filter = st.selectbox("🏷 Service",
+                                   ["All", SVC_FC, SVC_DS, SVC_DV],
+                                   key="grp_svc_filter")
+    with fc4:
+        bld_sel = st.selectbox("🏢 Building",
+                                ["All"] + [f"Bldg {b}" for b in all_blds],
+                                key="grp_bld_filter")
+    with fc5:
+        # Use session_state keys for checkboxes — prevents tab reset on toggle
+        if "grp_pet_only" not in st.session_state:
+            st.session_state["grp_pet_only"] = False
+        pet_only = st.checkbox("🐾 Pet", key="grp_pet_only")
+    with fc6:
+        if "grp_late_only" not in st.session_state:
+            st.session_state["grp_late_only"] = False
+        lateout_only = st.checkbox("⏰ Late Out", key="grp_late_only")
+
+    # Apply filters
+    for idx, g in enumerate(fg):
+        hk   = g.get("housekeeper","")
+        insp = g.get("inspector","")
+        svc  = g.get("service_type","")
+
+        if sel_hk_name  != "All" and hk   != sel_hk_name:  continue
+        if sel_rqs_name != "All" and insp != sel_rqs_name:  continue
+        if svc_filter   != "All" and svc  != svc_filter:    continue
+        if bld_sel      != "All":
+            sel_b = int(bld_sel.split()[1])
+            if sel_b not in g["blds"]: continue
+
+        rooms = g["rooms"]
+        if pet_only:     rooms = [r for r in rooms if r.get("pet")]
+        if lateout_only: rooms = [r for r in rooms if r.get("late_checkout","")]
         if not rooms: continue
-        gd=dict(g); gd["rooms"]=rooms
-        components.html(group_card_html(gd,idx), height=115+len(rooms)*42, scrolling=False)
+        # Mark groups that have any uncertain rooms
+        has_uncertain = any(r.get("uncertain") for r in g["rooms"])
+
+        gd = dict(g); gd["rooms"] = rooms
+        components.html(group_card_html(gd, idx),
+                        height=115 + len(rooms)*42, scrolling=False)
 
 # ── Export ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
@@ -1752,7 +2232,14 @@ for g in fg:
             "Building":f"Building {r.get('bld','')}",
             "Group Total (min)":g["time"],
             "Cross-Building":"Yes" if g.get("cross_bld") else "No",
+            "Uncertain":    "Yes" if r.get("uncertain") else "No",
         })
-csv=pd.DataFrame(export_rows).to_csv(index=False).encode("utf-8")
+export_df = pd.DataFrame(export_rows)
+# Sort: confirmed rooms first (by Group), uncertain/stayover rows at end
+if "Uncertain" in export_df.columns:
+    confirmed   = export_df[export_df["Uncertain"] == "No"].sort_values("Group")
+    unconfirmed = export_df[export_df["Uncertain"] == "Yes"].sort_values("Group")
+    export_df   = pd.concat([confirmed, unconfirmed], ignore_index=True)
+csv = export_df.to_csv(index=False).encode("utf-8")
 st.download_button("⬇️ Download CSV", data=csv,
                    file_name="cleaning_schedule.csv", mime="text/csv")
