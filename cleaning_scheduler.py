@@ -157,6 +157,26 @@ def _init_state():
 _init_state()
 auth.init_auth()
 
+# ── Load today's schedule from DB if session is empty ─────────────────────────
+# This makes the schedule visible to ALL users after any one user generates it,
+# and persists across refreshes and logouts.
+def _restore_schedule_from_db():
+    """Load today's full schedule from Supabase into session state."""
+    if st.session_state.get("groups_data"):
+        return  # already loaded this session
+    try:
+        saved = db.load_full_schedule()
+        if saved:
+            st.session_state["groups_data"]    = saved.get("groups_data")
+            st.session_state["total_rooms"]    = saved.get("total_rooms", 0)
+            st.session_state["inspectors_data"]= saved.get("inspectors_data", [])
+            st.session_state["used_hk_set"]    = set(saved.get("used_hk_set", []))
+            # Restore HK roster if present (so building assignments are correct)
+            if saved.get("hk_roster"):
+                st.session_state["hk_roster"] = saved["hk_roster"]
+    except Exception:
+        pass  # silently skip — DB may not have schedule_full table yet
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  LOGIN GATE
 # ══════════════════════════════════════════════════════════════════════════════
@@ -193,8 +213,8 @@ if not st.session_state.get("logged_in"):
                 st.error("Invalid username or password.")
     st.stop()
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  PARSING HELPERS
+# ── Restore today's schedule for this session ─────────────────────────────────
+_restore_schedule_from_db()
 # ══════════════════════════════════════════════════════════════════════════════
 SKIP_SERVICES = {"p/u models","pu models","p/u model","showcase","model unit","p/u"}
 
@@ -1102,6 +1122,32 @@ if run:
     elif not present_hk:
         st.warning("No housekeepers marked as present.")
     else:
+        # ── Check if a schedule already exists for today ───────────────────────
+        _has_existing = False
+        try:
+            _has_existing = db.schedule_exists_today()
+        except Exception:
+            pass  # table may not exist yet — treat as no existing schedule
+
+        if _has_existing and not st.session_state.get("_confirm_overwrite"):
+            st.warning(
+                "⚠️ **A schedule already exists for today.**\n\n"
+                "Generating a new one will **replace** today's schedule for all users. "
+                "The previous schedule will be permanently deleted."
+            )
+            col_yes, col_no, _ = st.columns([1,1,4])
+            with col_yes:
+                if st.button("✅ Yes, replace it", type="primary", key="btn_confirm_overwrite"):
+                    st.session_state["_confirm_overwrite"] = True
+                    st.rerun()
+            with col_no:
+                if st.button("❌ Cancel", key="btn_cancel_overwrite"):
+                    st.stop()
+            st.stop()
+
+        # Clear overwrite flag after use
+        st.session_state.pop("_confirm_overwrite", None)
+
         with st.spinner("⚡ Building schedule…"):
             try:
                 df = parse_rooms(raw_input)
@@ -1187,11 +1233,25 @@ if run:
                     inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
                     st.session_state.update({"groups_data":fg,"total_rooms":len(df),
                                              "inspectors_data":inspectors,"used_hk_set":used_hk_set})
+                    # ── Save full schedule to DB (shared across all users) ─────
+                    try:
+                        full_payload = {
+                            "groups_data":     fg,
+                            "total_rooms":     len(df),
+                            "inspectors_data": inspectors,
+                            "used_hk_set":     list(used_hk_set),
+                            "hk_roster":       dict(st.session_state.get("hk_roster",{})),
+                            "generated_by":    st.session_state.get("username","unknown"),
+                        }
+                        db.save_full_schedule(full_payload)
+                        st.toast("✅ Schedule saved and shared with all users!", icon="✅")
+                    except Exception as _fe:
+                        st.toast(f"⚠️ Schedule generated but not shared: {_fe}", icon="⚠️")
+                    # ── Save dashboard snapshot ────────────────────────────────
                     try:
                         db.save_snapshot(_build_snapshot(fg,len(df),inspectors))
-                        st.toast("✅ Schedule saved!", icon="✅")
-                    except Exception as _se:
-                        st.toast(f"⚠️ Not saved to DB: {_se}", icon="⚠️")
+                    except Exception:
+                        pass
             except Exception as ex:
                 st.error(f"Error: {ex}")
                 import traceback; st.code(traceback.format_exc())
