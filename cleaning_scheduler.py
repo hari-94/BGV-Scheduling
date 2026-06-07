@@ -150,7 +150,8 @@ def _init_state():
     for k, default in [("groups_data",None),("total_rooms",None),
                         ("inspectors_data",None),("used_hk_set",None),
                         ("last_email",None),("rqs1",""),("rqs2",""),
-                        ("priority_hks",[])]:
+                        ("priority_hks",[]),
+                        ("_schedule_generated_this_session", False)]:
         if k not in st.session_state:
             st.session_state[k] = default
 
@@ -160,22 +161,25 @@ auth.init_auth()
 # ── Load today's schedule from DB if session is empty ─────────────────────────
 # This makes the schedule visible to ALL users after any one user generates it,
 # and persists across refreshes and logouts.
+# IMPORTANT: only restore if session has NO schedule yet — never overwrite a
+# freshly generated schedule that was just put into session_state this run.
 def _restore_schedule_from_db():
     """Load today's full schedule from Supabase into session state."""
     if st.session_state.get("groups_data"):
-        return  # already loaded this session
+        return  # already have a schedule in this session — don't overwrite
+    if st.session_state.get("_schedule_generated_this_session"):
+        return  # we just generated one this session — don't overwrite
     try:
         saved = db.load_full_schedule()
         if saved:
-            st.session_state["groups_data"]    = saved.get("groups_data")
-            st.session_state["total_rooms"]    = saved.get("total_rooms", 0)
-            st.session_state["inspectors_data"]= saved.get("inspectors_data", [])
-            st.session_state["used_hk_set"]    = set(saved.get("used_hk_set", []))
-            # Restore HK roster if present (so building assignments are correct)
+            st.session_state["groups_data"]     = saved.get("groups_data")
+            st.session_state["total_rooms"]     = saved.get("total_rooms", 0)
+            st.session_state["inspectors_data"] = saved.get("inspectors_data", [])
+            st.session_state["used_hk_set"]     = set(saved.get("used_hk_set", []))
             if saved.get("hk_roster"):
-                st.session_state["hk_roster"] = saved["hk_roster"]
+                st.session_state["hk_roster"]   = saved["hk_roster"]
     except Exception:
-        pass  # silently skip — DB may not have schedule_full table yet
+        pass  # silently skip — schedule_full table may not exist yet
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  LOGIN GATE
@@ -1147,6 +1151,13 @@ if run:
 
         # Clear overwrite flag after use
         st.session_state.pop("_confirm_overwrite", None)
+
+        # Clear old schedule from session so fresh result goes in cleanly
+        st.session_state["groups_data"]     = None
+        st.session_state["inspectors_data"] = None
+        st.session_state["used_hk_set"]     = set()
+        # Flag: we are generating fresh this session — don't let restore overwrite it
+        st.session_state["_schedule_generated_this_session"] = True
 
         with st.spinner("⚡ Building schedule…"):
             try:
