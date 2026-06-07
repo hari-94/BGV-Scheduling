@@ -11,22 +11,130 @@ from datetime import datetime, date
 # ── Supabase client (lazy init) ───────────────────────────────────────────────
 _sb = None
 
+def _get_credentials():
+    """Get Supabase credentials - tries multiple methods."""
+    url, key = "", ""
+
+    # Method 1: Streamlit secrets (secrets.toml locally, Secrets dashboard on Cloud)
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            # Try direct key access (more reliable than .get())
+            try:
+                url = str(st.secrets["SUPABASE_URL"]).strip()
+                key = str(st.secrets["SUPABASE_KEY"]).strip()
+            except KeyError:
+                pass
+            # Fallback to .get()
+            if not url:
+                url = str(st.secrets.get("SUPABASE_URL", "") or "").strip()
+            if not key:
+                key = str(st.secrets.get("SUPABASE_KEY", "") or "").strip()
+    except Exception as _e:
+        print(f"[db] secrets read error: {_e}")
+
+    # Method 2: Environment variables
+    if not url:
+        url = os.environ.get("SUPABASE_URL", "").strip()
+    if not key:
+        key = os.environ.get("SUPABASE_KEY", "").strip()
+
+    # Method 3: Read secrets.toml directly as fallback
+    if not url:
+        try:
+            import pathlib
+            # Look for secrets.toml relative to this file and common locations
+            candidates = [
+                pathlib.Path(__file__).parent / ".streamlit" / "secrets.toml",
+                pathlib.Path.cwd() / ".streamlit" / "secrets.toml",
+                pathlib.Path.home() / ".streamlit" / "secrets.toml",
+            ]
+            for p in candidates:
+                if p.exists():
+                    text = p.read_text(encoding="utf-8")
+                    for line in text.splitlines():
+                        line = line.strip()
+                        if line.startswith("SUPABASE_URL"):
+                            url = line.split("=",1)[1].strip().strip('"\'\' ')
+                        elif line.startswith("SUPABASE_KEY"):
+                            key = line.split("=",1)[1].strip().strip('"\'\' ')
+                    if url:
+                        print(f"[db] loaded secrets from {p}")
+                        break
+        except Exception as _e2:
+            print(f"[db] direct secrets.toml read error: {_e2}")
+
+    return url, key
+
+
 def _client():
     global _sb
     if _sb is None:
         from supabase import create_client
-        url = os.environ.get("SUPABASE_URL","")
-        key = os.environ.get("SUPABASE_KEY","")
+        url, key = _get_credentials()
         if not url or not key:
             raise RuntimeError(
-                "Missing SUPABASE_URL or SUPABASE_KEY environment variables.\n"
-                "Add them to your .env file or Streamlit secrets.")
+                "Missing SUPABASE_URL or SUPABASE_KEY.\n\n"
+                "On Streamlit Cloud: go to your app → Settings → Secrets and add:\n"
+                "  SUPABASE_URL = \"https://xxxx.supabase.co\"\n"
+                "  SUPABASE_KEY = \"eyJ...\"\n\n"
+                "Locally: add them to .streamlit/secrets.toml"
+            )
         _sb = create_client(url, key)
     return _sb
 
 # ════════════════════════════════════════════════════════════════════════════
-#  SCHEDULE LOG
+#  FULL SCHEDULE  (complete groups + rooms, shared across all users)
 # ════════════════════════════════════════════════════════════════════════════
+def save_full_schedule(data: dict):
+    """
+    Save the complete schedule for today (groups, rooms, inspectors, HK roster).
+    Upserts on date — one record per day.
+    """
+    today = str(date.today())
+    payload = json.dumps(data, default=str)
+    try:
+        _client().table("schedule_full").upsert(
+            {"date": today, "payload": payload},
+            on_conflict="date"
+        ).execute()
+    except Exception as ex:
+        print(f"[db] save_full_schedule error: {ex}")
+        raise
+
+def load_full_schedule(date_str: str = None) -> dict | None:
+    """
+    Load the full schedule for a given date (defaults to today).
+    Returns None if no schedule exists for that date.
+    """
+    if date_str is None:
+        date_str = str(date.today())
+    try:
+        r = (_client().table("schedule_full")
+             .select("*")
+             .eq("date", date_str)
+             .limit(1)
+             .execute())
+        rows = r.data or []
+        if not rows:
+            return None
+        payload = rows[0]["payload"]
+        return json.loads(payload) if isinstance(payload, str) else payload
+    except Exception as ex:
+        print(f"[db] load_full_schedule error: {ex}")
+        return None
+
+def schedule_exists_today() -> bool:
+    """Check if a full schedule already exists for today."""
+    try:
+        r = (_client().table("schedule_full")
+             .select("date")
+             .eq("date", str(date.today()))
+             .limit(1)
+             .execute())
+        return bool(r.data)
+    except Exception:
+        return False
 def load_log() -> list:
     """Return all daily snapshots sorted by date desc."""
     try:
