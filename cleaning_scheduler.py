@@ -150,8 +150,7 @@ def _init_state():
     for k, default in [("groups_data",None),("total_rooms",None),
                         ("inspectors_data",None),("used_hk_set",None),
                         ("last_email",None),("rqs1",""),("rqs2",""),
-                        ("priority_hks",[]),
-                        ("_db_restored", False)]:
+                        ("priority_hks",[])]:
         if k not in st.session_state:
             st.session_state[k] = default
 
@@ -194,23 +193,23 @@ if not st.session_state.get("logged_in"):
                 st.error("Invalid username or password.")
     st.stop()
 
-# ── Restore today's schedule for this session (runs once per login session) ──
-# Only loads from DB if this user session has never loaded or generated a schedule.
-# Uses a hard flag "_db_restored" so it never runs twice in the same session.
-if not st.session_state.get("_db_restored"):
-    st.session_state["_db_restored"] = True   # set FIRST to prevent double-run
-    if not st.session_state.get("groups_data"):
-        try:
-            saved = db.load_full_schedule()
-            if saved:
-                st.session_state["groups_data"]     = saved.get("groups_data")
-                st.session_state["total_rooms"]     = saved.get("total_rooms", 0)
-                st.session_state["inspectors_data"] = saved.get("inspectors_data", [])
-                st.session_state["used_hk_set"]     = set(saved.get("used_hk_set", []))
-                if saved.get("hk_roster"):
-                    st.session_state["hk_roster"]   = saved["hk_roster"]
-        except Exception:
-            pass
+# ── Restore today's shared schedule — ONCE per browser session ────────────────
+# Runs only on the first script execution of a session. After that the flag
+# stays True for the whole session, so generating a new schedule (which sets
+# groups_data directly) is never overwritten by a stale DB load.
+if not st.session_state.get("_did_initial_restore", False):
+    st.session_state["_did_initial_restore"] = True
+    try:
+        saved = db.load_full_schedule()
+        if saved and saved.get("groups_data"):
+            st.session_state["groups_data"]     = saved.get("groups_data")
+            st.session_state["total_rooms"]     = saved.get("total_rooms", 0)
+            st.session_state["inspectors_data"] = saved.get("inspectors_data", [])
+            st.session_state["used_hk_set"]     = set(saved.get("used_hk_set", []))
+            if saved.get("hk_roster"):
+                st.session_state["hk_roster"]   = saved["hk_roster"]
+    except Exception:
+        pass
 # ══════════════════════════════════════════════════════════════════════════════
 SKIP_SERVICES = {"p/u models","pu models","p/u model","showcase","model unit","p/u"}
 
@@ -1118,44 +1117,11 @@ if run:
     elif not present_hk:
         st.warning("No housekeepers marked as present.")
     else:
-        # ── Check if a schedule already exists for today ───────────────────────
-        _has_existing = False
-        try:
-            _has_existing = db.schedule_exists_today()
-        except Exception:
-            pass  # table may not exist yet — treat as no existing schedule
-
-        if _has_existing and not st.session_state.get("_confirm_overwrite"):
-            st.warning(
-                "⚠️ **A schedule already exists for today.**\n\n"
-                "Generating a new one will **replace** today's schedule for all users. "
-                "The previous schedule will be permanently deleted."
-            )
-            col_yes, col_no, _ = st.columns([1,1,4])
-            with col_yes:
-                if st.button("✅ Yes, replace it", type="primary", key="btn_confirm_overwrite"):
-                    st.session_state["_confirm_overwrite"] = True
-                    st.rerun()
-            with col_no:
-                if st.button("❌ Cancel", key="btn_cancel_overwrite"):
-                    st.stop()
-            st.stop()
-
-        # Clear overwrite flag after use
-        st.session_state.pop("_confirm_overwrite", None)
-
-        # Clear old schedule and reset restore flag
-        # so on next rerun the new result is used (not the DB old version)
-        st.session_state["groups_data"]     = None
-        st.session_state["inspectors_data"] = None
-        st.session_state["used_hk_set"]     = set()
-        st.session_state["_db_restored"]    = True  # prevent restore from overwriting
-
         with st.spinner("⚡ Building schedule…"):
             try:
                 df = parse_rooms(raw_input)
                 if df.empty:
-                    st.error("No valid rows — check tab-separated data.")
+                    st.error("No valid rows — check tab-separated data with a header row.")
                 else:
                     email_data      = parse_email_notes(email_text)
                     late_co_map     = email_data["late_checkout"]
@@ -1234,27 +1200,30 @@ if run:
                     hk_asgn, used_hk_set = assign_hk_building_aware(fg, present_hk, roster)
                     for g in fg: g["housekeeper"] = hk_asgn.get(g["label"],"")
                     inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
-                    st.session_state.update({"groups_data":fg,"total_rooms":len(df),
-                                             "inspectors_data":inspectors,"used_hk_set":used_hk_set})
-                    # ── Save full schedule to DB (shared across all users) ─────
+
+                    # Store fresh result in session state
+                    st.session_state["groups_data"]     = fg
+                    st.session_state["total_rooms"]     = len(df)
+                    st.session_state["inspectors_data"] = inspectors
+                    st.session_state["used_hk_set"]     = used_hk_set
+
+                    # Save to DB for sharing + dashboard (non-blocking)
                     try:
-                        full_payload = {
-                            "groups_data":     fg,
-                            "total_rooms":     len(df),
+                        db.save_full_schedule({
+                            "groups_data": fg, "total_rooms": len(df),
                             "inspectors_data": inspectors,
-                            "used_hk_set":     list(used_hk_set),
-                            "hk_roster":       dict(st.session_state.get("hk_roster",{})),
-                            "generated_by":    st.session_state.get("username","unknown"),
-                        }
-                        db.save_full_schedule(full_payload)
-                        st.toast("✅ Schedule saved and shared with all users!", icon="✅")
-                    except Exception as _fe:
-                        st.toast(f"⚠️ Schedule generated but not shared: {_fe}", icon="⚠️")
-                    # ── Save dashboard snapshot ────────────────────────────────
+                            "used_hk_set": list(used_hk_set),
+                            "hk_roster": dict(st.session_state.get("hk_roster",{})),
+                            "generated_by": st.session_state.get("username","unknown"),
+                        })
+                    except Exception:
+                        pass
                     try:
                         db.save_snapshot(_build_snapshot(fg,len(df),inspectors))
                     except Exception:
                         pass
+
+                    st.success(f"✅ Schedule generated — {len(fg)} groups from {len(df)} rooms.")
             except Exception as ex:
                 st.error(f"Error: {ex}")
                 import traceback; st.code(traceback.format_exc())
