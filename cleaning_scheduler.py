@@ -127,12 +127,51 @@ section[data-testid="stSidebar"]{min-width:360px!important;max-width:400px!impor
 .stButton > button{border-radius:10px!important;font-weight:600!important;font-size:.82rem!important;}
 .stButton > button[kind="primary"]{background:linear-gradient(135deg,#5B4FE9,#7C6FF5)!important;
   border:none!important;color:#fff!important;}
+
+/* ── MOBILE RESPONSIVE ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .block-container{padding-top:.8rem!important;padding-left:.6rem!important;
+    padding-right:.6rem!important;max-width:100%!important;}
+  .pg-title{font-size:1.3rem!important;}
+  .pg-sub{font-size:.75rem!important;}
+  /* Stat cards: 2 per row on mobile instead of cramped single row */
+  .stat-row{gap:6px!important;}
+  .sc{flex:1 1 calc(50% - 6px)!important;min-width:calc(50% - 6px)!important;
+    padding:10px 8px!important;}
+  .sc .n{font-size:1.3rem!important;}
+  .sc .l{font-size:.55rem!important;}
+  /* Tabs: smaller padding, allow wrap */
+  .stTabs [data-baseweb="tab-list"]{flex-wrap:wrap!important;}
+  .stTabs [data-baseweb="tab"]{padding:5px 10px!important;font-size:.7rem!important;}
+  /* Sidebar full width when expanded on mobile */
+  section[data-testid="stSidebar"]{min-width:85vw!important;max-width:90vw!important;}
+  /* Stack the input columns vertically */
+  .rules-box{padding:10px 12px!important;font-size:.75rem!important;}
+}
+@media (max-width: 480px) {
+  .pg-title{font-size:1.1rem!important;}
+  .sc .n{font-size:1.15rem!important;}
+}
+/* Stack all multi-column layouts vertically on mobile */
+@media (max-width: 768px) {
+  [data-testid="stHorizontalBlock"]{flex-direction:column!important;}
+  [data-testid="stHorizontalBlock"] > [data-testid="column"]{
+    width:100%!important;flex:1 1 100%!important;min-width:100%!important;}
+  /* keep small button columns (◀▶ HK move) inline though */
+  [data-testid="stHorizontalBlock"]:has([data-testid="stCheckbox"]){
+    flex-direction:row!important;}
+}
 </style>""", unsafe_allow_html=True)
 
 SHARED_CSS = """<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif;}
-body{background:transparent;}
+body{background:transparent;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+table{min-width:0;}
+@media (max-width:600px){
+  table{font-size:.72rem!important;}
+  th,td{padding:5px 7px!important;}
+}
 </style>"""
 
 # ══════════════════════════════════════════════════════════════════════════════
