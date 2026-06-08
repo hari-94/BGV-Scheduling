@@ -249,7 +249,15 @@ hr{border:none!important;height:1px!important;background:var(--border)!important
 [data-testid="stSpinner"]>div{border-top-color:var(--indigo)!important;}
 footer{visibility:hidden!important;}
 #MainMenu{visibility:hidden!important;}
-/* Hide Streamlit's auto-generated multipage nav — we use a custom role-based nav */
+/* Hide the top header bar (leaves a white strip otherwise) */
+header[data-testid="stHeader"]{
+  background:transparent !important;
+  height:0 !important;
+  min-height:0 !important;
+}
+[data-testid="stToolbar"]{display:none !important;}
+[data-testid="stDecoration"]{display:none !important;}
+/* Hide Streamlit's auto-generated page nav — we use a custom role-based nav */
 [data-testid="stSidebarNav"]{display:none !important;}
 
 /* ── Mobile ── */
@@ -482,7 +490,20 @@ if not st.session_state.get("_did_initial_restore", False):
     try:
         saved = db.load_full_schedule()
         if saved and saved.get("groups_data"):
-            st.session_state["groups_data"]     = saved.get("groups_data")
+            _loaded_groups = saved.get("groups_data") or []
+            # JSON serialization turns sets into lists (or strings). Restore them
+            # to sets so sorted(g["blds"]) and set operations work correctly.
+            for _g in _loaded_groups:
+                _b = _g.get("blds", [])
+                if isinstance(_b, str):
+                    # e.g. "{1, 2}" → extract digits
+                    _b = [int(x) for x in re.findall(r'\d+', _b)]
+                _g["blds"] = set(_b) if not isinstance(_b, set) else _b
+                _f = _g.get("floors", [])
+                if isinstance(_f, str):
+                    _f = [int(x) for x in re.findall(r'\d+', _f)]
+                _g["floors"] = set(_f) if not isinstance(_f, set) else _f
+            st.session_state["groups_data"]     = _loaded_groups
             st.session_state["total_rooms"]     = saved.get("total_rooms", 0)
             st.session_state["inspectors_data"] = saved.get("inspectors_data", [])
             st.session_state["used_hk_set"]     = set(saved.get("used_hk_set", []))
@@ -1065,7 +1086,10 @@ def group_card_html(g, idx):
 
     hk      = e(hk_raw or "—")
     insp    = e(g.get("inspector","") or "—")
-    bld_str = " · ".join(f"Bldg {b}" for b in sorted(g["blds"]))
+    _blds_raw = g.get("blds", set())
+    if isinstance(_blds_raw, str):
+        _blds_raw = [int(x) for x in re.findall(r'\d+', _blds_raw)]
+    bld_str = " · ".join(f"Bldg {b}" for b in sorted(set(_blds_raw)))
 
     def badge(txt, bg, clr, border="transparent"):
         return f'<span style="background:{bg};color:{clr};border:1px solid {border};border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:600;letter-spacing:.02em">{txt}</span>'
@@ -2073,9 +2097,11 @@ else:
                             "bld": r.get("bld",""),
                         }
                     else:
-                        # Always keep schedule info in sync
+                        # Always keep schedule info in sync, EXCEPT housekeeper
+                        # if the room was swapped (swapped_from set) — keep DB HK.
                         rs[rm]["group_label"]  = g.get("label","")
-                        rs[rm]["housekeeper"]  = g.get("housekeeper","")
+                        if not rs[rm].get("swapped_from"):
+                            rs[rm]["housekeeper"] = g.get("housekeeper","")
                         rs[rm]["inspector"]    = g.get("inspector","")
                         rs[rm]["svc"]          = r.get("service","")
                         rs[rm]["guest"]        = r.get("guest","")
@@ -2092,11 +2118,12 @@ else:
         rs = st.session_state["room_statuses"]
 
         # ── Header bar ────────────────────────────────────────────────────────
-        # Progress summary
-        total_rooms_live = len([r for r in rs.values() if r.get("svc","") != "Dust n Vac"])
-        n_clean   = sum(1 for r in rs.values() if r.get("status") in ("already_clean","cleaning_done","inspected"))
-        n_insp    = sum(1 for r in rs.values() if r.get("status") == "inspected")
-        n_active  = sum(1 for r in rs.values() if r.get("status") == "cleaning_started")
+        # Progress summary — only count non-DV rooms consistently
+        _live_rooms = [r for r in rs.values() if r.get("svc","") != "Dust n Vac"]
+        total_rooms_live = len(_live_rooms)
+        n_clean   = sum(1 for r in _live_rooms if r.get("status") in ("already_clean","cleaning_done","inspected"))
+        n_insp    = sum(1 for r in _live_rooms if r.get("status") == "inspected")
+        n_active  = sum(1 for r in _live_rooms if r.get("status") == "cleaning_started")
         pct_done  = int(n_clean / max(total_rooms_live,1) * 100)
 
         st.markdown(f"""
@@ -2140,7 +2167,24 @@ else:
         lv1, lv2 = st.columns([1,1])
         with lv1:
             if st.button("🔄 Refresh", key="live_refresh", use_container_width=True):
-                _load_statuses()
+                # Pull fresh status records from DB and merge onto schedule
+                try:
+                    fresh = db.get_room_statuses()
+                    cur_rs = st.session_state.get("room_statuses", {})
+                    for rm_code, rec in fresh.items():
+                        if rm_code in cur_rs:
+                            # keep schedule metadata, take DB status + timestamps
+                            cur_rs[rm_code].update({
+                                k: rec.get(k) for k in
+                                ("status","started_at","cleaned_at","inspected_at",
+                                 "marked_clean_at","housekeeper","swapped_from")
+                                if rec.get(k) is not None
+                            })
+                        else:
+                            cur_rs[rm_code] = rec
+                    st.session_state["room_statuses"] = cur_rs
+                except Exception:
+                    pass
                 _init_statuses_from_schedule()
                 st.rerun()
         with lv2:
