@@ -5,28 +5,134 @@ Tables (auto-created on first use):
   schedule_log  : daily schedule snapshots (shared across all users)
   app_users     : user accounts with roles
 """
+# Guard against circular imports — this module must never import from
+# cleaning_scheduler.py or auth.py at module level.
 import os, json, hashlib, secrets
 from datetime import datetime, date
 
+# Ensure this module is fully initialized before any function is called.
+# Streamlit sometimes partially loads modules during hot-reload; this flag
+# lets callers detect and retry if needed.
+_MODULE_READY = True
+
 # ── Supabase client (lazy init) ───────────────────────────────────────────────
 _sb = None
+
+def _get_credentials():
+    """
+    Get Supabase credentials.
+    Order: env vars → secrets.toml (multiple locations) → st.secrets (last resort).
+    Never calls any Streamlit command — safe to call before set_page_config.
+    """
+    url, key = "", ""
+
+    # Method 1: Environment variables (works everywhere)
+    url = os.environ.get("SUPABASE_URL", "").strip()
+    key = os.environ.get("SUPABASE_KEY", "").strip()
+
+    # Method 2: Read secrets.toml directly (local dev + Streamlit Cloud)
+    if not url:
+        try:
+            import pathlib
+            candidates = [
+                pathlib.Path(__file__).parent / ".streamlit" / "secrets.toml",
+                pathlib.Path.cwd() / ".streamlit" / "secrets.toml",
+                pathlib.Path.home() / ".streamlit" / "secrets.toml",
+            ]
+            for p in candidates:
+                if p.exists():
+                    text = p.read_text(encoding="utf-8")
+                    for line in text.splitlines():
+                        line = line.strip()
+                        if line.startswith("SUPABASE_URL"):
+                            url = line.split("=",1)[1].strip().strip('"\'')
+                        elif line.startswith("SUPABASE_KEY"):
+                            key = line.split("=",1)[1].strip().strip('"\'')
+                    if url:
+                        break
+        except Exception as _e:
+            pass
+
+    # Method 3: st.secrets (Streamlit Cloud — only after set_page_config has run)
+    if not url:
+        try:
+            import streamlit as _st
+            url = str(_st.secrets.get("SUPABASE_URL","") or "").strip()
+            key = str(_st.secrets.get("SUPABASE_KEY","") or "").strip()
+        except Exception:
+            pass
+
+    return url, key
+
 
 def _client():
     global _sb
     if _sb is None:
         from supabase import create_client
-        url = os.environ.get("SUPABASE_URL","")
-        key = os.environ.get("SUPABASE_KEY","")
+        url, key = _get_credentials()
         if not url or not key:
             raise RuntimeError(
-                "Missing SUPABASE_URL or SUPABASE_KEY environment variables.\n"
-                "Add them to your .env file or Streamlit secrets.")
+                "Missing SUPABASE_URL or SUPABASE_KEY.\n\n"
+                "On Streamlit Cloud: go to your app → Settings → Secrets and add:\n"
+                "  SUPABASE_URL = \"https://xxxx.supabase.co\"\n"
+                "  SUPABASE_KEY = \"eyJ...\"\n\n"
+                "Locally: add them to .streamlit/secrets.toml"
+            )
         _sb = create_client(url, key)
     return _sb
 
 # ════════════════════════════════════════════════════════════════════════════
-#  SCHEDULE LOG
+#  FULL SCHEDULE  (complete groups + rooms, shared across all users)
 # ════════════════════════════════════════════════════════════════════════════
+def save_full_schedule(data: dict):
+    """
+    Save the complete schedule for today (groups, rooms, inspectors, HK roster).
+    Upserts on date — one record per day.
+    """
+    today = str(date.today())
+    payload = json.dumps(data, default=str)
+    try:
+        _client().table("schedule_full").upsert(
+            {"date": today, "payload": payload},
+            on_conflict="date"
+        ).execute()
+    except Exception as ex:
+        print(f"[db] save_full_schedule error: {ex}")
+        raise
+
+def load_full_schedule(date_str: str = None) -> dict | None:
+    """
+    Load the full schedule for a given date (defaults to today).
+    Returns None if no schedule exists for that date.
+    """
+    if date_str is None:
+        date_str = str(date.today())
+    try:
+        r = (_client().table("schedule_full")
+             .select("*")
+             .eq("date", date_str)
+             .limit(1)
+             .execute())
+        rows = r.data or []
+        if not rows:
+            return None
+        payload = rows[0]["payload"]
+        return json.loads(payload) if isinstance(payload, str) else payload
+    except Exception as ex:
+        print(f"[db] load_full_schedule error: {ex}")
+        return None
+
+def schedule_exists_today() -> bool:
+    """Check if a full schedule already exists for today."""
+    try:
+        r = (_client().table("schedule_full")
+             .select("date")
+             .eq("date", str(date.today()))
+             .limit(1)
+             .execute())
+        return bool(r.data)
+    except Exception:
+        return False
 def load_log() -> list:
     """Return all daily snapshots sorted by date desc."""
     try:
@@ -69,7 +175,20 @@ def _hash_pw(password: str, salt: str = "") -> str:
     return f"{salt}:{h}"
 
 def _check_pw(password: str, stored: str) -> bool:
+    """
+    Verify password against stored hash.
+    Supports two formats:
+      1. Plain sha256 hex (from seed SQL): 64-char hex string
+      2. Salted format (from create_user): "salt:sha256(salt+pw)"
+    """
+    if not stored:
+        return False
     try:
+        # Format 1: plain sha256 (no colon, 64 hex chars) — used by seed SQL
+        if ":" not in stored or len(stored) == 64:
+            import hashlib as _hl
+            return _hl.sha256(password.encode()).hexdigest() == stored
+        # Format 2: salted "salt:hash"
         salt, h = stored.split(":", 1)
         return hashlib.sha256(f"{salt}{password}".encode()).hexdigest() == h
     except Exception:
@@ -173,3 +292,57 @@ def ensure_admin_exists():
                 print("[db] Default admin created. Username: admin | Password: admin1234")
     except Exception as ex:
         print(f"[db] ensure_admin_exists error: {ex}")
+
+# ════════════════════════════════════════════════════════════════════════════
+#  ROOM STATUS  (live tracking — cleaning/inspection progress per room)
+# ════════════════════════════════════════════════════════════════════════════
+def get_room_statuses(date_str: str = None) -> dict:
+    """
+    Load all room statuses for a given date.
+    Returns dict keyed by room number: {room: status_record}
+    """
+    if date_str is None:
+        date_str = str(date.today())
+    try:
+        r = (_client().table("room_status")
+             .select("*")
+             .eq("date", date_str)
+             .execute())
+        return {row["room"]: row for row in (r.data or [])}
+    except Exception as ex:
+        print(f"[db] get_room_statuses error: {ex}")
+        return {}
+
+def upsert_room_status(room: str, fields: dict, date_str: str = None):
+    """
+    Upsert a room's status record for today.
+    fields can include: status, housekeeper, inspector, group_label,
+    started_at, cleaned_at, inspected_at, marked_clean_at, notes,
+    swapped_from, updated_by
+    """
+    if date_str is None:
+        date_str = str(date.today())
+    record = {"date": date_str, "room": room, **fields}
+    try:
+        _client().table("room_status").upsert(
+            record, on_conflict="date,room"
+        ).execute()
+    except Exception as ex:
+        print(f"[db] upsert_room_status error: {ex}")
+        raise
+
+def bulk_upsert_room_statuses(records: list, date_str: str = None):
+    """
+    Bulk upsert a list of room status records.
+    Each record must have at least 'room' key.
+    """
+    if date_str is None:
+        date_str = str(date.today())
+    rows = [{"date": date_str, **r} for r in records]
+    try:
+        _client().table("room_status").upsert(
+            rows, on_conflict="date,room"
+        ).execute()
+    except Exception as ex:
+        print(f"[db] bulk_upsert_room_statuses error: {ex}")
+        raise

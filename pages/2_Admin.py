@@ -9,9 +9,7 @@ import db, auth
 st.set_page_config(page_title="Admin · Cleaning Schedule", page_icon="👑", layout="wide")
 
 st.markdown("""<style>
-[data-testid="stSidebarNav"],
-[data-testid="stSidebarNavItems"],
-[data-testid="stSidebarNavSeparator"]{display:none!important}
+[data-testid="stSidebarNav"]{display:none !important;}
 </style>""", unsafe_allow_html=True)
 
 # Guard: init defaults
@@ -26,11 +24,11 @@ if not st.session_state.get("logged_in"):
   <div style="font-size:1.2rem;font-weight:700;color:#1e293b;margin-bottom:8px">Not signed in</div>
   <div style="color:#64748b;margin-bottom:20px">Please sign in from the main page.</div>
 </div>""", unsafe_allow_html=True)
-    st.page_link("cleaning_scheduler.py", label="← Go to main page / Sign In")
+    # (navigation via sidebar)
     st.stop()
 if not auth.can("can_manage_users"):
     st.error("⛔ Admin access required.")
-    st.page_link("cleaning_scheduler.py", label="← Back to schedule")
+    # (navigation via sidebar)
     st.stop()
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
@@ -39,6 +37,13 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 *{box-sizing:border-box;} html,body,[class*="css"]{font-family:'Inter',sans-serif;}
 .block-container{padding-top:1.4rem!important;max-width:1100px;}
+
+/* MOBILE RESPONSIVE */
+@media (max-width: 768px) {
+  .block-container{padding-left:.6rem!important;padding-right:.6rem!important;max-width:100%!important;}
+  [data-testid="stHorizontalBlock"]{flex-direction:column!important;}
+  [data-testid="stHorizontalBlock"] > [data-testid="column"]{width:100%!important;flex:1 1 100%!important;min-width:100%!important;}
+}
 .pg-title{font-size:1.5rem;font-weight:800;letter-spacing:-.5px;
   background:linear-gradient(135deg,#1e293b,#7C3AED);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0 0 3px}
@@ -56,13 +61,12 @@ cu = auth.current_user()
 
 # ── Manual sidebar navigation (replaces hidden auto-nav) ─────────────────────
 with st.sidebar:
-    st.markdown("### 🧭 Navigation")
-    st.page_link("cleaning_scheduler.py",  label="🧹 Schedule")
-    st.page_link("pages/1_Dashboard.py",   label="📊 Dashboard")
-    if st.session_state.get("role") == "admin":
-        st.page_link("pages/2_Admin.py",   label="👑 Admin")
+    st.markdown("### 🧭 Navigate")
+    st.page_link("cleaning_scheduler.py", label="🧹 Cleaning Schedule")
+    st.page_link("pages/1_Dashboard.py", label="📊 Dashboard")
+    st.page_link("pages/2_Admin.py", label="⚙️ Admin")
     st.markdown("---")
-    _cu = st.session_state.get("username","")
+    _cu = st.session_state.get("display_name","") or st.session_state.get("username","")
     _role = st.session_state.get("role","")
     if _cu:
         st.caption(f"Signed in as **{_cu}** · {_role.title()}")
