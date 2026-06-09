@@ -35,6 +35,11 @@ nav[aria-label="Page navigation"] {
 }
 </style>""", unsafe_allow_html=True)
 
+# ── Theme state (light / dark) ────────────────────────────────────────────────
+if "theme" not in st.session_state:
+    st.session_state["theme"] = "dark"   # default to the dark space theme
+_THEME = st.session_state["theme"]
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -277,8 +282,16 @@ header[data-testid="stHeader"]{
   .stTabs [data-baseweb="tab-list"]{flex-wrap:wrap!important;gap:3px!important;}
   .stTabs [data-baseweb="tab"]{padding:5px 9px!important;font-size:.68rem!important;}
 
-  /* Sidebar nearly full width when open */
-  section[data-testid="stSidebar"]{min-width:88vw!important;max-width:92vw!important;}
+  /* Sidebar nearly full width when OPEN (expanded) */
+  section[data-testid="stSidebar"][aria-expanded="true"]{
+    min-width:88vw!important;max-width:92vw!important;width:88vw!important;
+  }
+  /* When COLLAPSED, fully slide it off-screen (don't let min-width force it open) */
+  section[data-testid="stSidebar"][aria-expanded="false"]{
+    min-width:0!important;max-width:0!important;width:0!important;
+    margin-left:-92vw!important;transform:translateX(-100%)!important;
+    overflow:hidden!important;
+  }
 
   /* Bigger tap targets for buttons */
   .stButton>button{min-height:42px!important;padding:8px 10px!important;}
@@ -324,13 +337,94 @@ header[data-testid="stHeader"]{
 }
 </style>""", unsafe_allow_html=True)
 
+# ── LIGHT THEME OVERRIDE ──────────────────────────────────────────────────────
+# When the user picks light mode, override the CSS variables + backgrounds.
+# Because every component reads from var(--…), this single block reskins the
+# entire app without touching the individual style rules above.
+if _THEME == "light":
+    st.markdown("""
+<style>
+:root {
+  --bg:#f7f8fc; --bg1:#eef0f7; --bg2:#ffffff; --bg3:#f0f2f9;
+  --border:rgba(99,102,241,.18); --border-hi:rgba(99,102,241,.5);
+  --indigo:#5b54e0; --indigo-lo:rgba(99,102,241,.08);
+  --cyan:#0891b2; --cyan-lo:rgba(8,145,178,.08);
+  --teal:#0d9488; --amber:#d97706; --rose:#e11d48;
+  --txt:#1e293b; --txt2:#64748b; --txt3:#94a3b8;
+  --glow-i:0 0 0 1px rgba(99,102,241,.15),0 4px 18px rgba(99,102,241,.12);
+  --glow-c:0 0 0 1px rgba(8,145,178,.15);
+  --glow-sm:0 1px 4px rgba(15,23,42,.08);
+}
+.stApp{
+  background:#f7f8fc!important;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 20% -10%,rgba(99,102,241,.08) 0%,transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%,rgba(8,145,178,.05) 0%,transparent 55%)!important;
+}
+/* Cards & surfaces become white instead of translucent-on-black */
+.sc{background:#ffffff!important;box-shadow:0 1px 4px rgba(15,23,42,.06)!important;}
+.sc.hi{background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(99,102,241,.04))!important;}
+.sc.ds{background:linear-gradient(135deg,rgba(20,184,166,.1),rgba(20,184,166,.03))!important;}
+.sc.dv{background:linear-gradient(135deg,rgba(217,119,6,.1),rgba(217,119,6,.03))!important;}
+.sc .n{text-shadow:none!important;}
+.rules-box{background:#ffffff!important;}
+section[data-testid="stSidebar"]{
+  background:rgba(255,255,255,.92)!important;
+  box-shadow:4px 0 24px rgba(15,23,42,.06)!important;
+}
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:var(--txt)!important;}
+.stTabs [data-baseweb="tab-list"]{background:#ffffff!important;}
+.stTabs [aria-selected="true"]{background:rgba(99,102,241,.12)!important;color:var(--indigo)!important;}
+.stButton>button{background:#ffffff!important;color:var(--txt)!important;}
+.stButton>button:hover{background:rgba(99,102,241,.06)!important;}
+.stTextArea textarea,.stTextInput input,
+.stSelectbox [data-baseweb="select"]>div,
+.stMultiSelect [data-baseweb="select"]>div{background:#ffffff!important;color:var(--txt)!important;}
+.streamlit-expanderHeader{background:#ffffff!important;}
+.streamlit-expanderContent{background:#fafbff!important;}
+[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:#ffffff!important;}
+</style>""", unsafe_allow_html=True)
+
+# ── Theme-aware constants for components.html cards ───────────────────────────
+# Cards render inside iframes, which DON'T inherit the parent page's CSS vars,
+# so we pass concrete colors based on the active theme.
+if _THEME == "light":
+    _C = {
+        "card_bg":   "linear-gradient(135deg,#ffffff,#fbfbff)",
+        "card_br":   "rgba(99,102,241,.22)",
+        "card_sh":   "0 1px 4px rgba(15,23,42,.07),0 0 0 1px rgba(15,23,42,.02)",
+        "txt":       "#1e293b",
+        "txt2":      "#64748b",
+        "txt3":      "#94a3b8",
+        "row_br":    "rgba(99,102,241,.1)",
+        "th_bg":     "rgba(99,102,241,.05)",
+        "tbl_bg":    "#ffffff",
+        "foot_bg":   "rgba(15,23,42,.02)",
+    }
+    _BODY_TXT = "#1e293b"
+else:
+    _C = {
+        "card_bg":   "linear-gradient(135deg,rgba(14,14,26,.95),rgba(19,19,31,.98))",
+        "card_br":   "rgba(99,102,241,.25)",
+        "card_sh":   "0 0 0 1px rgba(255,255,255,.04),0 8px 32px rgba(0,0,0,.4)",
+        "txt":       "#e2e8f0",
+        "txt2":      "#94a3b8",
+        "txt3":      "#475569",
+        "row_br":    "rgba(99,102,241,.07)",
+        "th_bg":     "rgba(255,255,255,.02)",
+        "tbl_bg":    "rgba(13,13,26,.9)",
+        "foot_bg":   "rgba(255,255,255,.015)",
+    }
+    _BODY_TXT = "#e2e8f0"
+
 SHARED_CSS = """<style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
 body{
   font-family:'DM Sans',sans-serif;
   background:transparent;
-  color:#e2e8f0;
+  color:""" + _BODY_TXT + """;
   overflow-x:auto;
   -webkit-overflow-scrolling:touch;
 }
@@ -1110,24 +1204,24 @@ def group_card_html(g, idx):
         late_co    = e(r.get("late_checkout",""))
         late_badge2= f'<span style="background:rgba(245,158,11,.15);color:#fcd34d;border-radius:4px;padding:1px 6px;font-size:.64rem;font-weight:600">⏰ {late_co}</span>' if late_co else ""
         delay = f"{i*0.04:.2f}s"
-        rows += f"""<tr style="background:{row_bg};border-bottom:1px solid rgba(99,102,241,.07);animation:rowIn .3s {delay} both">
+        rows += f"""<tr style="background:{row_bg};border-bottom:1px solid {_C["row_br"]};animation:rowIn .3s {delay} both">
           <td style="font-family:'DM Mono',monospace;font-size:.76rem;font-weight:500;color:{ac};padding:8px 10px;white-space:nowrap">{e(r.get("room",""))}</td>
           <td style="padding:8px 10px;color:#64748b;font-size:.75rem">B{r.get("bld","")}</td>
-          <td style="padding:8px 10px;color:#e2e8f0;font-size:.78rem;font-weight:500;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{e(r.get("guest",""))}</td>
-          <td style="padding:8px 10px;color:#94a3b8;font-size:.73rem">{e(r.get("service",""))}</td>
-          <td style="padding:8px 10px;font-family:'DM Mono',monospace;font-weight:500;color:#e2e8f0;font-size:.76rem">{"—" if r.get("time",0)==0 else str(r.get("time",""))+"m"}</td>
+          <td style="padding:8px 10px;color:{_C["txt"]};font-size:.78rem;font-weight:500;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{e(r.get("guest",""))}</td>
+          <td style="padding:8px 10px;color:{_C["txt2"]};font-size:.73rem">{e(r.get("service",""))}</td>
+          <td style="padding:8px 10px;font-family:'DM Mono',monospace;font-weight:500;color:{_C["txt"]};font-size:.76rem">{"—" if r.get("time",0)==0 else str(r.get("time",""))+"m"}</td>
           <td style="padding:8px 10px">{pet_badge}</td>
           <td style="padding:8px 10px">{late_badge2}</td>
         </tr>"""
 
     lbl = e(g.get("label",""))
-    th  = f"padding:6px 10px;text-align:left;font-family:'DM Mono',monospace;font-size:.6rem;font-weight:500;text-transform:uppercase;letter-spacing:.1em;color:#475569;background:rgba(255,255,255,.02);border-bottom:1px solid rgba(99,102,241,.1)"
+    th  = f"padding:6px 10px;text-align:left;font-family:'DM Mono',monospace;font-size:.6rem;font-weight:500;text-transform:uppercase;letter-spacing:.1em;color:{_C["txt3"]};background:{_C["th_bg"]};border-bottom:1px solid {_C["row_br"]}"
 
     return f"""<!DOCTYPE html><html><head>{SHARED_CSS}</head><body>
 <div style="border-radius:12px;overflow:hidden;border:1px solid {glow};
-            background:linear-gradient(135deg,rgba(14,14,26,.95),rgba(19,19,31,.98));
+            background:{_C["card_bg"]};
             backdrop-filter:blur(16px);margin-bottom:4px;
-            box-shadow:0 0 0 1px rgba(255,255,255,.04),0 8px 32px rgba(0,0,0,.4);
+            box-shadow:{_C["card_sh"]};
             animation:glassIn .35s cubic-bezier(.16,1,.3,1) both">
   <!-- Card header -->
   <div style="padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
@@ -1143,11 +1237,11 @@ def group_card_html(g, idx):
     <!-- Title + badges -->
     <div style="flex:1;min-width:0">
       <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
-        <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:.88rem;color:#f1f5f9">Group {lbl}</span>
+        <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:.88rem;color:{_C["txt"]}">Group {lbl}</span>
         {svc_badge} {overflow_badge} {priority_badge} {cross_badge} {unassigned_badge}
       </div>
-      <div style="font-size:.71rem;color:#475569;margin-top:3px;font-family:'DM Mono',monospace">
-        {bld_str} &nbsp;·&nbsp; <span style="color:#94a3b8">🧑</span> {hk} &nbsp;·&nbsp; <span style="color:#94a3b8">🔍</span> {insp}
+      <div style="font-size:.71rem;color:{_C["txt2"]};margin-top:3px;font-family:'DM Mono',monospace">
+        {bld_str} &nbsp;·&nbsp; <span style="color:{_C["txt3"]}">🧑</span> {hk} &nbsp;·&nbsp; <span style="color:{_C["txt3"]}">🔍</span> {insp}
       </div>
     </div>
     <!-- Time meter -->
@@ -1170,8 +1264,8 @@ def group_card_html(g, idx):
     <tbody>{rows}</tbody>
   </table>
   <!-- Footer -->
-  <div style="background:rgba(255,255,255,.015);padding:6px 12px;display:flex;justify-content:space-between;
-              border-top:1px solid rgba(99,102,241,.07);font-family:'DM Mono',monospace;font-size:.68rem;color:#334155">
+  <div style="background:{_C["foot_bg"]};padding:6px 12px;display:flex;justify-content:space-between;
+              border-top:1px solid {_C["row_br"]};font-family:'DM Mono',monospace;font-size:.68rem;color:{_C["txt3"]}">
     <span>{len(g["rooms"])} rooms &nbsp;·&nbsp; {g.get("c120",0)}×120 &nbsp;·&nbsp; {g.get("c140",0)}×140</span>
     <span style="color:{t_col};font-weight:500">{g.get("time","")}m used</span>
   </div>
@@ -1180,25 +1274,26 @@ def group_card_html(g, idx):
 def staff_table_html(rows, cols, cell_fns, row_bg_fn):
     th_s = ("padding:8px 12px;text-align:left;font-family:'DM Mono',monospace;"
             "font-size:.6rem;font-weight:500;text-transform:uppercase;letter-spacing:.1em;"
-            "color:#475569;background:rgba(99,102,241,.06);border-bottom:1px solid rgba(99,102,241,.12)")
+            f"color:{_C['txt3']};background:{_C['th_bg']};border-bottom:1px solid {_C['row_br']}")
     ths  = "".join(f'<th style="{th_s}">{e(c)}</th>' for c in cols)
     body = ""
     for i, row in enumerate(rows):
         bg  = row_bg_fn(row)
-        # Override row_bg_fn colors with dark equivalents
-        if bg == "#f0fdf4": bg = "rgba(20,184,166,.06)"
-        elif bg == "#fefce8": bg = "rgba(245,158,11,.05)"
-        elif bg not in ("transparent","","#fff"): bg = "rgba(99,102,241,.04)"
+        # Map known status backgrounds to theme-appropriate tints
+        if bg == "#f0fdf4": bg = "rgba(20,184,166,.08)" if _THEME=="dark" else "rgba(20,184,166,.07)"
+        elif bg == "#fefce8": bg = "rgba(245,158,11,.06)"
+        elif bg not in ("transparent","","#fff"): bg = "rgba(99,102,241,.05)"
+        elif bg in ("#fff","") : bg = "transparent"
         delay = f"{i*0.03:.2f}s"
         tds = "".join(
-            f'<td style="padding:8px 12px;border-bottom:1px solid rgba(99,102,241,.07);'
+            f'<td style="padding:8px 12px;border-bottom:1px solid {_C["row_br"]};'
             f'vertical-align:middle;background:{bg};animation:rowIn .3s {delay} both">{fn(row)}</td>'
             for fn in cell_fns)
         body += f"<tr>{tds}</tr>"
     return f"""<!DOCTYPE html><html><head>{SHARED_CSS}</head><body>
-<div style="border-radius:12px;overflow:hidden;border:1px solid rgba(99,102,241,.18);
-            background:rgba(13,13,26,.9);backdrop-filter:blur(12px);
-            box-shadow:0 0 0 1px rgba(255,255,255,.03),0 8px 32px rgba(0,0,0,.35)">
+<div style="border-radius:12px;overflow:hidden;border:1px solid {_C['card_br']};
+            background:{_C['tbl_bg']};backdrop-filter:blur(12px);
+            box-shadow:{_C['card_sh']}">
 <table style="width:100%;border-collapse:collapse;font-size:.8rem">
   <thead><tr>{ths}</tr></thead><tbody>{body}</tbody>
 </table></div></body></html>"""
@@ -1244,22 +1339,22 @@ def insp_card_html(insp, fg, color):
                   f'padding:3px 10px;font-size:.73rem;margin:2px 2px;">'
                   f'<span style="font-family:\'DM Mono\',monospace;font-weight:500;color:{ac2};font-size:.72rem">{gl}</span>'
                   f' <span style="color:#64748b">·</span>'
-                  f' <span style="color:#e2e8f0">{hk}</span></span>')
+                  f' <span style="color:{_C["txt"]}">{hk}</span></span>')
     return f"""<!DOCTYPE html><html><head>{SHARED_CSS}</head><body>
 <div style="border-radius:12px;padding:14px 16px;
             border:1px solid {color}44;
-            background:linear-gradient(135deg,rgba(13,13,26,.95),rgba(19,19,31,.98));
+            background:{_C['card_bg']};
             backdrop-filter:blur(16px);
-            box-shadow:0 0 0 1px rgba(255,255,255,.03),0 4px 24px rgba(0,0,0,.4),0 0 20px {color}18">
+            box-shadow:{_C['card_sh']},0 0 20px {color}18">
   <div style="display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-bottom:8px">
     <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:.9rem;
-                 color:{color};text-shadow:0 0 12px {color}88">🔍 {name}</span>
+                 color:{color}">🔍 {name}</span>
     {role_badge}{heavy_warn}
   </div>
   <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:4px">{bld_tags}</div>
-  <div style="line-height:1.8">{pills or '<span style="color:#475569;font-family:\'DM Mono\',monospace;font-size:.77rem">— no groups —</span>'}</div>
-  <div style="margin-top:8px;font-family:'DM Mono',monospace;font-size:.67rem;color:#334155;
-              border-top:1px solid rgba(99,102,241,.1);padding-top:6px">
+  <div style="line-height:1.8">{pills or f'<span style="color:{_C["txt3"]};font-family:\'DM Mono\',monospace;font-size:.77rem">— no groups —</span>'}</div>
+  <div style="margin-top:8px;font-family:'DM Mono',monospace;font-size:.67rem;color:{_C['txt3']};
+              border-top:1px solid {_C['row_br']};padding-top:6px">
     {len(insp["groups"])} groups &nbsp;·&nbsp; {total_t} min
   </div>
 </div></body></html>"""
@@ -1285,6 +1380,12 @@ with st.sidebar:
 </div>""", unsafe_allow_html=True)
     if st.button("Sign Out", key="btn_logout", use_container_width=True):
         auth.logout(); st.rerun()
+
+    # ── Theme toggle (light / dark) ────────────────────────────────────────
+    _theme_label = "☀️ Light Mode" if st.session_state["theme"] == "dark" else "🌙 Dark Mode"
+    if st.button(_theme_label, key="btn_theme", use_container_width=True):
+        st.session_state["theme"] = "light" if st.session_state["theme"] == "dark" else "dark"
+        st.rerun()
 
     # ── Role-based navigation ──────────────────────────────────────────────
     # admin → Schedule + Dashboard + Admin
@@ -1463,9 +1564,13 @@ with col_data:
         st.caption("Late checkouts, room moves, notes auto-matched.")
 with col_cfg:
     st.markdown('<p class="sec">⚙️</p>', unsafe_allow_html=True)
-    st.markdown(f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
-                f'padding:11px 13px;font-size:.78rem;color:#475569;margin-bottom:10px">'
-                f'<div style="font-weight:700;color:#0f172a;margin-bottom:5px">Today</div>'
+    _today_bg  = "#ffffff" if _THEME=="light" else "rgba(255,255,255,.03)"
+    _today_br  = "rgba(99,102,241,.18)"
+    _today_hd  = "#0f172a" if _THEME=="light" else "#e2e8f0"
+    _today_tx  = "#475569" if _THEME=="light" else "#94a3b8"
+    st.markdown(f'<div style="background:{_today_bg};border:1px solid {_today_br};border-radius:10px;'
+                f'padding:11px 13px;font-size:.78rem;color:{_today_tx};margin-bottom:10px">'
+                f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">Today</div>'
                 f'<div>🧑‍🔧 <b>{len(present_hk)}</b> HKs present</div>'
                 f'<div>🔍 <b>{len(present_insp)}</b> inspectors</div></div>', unsafe_allow_html=True)
     _can_gen = auth.can("can_generate")
@@ -1934,7 +2039,7 @@ else:
                     f'<div style="background:#e5e7eb;border-radius:4px;height:7px;width:75px">'
                     f'<div style="background:{col};width:{pct}%;height:7px;border-radius:4px"></div></div></div>')
         tbl=staff_table_html(rows_hk,["Housekeeper","Building","Status","Groups","Time"],
-            [lambda r:f'<span style="font-weight:600;color:#1e293b">{e(r["name"])}</span>',
+            [lambda r:f'<span style="font-weight:600;color:{_C["txt"]}">{e(r["name"])}</span>',
              hk_bld_tag,hk_status_tag,hk_pills,hk_bar],
             lambda r:{"free":"#f0fdf4","low":"#fefce8","ok":"#fff"}[r["stat"]])
         components.html(tbl, height=max(70+len(rows_hk)*42,120), scrolling=False)
@@ -1979,8 +2084,8 @@ else:
             return f'<span style="background:{bg2};color:{col};border-radius:5px;padding:2px 8px;font-size:.72rem;font-weight:700">{c}{"🔴" if heavy else ""}</span>'
         tbl_i=staff_table_html(rows_insp,
             ["Inspector","Role","Buildings","Groups","Load","Housekeepers"],
-            [lambda r:(f'<span style="font-weight:700;color:#0f172a;font-size:.82rem">{e(r["name"])}</span>'
-                       +(f'<br><span style="font-size:.68rem;color:#94a3b8">✅ Free</span>' if r["stat"]=="free" else "")),
+            [lambda r:(f'<span style="font-weight:700;color:{_C["txt"]};font-size:.82rem">{e(r["name"])}</span>'
+                       +(f'<br><span style="font-size:.68rem;color:{_C["txt3"]}">✅ Free</span>' if r["stat"]=="free" else "")),
              insp_role_tag, insp_bld_tags, insp_grp_pills, insp_complexity_tag,
              lambda r:(f'<span style="font-size:.72rem;color:#475569;line-height:1.6">'
                        +"<br>".join(f'<span style="color:#64748b">{e(gl)}</span> <span style="color:#0f172a;font-weight:500">{e(next((g.get("housekeeper","") for g in fg if g["label"]==gl),"—"))}</span>'
