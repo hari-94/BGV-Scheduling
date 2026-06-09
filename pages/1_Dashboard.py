@@ -45,47 +45,113 @@ with st.sidebar:
     _r = st.session_state.get("role","")
     if _u: st.caption(f"Signed in as **{_u}** · {_r.title()}")
 
+# ── Theme (shared with main app via session_state) ─────────────────────────────
+_THEME = st.session_state.get("theme", "dark")
+
 # ── CSS ────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-*{box-sizing:border-box;} html,body,[class*="css"]{font-family:'Inter',sans-serif;}
-.block-container{padding-top:1.4rem!important;max-width:1440px;}
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+:root{
+  --bg:#080810; --bg2:#13131f; --border:rgba(99,102,241,.18); --border-hi:rgba(99,102,241,.45);
+  --indigo:#6366f1; --cyan:#22d3ee; --teal:#14b8a6; --amber:#f59e0b; --rose:#f43f5e;
+  --txt:#e2e8f0; --txt2:#94a3b8; --txt3:#475569;
+  --radius:14px; --radius-sm:8px;
+}
+*{box-sizing:border-box;}
+html,body,[class*="css"]{font-family:'DM Sans',sans-serif!important;color:var(--txt)!important;}
+.stApp{
+  background:var(--bg)!important;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 20% -10%,rgba(99,102,241,.12) 0%,transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%,rgba(34,211,238,.07) 0%,transparent 55%)!important;
+}
+.block-container{padding-top:1.4rem!important;max-width:1440px;background:transparent!important;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:var(--indigo);border-radius:99px;}
 
-/* MOBILE RESPONSIVE */
+.pg-title{font-family:'Syne',sans-serif!important;font-size:1.7rem;font-weight:800;letter-spacing:-.04em;
+  background:linear-gradient(135deg,#fff 0%,var(--indigo) 45%,var(--cyan) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0 0 4px}
+.pg-sub{font-size:.82rem;color:var(--txt2);margin:0 0 1rem}
+.sec{font-family:'DM Mono',monospace!important;font-size:.6rem;font-weight:500;text-transform:uppercase;
+     letter-spacing:.16em;color:var(--indigo);padding-bottom:6px;border-bottom:1px solid var(--border);margin:1.2rem 0 .6rem}
+
+.kpi-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:1rem}
+.kpi{flex:1 1 130px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:var(--radius);
+     padding:16px 14px;backdrop-filter:blur(12px);transition:transform .2s,box-shadow .2s}
+.kpi:hover{transform:translateY(-3px);border-color:var(--border-hi);box-shadow:0 0 12px rgba(99,102,241,.25)}
+.kpi.pu{background:linear-gradient(135deg,rgba(99,102,241,.25),rgba(99,102,241,.1));border-color:rgba(99,102,241,.4)}
+.kpi.te{background:linear-gradient(135deg,rgba(20,184,166,.2),rgba(20,184,166,.06));border-color:rgba(20,184,166,.35)}
+.kpi.am{background:linear-gradient(135deg,rgba(245,158,11,.2),rgba(245,158,11,.06));border-color:rgba(245,158,11,.35)}
+.kpi.bl{background:linear-gradient(135deg,rgba(37,99,235,.2),rgba(37,99,235,.06));border-color:rgba(37,99,235,.35)}
+.kpi .val{font-family:'Syne',sans-serif!important;font-size:1.8rem;font-weight:800;color:#fff;line-height:1;margin-bottom:3px;
+     text-shadow:0 0 20px rgba(99,102,241,.5)}
+.kpi .lbl{font-family:'DM Mono',monospace!important;font-size:.58rem;color:var(--txt2);text-transform:uppercase;letter-spacing:.1em;font-weight:500}
+.kpi .sub{font-size:.7rem;color:var(--txt2);margin-top:3px}
+
+.stTabs [data-baseweb="tab-list"]{gap:4px;background:rgba(255,255,255,.03)!important;border:1px solid var(--border)!important;border-radius:var(--radius-sm);padding:4px!important}
+.stTabs [data-baseweb="tab"]{border-radius:6px!important;padding:7px 18px!important;font-size:.78rem!important;
+  font-weight:600!important;color:var(--txt2)!important;border:none!important;background:transparent!important}
+.stTabs [aria-selected="true"]{background:rgba(99,102,241,.2)!important;color:var(--cyan)!important;
+  box-shadow:0 0 0 1px rgba(99,102,241,.4)!important}
+
+section[data-testid="stSidebar"]{
+  background:rgba(13,13,26,.88)!important;backdrop-filter:blur(20px)!important;
+  border-right:1px solid var(--border)!important;
+}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] *{color:var(--txt2)!important;}
+.stButton>button{border-radius:var(--radius-sm)!important;font-weight:600!important;border:1px solid var(--border)!important;
+  background:rgba(255,255,255,.04)!important;color:var(--txt)!important;}
+.stButton>button:hover{border-color:var(--border-hi)!important;background:rgba(99,102,241,.1)!important;}
+.stSelectbox [data-baseweb="select"]>div,.stMultiSelect [data-baseweb="select"]>div,
+.stDateInput input,.stTextInput input{background:rgba(255,255,255,.03)!important;border:1px solid var(--border)!important;color:var(--txt)!important;}
+[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:var(--bg2)!important;border:1px solid var(--border)!important;}
+hr{border:none!important;height:1px!important;background:var(--border)!important;}
+footer{visibility:hidden!important;}#MainMenu{visibility:hidden!important;}
+header[data-testid="stHeader"]{background:transparent!important;height:0!important;}
+[data-testid="stSidebarNav"]{display:none !important;}
+
+/* MOBILE */
 @media (max-width: 768px) {
-  .block-container{padding-left:.6rem!important;padding-right:.6rem!important;max-width:100%!important;}
+  .block-container{padding-left:.5rem!important;padding-right:.5rem!important;max-width:100%!important;}
+  .pg-title{font-size:1.35rem!important;}
+  .kpi{flex:1 1 calc(50% - 5px)!important;min-width:calc(50% - 5px)!important;padding:11px 9px!important;}
+  .kpi .val{font-size:1.35rem!important;}
+  .stTabs [data-baseweb="tab-list"]{flex-wrap:wrap!important;}
+  .stTabs [data-baseweb="tab"]{padding:5px 10px!important;font-size:.7rem!important;}
+  section[data-testid="stSidebar"][aria-expanded="true"]{min-width:88vw!important;max-width:92vw!important;}
+  section[data-testid="stSidebar"][aria-expanded="false"]{min-width:0!important;max-width:0!important;margin-left:-92vw!important;}
   [data-testid="stHorizontalBlock"]{flex-direction:column!important;}
   [data-testid="stHorizontalBlock"] > [data-testid="column"]{width:100%!important;flex:1 1 100%!important;min-width:100%!important;}
 }
-.pg-title{font-size:1.6rem;font-weight:800;letter-spacing:-.6px;
-  background:linear-gradient(135deg,#1e293b,#3B4FE4);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0 0 2px}
-.pg-sub{font-size:.82rem;color:#64748b;margin:0 0 .6rem}
-.sec{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
-     color:#94a3b8;padding-bottom:4px;border-bottom:1.5px solid #f1f5f9;margin:.9rem 0 .5rem}
-.kpi-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:1rem}
-.kpi{flex:1 1 130px;background:#fff;border:1px solid #e8edf5;border-radius:14px;padding:14px;
-     box-shadow:0 2px 8px rgba(0,0,0,.05)}
-.kpi.pu{background:linear-gradient(135deg,#5B4FE9,#7C6FF5);border:none}
-.kpi.te{background:linear-gradient(135deg,#0D9488,#14B8A6);border:none}
-.kpi.am{background:linear-gradient(135deg,#D97706,#F59E0B);border:none}
-.kpi.bl{background:linear-gradient(135deg,#2563EB,#3B82F6);border:none}
-.kpi .val{font-size:1.7rem;font-weight:800;color:#0f172a;line-height:1;margin-bottom:3px}
-.kpi .lbl{font-size:.6rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
-.kpi .sub{font-size:.7rem;color:#64748b;margin-top:3px}
-.kpi.pu .val,.kpi.pu .lbl,.kpi.pu .sub,
-.kpi.te .val,.kpi.te .lbl,.kpi.te .sub,
-.kpi.am .val,.kpi.am .lbl,.kpi.am .sub,
-.kpi.bl .val,.kpi.bl .lbl,.kpi.bl .sub{color:#fff}
-.stTabs [data-baseweb="tab-list"]{gap:4px;background:#f1f5f9;border-radius:10px;padding:3px;border:none!important}
-.stTabs [data-baseweb="tab"]{border-radius:8px!important;padding:6px 18px!important;font-size:.78rem!important;
-  font-weight:600!important;color:#64748b!important;border:none!important;background:transparent!important}
-.stTabs [aria-selected="true"]{background:#fff!important;color:#1e293b!important;
-  box-shadow:0 1px 4px rgba(0,0,0,.1)!important}
 </style>""", unsafe_allow_html=True)
 
-PURPLE="#5B4FE9"; TEAL="#0D9488"; AMBER="#D97706"; BLUE="#2563EB"; RED="#DC2626"
+# Light theme override
+if _THEME == "light":
+    st.markdown("""<style>
+:root{--bg:#f7f8fc;--bg2:#ffffff;--border:rgba(99,102,241,.18);--border-hi:rgba(99,102,241,.5);
+  --txt:#1e293b;--txt2:#64748b;--txt3:#94a3b8;}
+.stApp{background:#f7f8fc!important;background-image:
+  radial-gradient(ellipse 80% 50% at 20% -10%,rgba(99,102,241,.08) 0%,transparent 60%)!important;}
+.kpi{background:#ffffff!important;box-shadow:0 1px 4px rgba(15,23,42,.06)!important;}
+.kpi .val{color:#0f172a!important;text-shadow:none!important;}
+.stTabs [data-baseweb="tab-list"]{background:#ffffff!important;}
+.stTabs [aria-selected="true"]{background:rgba(99,102,241,.12)!important;color:var(--indigo)!important;}
+.stButton>button{background:#ffffff!important;color:var(--txt)!important;}
+section[data-testid="stSidebar"]{background:rgba(255,255,255,.92)!important;}
+.stSelectbox [data-baseweb="select"]>div,.stDateInput input,.stTextInput input{background:#ffffff!important;color:var(--txt)!important;}
+[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:#ffffff!important;}
+</style>""", unsafe_allow_html=True)
+
+# Plotly font color follows theme
+_PLOT_FONT = "#1e293b" if _THEME == "light" else "#e2e8f0"
+
+# Chart palette — brighter on dark, deeper on light
+if _THEME == "light":
+    PURPLE="#5B4FE9"; TEAL="#0D9488"; AMBER="#D97706"; BLUE="#2563EB"; RED="#DC2626"
+else:
+    PURPLE="#818cf8"; TEAL="#2dd4bf"; AMBER="#fbbf24"; BLUE="#60a5fa"; RED="#fb7185"
 
 # ── Snapshot builder ───────────────────────────────────────────────────────────
 def build_snapshot(fg, total_rms, inspectors):
@@ -250,7 +316,7 @@ with tab_hk:
             fig.update_layout(barmode="stack",height=max(300,len(dfc)*26+80),
                 margin=dict(l=10,r=60,t=30,b=10),
                 plot_bgcolor="rgba(0,0,0,0)",paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(family="Inter",size=12),
+                font=dict(family="DM Sans",size=12,color=_PLOT_FONT),
                 legend=dict(orientation="h",y=1.04,x=0),
                 xaxis=dict(title="Rooms",showgrid=True,gridcolor="rgba(128,128,128,.15)"),
                 yaxis=dict(showgrid=False),hovermode="y unified")
@@ -267,7 +333,7 @@ with tab_hk:
         ft.add_vline(x=330,line_dash="dash",line_color=AMBER,annotation_text="330m min")
         ft.update_layout(height=max(300,len(dft)*26+80),margin=dict(l=10,r=90,t=10,b=10),
             plot_bgcolor="rgba(0,0,0,0)",paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Inter",size=12),showlegend=False,
+            font=dict(family="DM Sans",size=12,color=_PLOT_FONT),showlegend=False,
             xaxis=dict(range=[0,430],showgrid=True,gridcolor="rgba(128,128,128,.15)",ticksuffix="m"),
             yaxis=dict(showgrid=False))
         st.plotly_chart(ft, use_container_width=True)
@@ -324,7 +390,7 @@ with tab_insp:
                 hovertemplate="<b>%{y}</b><br>Rooms: %{x}<br>Groups: %{customdata[0]}<br>Role: %{customdata[1]}<extra></extra>"))
             fi2.update_layout(height=max(280,len(dic)*30+80),margin=dict(l=10,r=60,t=10,b=10),
                 plot_bgcolor="rgba(0,0,0,0)",paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(family="Inter",size=12),showlegend=False,
+                font=dict(family="DM Sans",size=12,color=_PLOT_FONT),showlegend=False,
                 xaxis=dict(title="Rooms Inspected",showgrid=True,gridcolor="rgba(128,128,128,.15)"),
                 yaxis=dict(showgrid=False))
             st.plotly_chart(fi2, use_container_width=True)
