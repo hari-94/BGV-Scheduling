@@ -23,15 +23,11 @@ import auth, db
 # This must be the first markdown call so the nav never flashes. We use every
 # known selector variant across Streamlit versions to be bulletproof.
 st.markdown("""<style>
-[data-testid="stSidebarNav"],
-div[data-testid="stSidebarNav"],
-section[data-testid="stSidebar"] > div > div > ul,
-section[data-testid="stSidebar"] ul[role="list"]:first-of-type,
-.st-emotion-cache-1cypcdb,
-nav[aria-label="Page navigation"] {
+/* Hide ONLY Streamlit's auto-generated page nav. The config.toml setting
+   showSidebarNavigation=false is the primary fix; this is a safe backup that
+   targets only the nav testid, never the sidebar content itself. */
+[data-testid="stSidebarNav"]{
   display: none !important;
-  visibility: hidden !important;
-  height: 0 !important;
 }
 </style>""", unsafe_allow_html=True)
 
