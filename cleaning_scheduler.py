@@ -170,8 +170,10 @@ section[data-testid="stSidebar"]{
 section[data-testid="stSidebar"][aria-expanded="true"]{
   min-width:340px!important;max-width:380px!important;
 }
-section[data-testid="stSidebar"][aria-expanded="false"]{
-  min-width:0!important;max-width:0!important;width:0!important;overflow:hidden!important;
+/* Always keep the collapse/expand control visible & clickable */
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"]{
+  display:flex!important;visibility:visible!important;opacity:1!important;z-index:999999!important;
 }
 section[data-testid="stSidebar"]::before{
   content:'';position:absolute;top:0;left:0;right:0;height:2px;
