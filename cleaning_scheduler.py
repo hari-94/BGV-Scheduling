@@ -164,7 +164,14 @@ html,body,[class*="css"]{
 section[data-testid="stSidebar"]{
   background:rgba(13,13,26,.88)!important;backdrop-filter:blur(20px)!important;
   -webkit-backdrop-filter:blur(20px)!important;border-right:1px solid var(--border)!important;
-  box-shadow:4px 0 40px rgba(0,0,0,.5)!important;min-width:340px!important;max-width:380px!important;
+  box-shadow:4px 0 40px rgba(0,0,0,.5)!important;
+}
+/* Width only when expanded — lets Streamlit fully collapse it when closed */
+section[data-testid="stSidebar"][aria-expanded="true"]{
+  min-width:340px!important;max-width:380px!important;
+}
+section[data-testid="stSidebar"][aria-expanded="false"]{
+  min-width:0!important;max-width:0!important;width:0!important;overflow:hidden!important;
 }
 section[data-testid="stSidebar"]::before{
   content:'';position:absolute;top:0;left:0;right:0;height:2px;
