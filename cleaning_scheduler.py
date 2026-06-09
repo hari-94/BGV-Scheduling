@@ -163,6 +163,11 @@ section[data-testid="stSidebar"]{
   box-shadow:4px 0 40px rgba(0,0,0,.5)!important;
   display:flex !important;   /* override any leftover login-screen hide */
 }
+/* Default + expanded width (overrides cached login zero-width). Collapsed
+   state is left to Streamlit so the panel can still be hidden via the arrow. */
+section[data-testid="stSidebar"]:not([aria-expanded="false"]){
+  min-width:340px !important;max-width:380px !important;
+}
 /* Make sure the collapse/expand arrow is always available */
 [data-testid="stSidebarCollapsedControl"],[data-testid="collapsedControl"]{
   display:flex !important;visibility:visible !important;opacity:1 !important;
@@ -283,8 +288,8 @@ header[data-testid="stHeader"]{
   .stTabs [data-baseweb="tab-list"]{flex-wrap:wrap!important;gap:3px!important;}
   .stTabs [data-baseweb="tab"]{padding:5px 9px!important;font-size:.68rem!important;}
 
-  /* Sidebar wider on mobile when open (Streamlit handles collapse natively) */
-  section[data-testid="stSidebar"][aria-expanded="true"]{
+  /* Sidebar wider on mobile unless collapsed (Streamlit handles collapse) */
+  section[data-testid="stSidebar"]:not([aria-expanded="false"]){
     min-width:85vw!important;max-width:90vw!important;
   }
 
@@ -458,13 +463,14 @@ auth.init_auth()
 #  LOGIN GATE
 # ══════════════════════════════════════════════════════════════════════════════
 if not st.session_state.get("logged_in"):
+    # Collapse (not display:none) the empty sidebar on login. Using display:none
+    # here leaks into the logged-in view via cached <style> tags, so we instead
+    # just shrink it to zero width — and since the sidebar block hasn't run yet,
+    # there's nothing in it anyway.
     st.markdown("""<style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400&display=swap');
-/* Hide the entire sidebar + nav on the login screen */
-section[data-testid="stSidebar"]{display:none !important;}
+section[data-testid="stSidebar"]{min-width:0 !important;max-width:0 !important;width:0 !important;border:none !important;}
 [data-testid="stSidebarNav"]{display:none !important;}
-[data-testid="collapsedControl"]{display:none !important;}
-button[kind="header"]{display:none !important;}
 .stApp{
   background:#080810 !important;
   background-image:
