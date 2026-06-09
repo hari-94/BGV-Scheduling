@@ -31,31 +31,89 @@ if not auth.can("can_manage_users"):
     # (navigation via sidebar)
     st.stop()
 
+# ── Theme (shared with main app via session_state) ─────────────────────────────
+_THEME = st.session_state.get("theme", "dark")
+
 # ── CSS ────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-*{box-sizing:border-box;} html,body,[class*="css"]{font-family:'Inter',sans-serif;}
-.block-container{padding-top:1.4rem!important;max-width:1100px;}
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+:root{
+  --bg:#080810; --bg2:#13131f; --border:rgba(99,102,241,.18); --border-hi:rgba(99,102,241,.45);
+  --indigo:#6366f1; --cyan:#22d3ee; --rose:#f43f5e;
+  --txt:#e2e8f0; --txt2:#94a3b8; --txt3:#475569;
+  --radius:14px; --radius-sm:8px;
+}
+*{box-sizing:border-box;}
+html,body,[class*="css"]{font-family:'DM Sans',sans-serif!important;color:var(--txt)!important;}
+.stApp{
+  background:var(--bg)!important;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 20% -10%,rgba(124,58,237,.14) 0%,transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%,rgba(34,211,238,.06) 0%,transparent 55%)!important;
+}
+.block-container{padding-top:1.4rem!important;max-width:1100px;background:transparent!important;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:var(--indigo);border-radius:99px;}
 
-/* MOBILE RESPONSIVE */
+.pg-title{font-family:'Syne',sans-serif!important;font-size:1.6rem;font-weight:800;letter-spacing:-.04em;
+  background:linear-gradient(135deg,#fff 0%,#a78bfa 50%,var(--cyan) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0 0 4px}
+.pg-sub{font-size:.82rem;color:var(--txt2);margin:0 0 1rem}
+.sec{font-family:'DM Mono',monospace!important;font-size:.6rem;font-weight:500;text-transform:uppercase;
+     letter-spacing:.16em;color:var(--indigo);padding-bottom:6px;border-bottom:1px solid var(--border);margin:1.2rem 0 .6rem}
+
+.stTabs [data-baseweb="tab-list"]{gap:4px;background:rgba(255,255,255,.03)!important;border:1px solid var(--border)!important;border-radius:var(--radius-sm);padding:4px!important}
+.stTabs [data-baseweb="tab"]{border-radius:6px!important;padding:7px 16px!important;font-size:.78rem!important;
+  font-weight:600!important;color:var(--txt2)!important;border:none!important;background:transparent!important}
+.stTabs [aria-selected="true"]{background:rgba(99,102,241,.2)!important;color:var(--cyan)!important;box-shadow:0 0 0 1px rgba(99,102,241,.4)!important}
+
+section[data-testid="stSidebar"]{
+  background:rgba(13,13,26,.88)!important;backdrop-filter:blur(20px)!important;
+  border-right:1px solid var(--border)!important;
+}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] *{color:var(--txt2)!important;}
+.stButton>button{border-radius:var(--radius-sm)!important;font-weight:600!important;border:1px solid var(--border)!important;
+  background:rgba(255,255,255,.04)!important;color:var(--txt)!important;}
+.stButton>button:hover{border-color:var(--border-hi)!important;background:rgba(99,102,241,.1)!important;}
+.stButton>button[kind="primary"]{background:linear-gradient(135deg,var(--indigo),#818cf8)!important;border:none!important;color:#fff!important;}
+.stSelectbox [data-baseweb="select"]>div,.stMultiSelect [data-baseweb="select"]>div,
+.stTextInput input,.stTextArea textarea{background:rgba(255,255,255,.03)!important;border:1px solid var(--border)!important;color:var(--txt)!important;}
+[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:var(--bg2)!important;border:1px solid var(--border)!important;}
+label{color:var(--txt2)!important;}
+hr{border:none!important;height:1px!important;background:var(--border)!important;}
+footer{visibility:hidden!important;}#MainMenu{visibility:hidden!important;}
+header[data-testid="stHeader"]{background:transparent!important;height:0!important;}
+[data-testid="stSidebarNav"]{display:none !important;}
+
+/* MOBILE */
 @media (max-width: 768px) {
-  .block-container{padding-left:.6rem!important;padding-right:.6rem!important;max-width:100%!important;}
+  .block-container{padding-left:.5rem!important;padding-right:.5rem!important;max-width:100%!important;}
+  .pg-title{font-size:1.3rem!important;}
+  .stTabs [data-baseweb="tab-list"]{flex-wrap:wrap!important;}
+  .stTabs [data-baseweb="tab"]{padding:5px 10px!important;font-size:.7rem!important;}
+  section[data-testid="stSidebar"][aria-expanded="true"]{min-width:88vw!important;max-width:92vw!important;}
+  section[data-testid="stSidebar"][aria-expanded="false"]{min-width:0!important;max-width:0!important;margin-left:-92vw!important;}
   [data-testid="stHorizontalBlock"]{flex-direction:column!important;}
   [data-testid="stHorizontalBlock"] > [data-testid="column"]{width:100%!important;flex:1 1 100%!important;min-width:100%!important;}
 }
-.pg-title{font-size:1.5rem;font-weight:800;letter-spacing:-.5px;
-  background:linear-gradient(135deg,#1e293b,#7C3AED);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0 0 3px}
-.pg-sub{font-size:.82rem;color:#64748b;margin:0 0 .8rem}
-.sec{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
-     color:#94a3b8;padding-bottom:5px;border-bottom:1.5px solid #f1f5f9;margin:1rem 0 .6rem}
-.stTabs [data-baseweb="tab-list"]{gap:4px;background:#f1f5f9;border-radius:10px;padding:3px;border:none!important}
-.stTabs [data-baseweb="tab"]{border-radius:8px!important;padding:6px 16px!important;font-size:.78rem!important;
-  font-weight:600!important;color:#64748b!important;border:none!important;background:transparent!important}
-.stTabs [aria-selected="true"]{background:#fff!important;color:#1e293b!important;box-shadow:0 1px 4px rgba(0,0,0,.1)!important}
 </style>
 """, unsafe_allow_html=True)
+
+# Light theme override
+if _THEME == "light":
+    st.markdown("""<style>
+:root{--bg:#f7f8fc;--bg2:#ffffff;--border:rgba(99,102,241,.18);--border-hi:rgba(99,102,241,.5);
+  --txt:#1e293b;--txt2:#64748b;--txt3:#94a3b8;}
+.stApp{background:#f7f8fc!important;background-image:
+  radial-gradient(ellipse 80% 50% at 20% -10%,rgba(124,58,237,.08) 0%,transparent 60%)!important;}
+.stTabs [data-baseweb="tab-list"]{background:#ffffff!important;}
+.stTabs [aria-selected="true"]{background:rgba(99,102,241,.12)!important;color:var(--indigo)!important;}
+.stButton>button{background:#ffffff!important;color:var(--txt)!important;}
+section[data-testid="stSidebar"]{background:rgba(255,255,255,.92)!important;}
+.stSelectbox [data-baseweb="select"]>div,.stTextInput input,.stTextArea textarea{background:#ffffff!important;color:var(--txt)!important;}
+[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:#ffffff!important;}
+</style>""", unsafe_allow_html=True)
 
 cu = auth.current_user()
 
@@ -88,31 +146,41 @@ with tab_users:
         st.info("No users found.")
     else:
         import html as _html
-        ROLE_COL = {"admin":"#7C3AED","rqs":"#0D9488","housekeeper":"#2563EB"}
-        ROLE_BG  = {"admin":"#F5F3FF","rqs":"#ECFDF5","housekeeper":"#EFF6FF"}
+        # Theme-aware colors for the iframe table
+        if _THEME == "light":
+            _t_txt="#0f172a"; _t_txt2="#64748b"; _t_th_bg="#f8fafc"; _t_th_tx="#64748b"
+            _t_card_bg="#ffffff"; _t_card_br="#e2e8f0"; _t_row_br="#f1f5f9"
+            _t_sh="0 2px 12px rgba(0,0,0,.05)"
+        else:
+            _t_txt="#e2e8f0"; _t_txt2="#94a3b8"; _t_th_bg="rgba(99,102,241,.06)"; _t_th_tx="#475569"
+            _t_card_bg="rgba(13,13,26,.9)"; _t_card_br="rgba(99,102,241,.18)"; _t_row_br="rgba(99,102,241,.08)"
+            _t_sh="0 8px 32px rgba(0,0,0,.35)"
+        ROLE_COL = {"admin":"#a78bfa","rqs":"#5eead4","housekeeper":"#93c5fd"} if _THEME=="dark" else {"admin":"#7C3AED","rqs":"#0D9488","housekeeper":"#2563EB"}
+        ROLE_BG  = {"admin":"rgba(167,139,250,.15)","rqs":"rgba(20,184,166,.15)","housekeeper":"rgba(37,99,235,.15)"} if _THEME=="dark" else {"admin":"#F5F3FF","rqs":"#ECFDF5","housekeeper":"#EFF6FF"}
         rows_html = ""
         for u in users:
             role = u.get("role","")
-            ac   = ROLE_COL.get(role,"#64748b")
-            bg   = ROLE_BG.get(role,"#f1f5f9")
+            ac   = ROLE_COL.get(role,"#94a3b8")
+            bg   = ROLE_BG.get(role,"rgba(148,163,184,.15)")
             badge= (f'<span style="background:{bg};color:{ac};border-radius:6px;'
                     f'padding:2px 10px;font-size:.71rem;font-weight:700">{role.title()}</span>')
             ll   = u.get("last_login","—") or "Never"
             if ll != "—" and ll != "Never":
                 ll = ll[:16].replace("T"," ")
             rows_html += f"""<tr>
-              <td style="padding:10px 14px;font-weight:600;color:#0f172a">{_html.escape(u.get("username",""))}</td>
-              <td style="padding:10px 14px">{badge}</td>
-              <td style="padding:10px 14px;color:#64748b;font-size:.78rem">{_html.escape(str(u.get("created_at",""))[:10])}</td>
-              <td style="padding:10px 14px;color:#64748b;font-size:.78rem">{_html.escape(ll)}</td>
+              <td style="padding:10px 14px;font-weight:600;color:{_t_txt};border-bottom:1px solid {_t_row_br}">{_html.escape(u.get("username",""))}</td>
+              <td style="padding:10px 14px;border-bottom:1px solid {_t_row_br}">{badge}</td>
+              <td style="padding:10px 14px;color:{_t_txt2};font-size:.78rem;border-bottom:1px solid {_t_row_br}">{_html.escape(str(u.get("created_at",""))[:10])}</td>
+              <td style="padding:10px 14px;color:{_t_txt2};font-size:.78rem;border-bottom:1px solid {_t_row_br}">{_html.escape(ll)}</td>
             </tr>"""
-        th_s = ("padding:9px 14px;text-align:left;font-size:.67rem;font-weight:700;"
-                "text-transform:uppercase;letter-spacing:.08em;color:#64748b;"
-                "background:#f8fafc;border-bottom:1.5px solid #e2e8f0")
+        th_s = (f"padding:9px 14px;text-align:left;font-size:.6rem;font-weight:500;font-family:'DM Mono',monospace;"
+                f"text-transform:uppercase;letter-spacing:.1em;color:{_t_th_tx};"
+                f"background:{_t_th_bg};border-bottom:1px solid {_t_card_br}")
         tbl = f"""<!DOCTYPE html><html><head>
-<style>*{{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif;}}</style>
+<style>@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap');
+*{{box-sizing:border-box;margin:0;padding:0;font-family:'DM Sans',sans-serif;}}</style>
 </head><body>
-<div style="border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 2px 12px rgba(0,0,0,.05)">
+<div style="border-radius:14px;overflow:hidden;border:1px solid {_t_card_br};background:{_t_card_bg};box-shadow:{_t_sh}">
 <table style="width:100%;border-collapse:collapse;font-size:.82rem">
   <thead><tr>
     <th style="{th_s}">Username</th><th style="{th_s}">Role</th>
