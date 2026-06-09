@@ -161,15 +161,11 @@ section[data-testid="stSidebar"]{
   background:rgba(13,13,26,.88)!important;backdrop-filter:blur(20px)!important;
   -webkit-backdrop-filter:blur(20px)!important;border-right:1px solid var(--border)!important;
   box-shadow:4px 0 40px rgba(0,0,0,.5)!important;
+  display:flex !important;   /* override any leftover login-screen hide */
 }
-/* Width only when expanded — lets Streamlit fully collapse it when closed */
-section[data-testid="stSidebar"][aria-expanded="true"]{
-  min-width:340px!important;max-width:380px!important;
-}
-/* Always keep the collapse/expand control visible & clickable */
-[data-testid="stSidebarCollapsedControl"],
-[data-testid="collapsedControl"]{
-  display:flex!important;visibility:visible!important;opacity:1!important;z-index:999999!important;
+/* Make sure the collapse/expand arrow is always available */
+[data-testid="stSidebarCollapsedControl"],[data-testid="collapsedControl"]{
+  display:flex !important;visibility:visible !important;opacity:1 !important;
 }
 section[data-testid="stSidebar"]::before{
   content:'';position:absolute;top:0;left:0;right:0;height:2px;
@@ -287,15 +283,9 @@ header[data-testid="stHeader"]{
   .stTabs [data-baseweb="tab-list"]{flex-wrap:wrap!important;gap:3px!important;}
   .stTabs [data-baseweb="tab"]{padding:5px 9px!important;font-size:.68rem!important;}
 
-  /* Sidebar nearly full width when OPEN (expanded) */
+  /* Sidebar wider on mobile when open (Streamlit handles collapse natively) */
   section[data-testid="stSidebar"][aria-expanded="true"]{
-    min-width:88vw!important;max-width:92vw!important;width:88vw!important;
-  }
-  /* When COLLAPSED, fully slide it off-screen (don't let min-width force it open) */
-  section[data-testid="stSidebar"][aria-expanded="false"]{
-    min-width:0!important;max-width:0!important;width:0!important;
-    margin-left:-92vw!important;transform:translateX(-100%)!important;
-    overflow:hidden!important;
+    min-width:85vw!important;max-width:90vw!important;
   }
 
   /* Bigger tap targets for buttons */
