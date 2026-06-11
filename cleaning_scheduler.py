@@ -492,18 +492,30 @@ button[kind="header"]{display:none !important;}
   box-shadow:0 0 32px rgba(99,102,241,.6),0 8px 30px rgba(99,102,241,.35)!important;
 }
 .stTextInput input {
-  background:rgba(255,255,255,.04)!important;
+  background:rgba(20,20,35,.9)!important;
   border:1px solid rgba(99,102,241,.2)!important;
-  border-radius:10px!important;color:#e2e8f0!important;
+  border-radius:10px!important;color:#ffffff!important;
   font-family:'DM Mono',monospace!important;font-size:.85rem!important;
   padding:12px 14px!important;
+  -webkit-text-fill-color:#ffffff!important;
 }
 .stTextInput input:focus{
   border-color:#6366f1!important;
   box-shadow:0 0 0 3px rgba(99,102,241,.18)!important;
+  -webkit-text-fill-color:#ffffff!important;
 }
-.stTextInput input::placeholder{color:#334155!important;}
-label{color:#64748b!important;font-size:.78rem!important;font-family:'DM Sans',sans-serif!important;}
+.stTextInput input::placeholder{color:#64748b!important;-webkit-text-fill-color:#64748b!important;}
+/* Stop browser autofill from forcing a white box with invisible white text */
+.stTextInput input:-webkit-autofill,
+.stTextInput input:-webkit-autofill:hover,
+.stTextInput input:-webkit-autofill:focus{
+  -webkit-text-fill-color:#ffffff!important;
+  caret-color:#ffffff!important;
+  -webkit-box-shadow:0 0 0 1000px rgba(20,20,35,.95) inset!important;
+  box-shadow:0 0 0 1000px rgba(20,20,35,.95) inset!important;
+  transition:background-color 9999s ease-in-out 0s!important;
+}
+label{color:#94a3b8!important;font-size:.78rem!important;font-family:'DM Sans',sans-serif!important;}
 footer{visibility:hidden!important;}
 </style>""", unsafe_allow_html=True)
 
