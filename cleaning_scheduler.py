@@ -34,7 +34,9 @@ st.markdown("""<style>
 # ── Theme state (light / dark) ────────────────────────────────────────────────
 if "theme" not in st.session_state:
     st.session_state["theme"] = "dark"   # default to the dark space theme
-_THEME = st.session_state["theme"]
+_THEME    = st.session_state["theme"]    # dark | light | glass-dark | glass-light
+_IS_GLASS = _THEME.startswith("glass")
+_IS_LIGHT = _THEME.endswith("light")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  CONSTANTS
@@ -377,10 +379,203 @@ section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:var
 [data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:#ffffff!important;}
 </style>""", unsafe_allow_html=True)
 
+# ── LIQUID GLASS THEMES (iOS-style frosted translucency) ─────────────────────
+# Two variants: glass-light (bright frosted) and glass-dark (smoked glass).
+if _THEME == "glass-light":
+    st.markdown("""
+<style>
+:root {
+  --bg:#eef1f7; --bg1:#e8ecf4; --bg2:rgba(255,255,255,.62); --bg3:rgba(255,255,255,.45);
+  --border:rgba(255,255,255,.75); --border-hi:rgba(94,92,230,.45);
+  --indigo:#5e5ce6; --indigo-lo:rgba(94,92,230,.10);
+  --cyan:#0a84c1; --cyan-lo:rgba(10,132,193,.10);
+  --teal:#0d9488; --amber:#c77700; --rose:#d6275d;
+  --txt:#1c1c1e; --txt2:#5b5b60; --txt3:#9a9aa2;
+  --glow-i:0 8px 32px rgba(31,38,135,.10);
+  --glow-c:0 8px 32px rgba(31,38,135,.08);
+  --glow-sm:0 2px 10px rgba(31,38,135,.06);
+}
+.stApp{
+  background:#eef1f7!important;
+  background-image:
+    radial-gradient(ellipse 90% 60% at 15% -10%,rgba(94,92,230,.14) 0%,transparent 60%),
+    radial-gradient(ellipse 70% 50% at 90% 0%,rgba(10,132,193,.10) 0%,transparent 55%),
+    radial-gradient(ellipse 60% 45% at 70% 110%,rgba(255,150,160,.10) 0%,transparent 55%)!important;
+  background-attachment:fixed!important;
+}
+.sc, .rules-box{
+  background:rgba(255,255,255,.55)!important;
+  backdrop-filter:blur(28px) saturate(180%)!important;
+  -webkit-backdrop-filter:blur(28px) saturate(180%)!important;
+  border:1px solid rgba(255,255,255,.78)!important;
+  border-radius:18px!important;
+  box-shadow:0 8px 32px rgba(31,38,135,.10), inset 0 1px 0 rgba(255,255,255,.95)!important;
+}
+.sc.hi{background:linear-gradient(135deg,rgba(94,92,230,.16),rgba(255,255,255,.5))!important;}
+.sc.ds{background:linear-gradient(135deg,rgba(13,148,136,.13),rgba(255,255,255,.5))!important;}
+.sc.dv{background:linear-gradient(135deg,rgba(199,119,0,.13),rgba(255,255,255,.5))!important;}
+.sc .n{text-shadow:none!important;color:#1c1c1e!important;}
+section[data-testid="stSidebar"]{
+  background:rgba(255,255,255,.55)!important;
+  backdrop-filter:blur(34px) saturate(180%)!important;
+  -webkit-backdrop-filter:blur(34px) saturate(180%)!important;
+  border-right:1px solid rgba(255,255,255,.7)!important;
+  box-shadow:8px 0 32px rgba(31,38,135,.07)!important;
+}
+section[data-testid="stSidebar"]::before{background:linear-gradient(90deg,#5e5ce6,#0a84c1)!important;}
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:var(--txt)!important;}
+.stTabs [data-baseweb="tab-list"]{
+  background:rgba(255,255,255,.5)!important;border:1px solid rgba(255,255,255,.75)!important;
+  backdrop-filter:blur(20px) saturate(170%)!important;-webkit-backdrop-filter:blur(20px) saturate(170%)!important;
+  border-radius:14px!important;box-shadow:0 4px 18px rgba(31,38,135,.07)!important;
+}
+.stTabs [aria-selected="true"]{
+  background:rgba(255,255,255,.92)!important;color:var(--indigo)!important;
+  box-shadow:0 2px 10px rgba(31,38,135,.12)!important;border-radius:10px!important;
+}
+.stButton>button{
+  background:rgba(255,255,255,.6)!important;color:var(--txt)!important;
+  border:1px solid rgba(255,255,255,.8)!important;border-radius:13px!important;
+  backdrop-filter:blur(16px) saturate(160%)!important;-webkit-backdrop-filter:blur(16px) saturate(160%)!important;
+  box-shadow:0 2px 12px rgba(31,38,135,.07), inset 0 1px 0 rgba(255,255,255,.95)!important;
+}
+.stButton>button:hover{background:rgba(255,255,255,.85)!important;border-color:rgba(94,92,230,.4)!important;}
+.stButton>button[kind="primary"]{
+  background:linear-gradient(135deg,rgba(94,92,230,.92),rgba(122,120,255,.88))!important;
+  border:1px solid rgba(255,255,255,.5)!important;color:#fff!important;
+  box-shadow:0 6px 22px rgba(94,92,230,.35), inset 0 1px 0 rgba(255,255,255,.45)!important;
+}
+.stTextArea textarea,.stTextInput input,
+.stSelectbox [data-baseweb="select"]>div,
+.stMultiSelect [data-baseweb="select"]>div{
+  background:rgba(255,255,255,.62)!important;color:var(--txt)!important;
+  border:1px solid rgba(255,255,255,.85)!important;border-radius:13px!important;
+  backdrop-filter:blur(14px)!important;-webkit-backdrop-filter:blur(14px)!important;
+}
+.streamlit-expanderHeader{background:rgba(255,255,255,.55)!important;border-radius:14px!important;}
+.streamlit-expanderContent{background:rgba(255,255,255,.4)!important;}
+[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{
+  background:rgba(255,255,255,.92)!important;backdrop-filter:blur(28px)!important;
+  border:1px solid rgba(255,255,255,.85)!important;border-radius:14px!important;
+}
+hr{background:rgba(28,28,30,.12)!important;}
+</style>""", unsafe_allow_html=True)
+
+elif _THEME == "glass-dark":
+    st.markdown("""
+<style>
+:root {
+  --bg:#0b0b0f; --bg1:#101016; --bg2:rgba(38,38,48,.5); --bg3:rgba(48,48,60,.4);
+  --border:rgba(255,255,255,.14); --border-hi:rgba(125,122,255,.5);
+  --indigo:#7d7aff; --indigo-lo:rgba(125,122,255,.12);
+  --cyan:#64d2ff; --cyan-lo:rgba(100,210,255,.10);
+  --teal:#2dd4bf; --amber:#ffb340; --rose:#ff6482;
+  --txt:#f2f2f7; --txt2:#aeaeb6; --txt3:#6c6c75;
+  --glow-i:0 8px 32px rgba(0,0,0,.45);
+  --glow-c:0 8px 32px rgba(0,0,0,.4);
+  --glow-sm:0 2px 12px rgba(0,0,0,.35);
+}
+.stApp{
+  background:#0b0b0f!important;
+  background-image:
+    radial-gradient(ellipse 90% 60% at 15% -10%,rgba(125,122,255,.16) 0%,transparent 60%),
+    radial-gradient(ellipse 70% 50% at 90% 0%,rgba(100,210,255,.09) 0%,transparent 55%),
+    radial-gradient(ellipse 60% 45% at 70% 110%,rgba(255,100,130,.08) 0%,transparent 55%)!important;
+  background-attachment:fixed!important;
+}
+.sc, .rules-box{
+  background:rgba(36,36,46,.45)!important;
+  backdrop-filter:blur(28px) saturate(160%)!important;
+  -webkit-backdrop-filter:blur(28px) saturate(160%)!important;
+  border:1px solid rgba(255,255,255,.14)!important;
+  border-radius:18px!important;
+  box-shadow:0 8px 32px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.10)!important;
+}
+.sc.hi{background:linear-gradient(135deg,rgba(125,122,255,.2),rgba(36,36,46,.4))!important;}
+.sc.ds{background:linear-gradient(135deg,rgba(45,212,191,.14),rgba(36,36,46,.4))!important;}
+.sc.dv{background:linear-gradient(135deg,rgba(255,179,64,.13),rgba(36,36,46,.4))!important;}
+.sc .n{color:#f2f2f7!important;text-shadow:0 0 22px rgba(125,122,255,.45)!important;}
+section[data-testid="stSidebar"]{
+  background:rgba(22,22,30,.55)!important;
+  backdrop-filter:blur(36px) saturate(160%)!important;
+  -webkit-backdrop-filter:blur(36px) saturate(160%)!important;
+  border-right:1px solid rgba(255,255,255,.12)!important;
+  box-shadow:8px 0 40px rgba(0,0,0,.5)!important;
+}
+section[data-testid="stSidebar"]::before{background:linear-gradient(90deg,#7d7aff,#64d2ff)!important;}
+.stTabs [data-baseweb="tab-list"]{
+  background:rgba(36,36,46,.45)!important;border:1px solid rgba(255,255,255,.13)!important;
+  backdrop-filter:blur(22px) saturate(150%)!important;-webkit-backdrop-filter:blur(22px) saturate(150%)!important;
+  border-radius:14px!important;
+}
+.stTabs [aria-selected="true"]{
+  background:rgba(125,122,255,.25)!important;color:#cfcdff!important;
+  box-shadow:0 0 0 1px rgba(125,122,255,.45), inset 0 1px 0 rgba(255,255,255,.16)!important;
+  border-radius:10px!important;
+}
+.stButton>button{
+  background:rgba(46,46,58,.5)!important;color:var(--txt)!important;
+  border:1px solid rgba(255,255,255,.15)!important;border-radius:13px!important;
+  backdrop-filter:blur(18px) saturate(150%)!important;-webkit-backdrop-filter:blur(18px) saturate(150%)!important;
+  box-shadow:0 2px 14px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.10)!important;
+}
+.stButton>button:hover{background:rgba(125,122,255,.18)!important;border-color:rgba(125,122,255,.45)!important;}
+.stButton>button[kind="primary"]{
+  background:linear-gradient(135deg,rgba(125,122,255,.85),rgba(100,210,255,.7))!important;
+  border:1px solid rgba(255,255,255,.3)!important;color:#fff!important;
+  box-shadow:0 6px 26px rgba(125,122,255,.4), inset 0 1px 0 rgba(255,255,255,.35)!important;
+}
+.stTextArea textarea,.stTextInput input,
+.stSelectbox [data-baseweb="select"]>div,
+.stMultiSelect [data-baseweb="select"]>div{
+  background:rgba(36,36,46,.5)!important;color:var(--txt)!important;
+  border:1px solid rgba(255,255,255,.15)!important;border-radius:13px!important;
+  backdrop-filter:blur(14px)!important;-webkit-backdrop-filter:blur(14px)!important;
+}
+.streamlit-expanderHeader{background:rgba(36,36,46,.5)!important;border-radius:14px!important;}
+.streamlit-expanderContent{background:rgba(28,28,36,.4)!important;}
+[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{
+  background:rgba(30,30,40,.92)!important;backdrop-filter:blur(30px)!important;
+  border:1px solid rgba(255,255,255,.16)!important;border-radius:14px!important;
+}
+hr{background:rgba(255,255,255,.1)!important;}
+</style>""", unsafe_allow_html=True)
+
 # ── Theme-aware constants for components.html cards ───────────────────────────
 # Cards render inside iframes, which DON'T inherit the parent page's CSS vars,
-# so we pass concrete colors based on the active theme.
-if _THEME == "light":
+# so we pass concrete colors based on the active theme. (backdrop-filter can't
+# blur the parent page from inside an iframe, so glass cards here use soft
+# translucent fills + hairline highlights that read as glass.)
+if _THEME == "glass-light":
+    _C = {
+        "card_bg":   "linear-gradient(135deg,rgba(255,255,255,.94),rgba(247,249,255,.9))",
+        "card_br":   "rgba(255,255,255,.95)",
+        "card_sh":   "0 8px 28px rgba(31,38,135,.10), inset 0 1px 0 rgba(255,255,255,.98)",
+        "txt":       "#1c1c1e",
+        "txt2":      "#5b5b60",
+        "txt3":      "#9a9aa2",
+        "row_br":    "rgba(94,92,230,.10)",
+        "th_bg":     "rgba(94,92,230,.05)",
+        "tbl_bg":    "rgba(255,255,255,.92)",
+        "foot_bg":   "rgba(94,92,230,.04)",
+    }
+    _BODY_TXT = "#1c1c1e"
+elif _THEME == "glass-dark":
+    _C = {
+        "card_bg":   "linear-gradient(135deg,rgba(40,40,52,.92),rgba(30,30,40,.94))",
+        "card_br":   "rgba(255,255,255,.16)",
+        "card_sh":   "0 8px 28px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.12)",
+        "txt":       "#f2f2f7",
+        "txt2":      "#aeaeb6",
+        "txt3":      "#6c6c75",
+        "row_br":    "rgba(255,255,255,.08)",
+        "th_bg":     "rgba(255,255,255,.04)",
+        "tbl_bg":    "rgba(32,32,42,.92)",
+        "foot_bg":   "rgba(255,255,255,.03)",
+    }
+    _BODY_TXT = "#f2f2f7"
+elif _THEME == "light":
     _C = {
         "card_bg":   "linear-gradient(135deg,#ffffff,#fbfbff)",
         "card_br":   "rgba(99,102,241,.22)",
@@ -1312,6 +1507,12 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
 # ══════════════════════════════════════════════════════════════════════════════
 #  HTML BUILDERS
 # ══════════════════════════════════════════════════════════════════════════════
+def _rgba_a(rgba: str, a) -> str:
+    """Return the same rgba color with a different alpha. Safe on any input."""
+    m = re.match(r"rgba\((\d+),\s*(\d+),\s*(\d+)", str(rgba))
+    if not m: return rgba
+    return f"rgba({m.group(1)},{m.group(2)},{m.group(3)},{a})"
+
 def group_card_html(g, idx):
     svc = g.get("service_type", SVC_FC)
     cap = MAX_DS if svc==SVC_DS else MAX_FC
@@ -1356,7 +1557,7 @@ def group_card_html(g, idx):
     if is_verify:
         svc_badge = badge("⚠ VERIFY & ASSIGN","rgba(244,63,94,.2)","#fda4af","rgba(244,63,94,.4)")
     else:
-        svc_badge = badge(svc, c["badge_bg"], c["badge_txt"], c["glow"].replace(".45",",.3)").replace("rgba","rgba").replace(",.3)",",.25)"))
+        svc_badge = badge(svc, c["badge_bg"], c["badge_txt"], _rgba_a(c["glow"], ".25"))
     overflow_badge = badge("⚠ DS Overflow","rgba(245,158,11,.15)","#fcd34d","rgba(245,158,11,.3)") if g.get("ds_overflow") else ""
     priority_badge = badge("⭐ Priority","rgba(234,179,8,.15)","#fde047","rgba(234,179,8,.3)") if g.get("priority_hk") else ""
     cross_badge    = badge("Cross-bld","rgba(168,85,247,.15)","#d8b4fe","rgba(168,85,247,.3)") if (g.get("cross_bld") and not is_verify) else ""
@@ -1422,7 +1623,7 @@ def group_card_html(g, idx):
     <div style="background:{ac};color:#fff;border-radius:6px;padding:4px 10px;
                 font-family:'Syne',sans-serif;font-weight:800;font-size:.78rem;
                 white-space:nowrap;flex-shrink:0;letter-spacing:.04em;
-                box-shadow:0 0 12px {glow},0 0 24px {glow.replace(".45",",.2)").replace(".4",",.18)")}">
+                box-shadow:0 0 12px {glow},0 0 24px {_rgba_a(glow, ".18")}">
       {pill_text}
     </div>
     <!-- Title + badges -->
@@ -1462,7 +1663,7 @@ def staff_table_html(rows, cols, cell_fns, row_bg_fn):
     for i, row in enumerate(rows):
         bg  = row_bg_fn(row)
         # Map known status backgrounds to theme-appropriate tints
-        if bg == "#f0fdf4": bg = "rgba(20,184,166,.08)" if _THEME=="dark" else "rgba(20,184,166,.07)"
+        if bg == "#f0fdf4": bg = "rgba(20,184,166,.07)" if _IS_LIGHT else "rgba(20,184,166,.08)"
         elif bg == "#fefce8": bg = "rgba(245,158,11,.06)"
         elif bg not in ("transparent","","#fff"): bg = "rgba(99,102,241,.05)"
         elif bg in ("#fff","") : bg = "transparent"
@@ -1563,10 +1764,20 @@ with st.sidebar:
     if st.button("Sign Out", key="btn_logout", use_container_width=True):
         auth.logout(); st.rerun()
 
-    # ── Theme toggle (light / dark) ────────────────────────────────────────
-    _theme_label = "☀️ Light Mode" if st.session_state["theme"] == "dark" else "🌙 Dark Mode"
-    if st.button(_theme_label, key="btn_theme", use_container_width=True):
-        st.session_state["theme"] = "light" if st.session_state["theme"] == "dark" else "dark"
+    # ── Theme picker (Space / Glass × Dark / Light) ────────────────────────
+    _THEME_OPTS = {
+        "🌌 Space — Dark":  "dark",
+        "🌤 Space — Light": "light",
+        "🫧 Glass — Dark":  "glass-dark",
+        "🤍 Glass — Light": "glass-light",
+    }
+    _rev = {v: k for k, v in _THEME_OPTS.items()}
+    _cur_label = _rev.get(st.session_state.get("theme","dark"), "🌌 Space — Dark")
+    _pick = st.selectbox("🎨 Theme", list(_THEME_OPTS.keys()),
+                         index=list(_THEME_OPTS.keys()).index(_cur_label),
+                         key="theme_picker")
+    if _THEME_OPTS[_pick] != st.session_state.get("theme"):
+        st.session_state["theme"] = _THEME_OPTS[_pick]
         st.rerun()
 
     # ── Role-based navigation ──────────────────────────────────────────────
@@ -1648,7 +1859,7 @@ with st.sidebar:
                 with c_name:
                     col2 = "inherit" if checked else "#94a3b8"
                     td   = "none"    if checked else "line-through"
-                    st.markdown(f'<div style="font-size:.8rem;color:{col2};padding:4px 0;text-decoration:{td}">{name}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:.8rem;color:{col2};padding:4px 0;text-decoration:{td}">{e(name)}</div>', unsafe_allow_html=True)
                 with c_left:
                     if bld > 1:
                         if st.button("◀", key=f"ml_{name}", use_container_width=True):
@@ -1769,10 +1980,10 @@ with col_data:
         st.caption("Late checkouts, room moves, notes auto-matched.")
 with col_cfg:
     st.markdown('<p class="sec">⚙️</p>', unsafe_allow_html=True)
-    _today_bg  = "#ffffff" if _THEME=="light" else "rgba(255,255,255,.03)"
+    _today_bg  = ("rgba(255,255,255,.7)" if _IS_GLASS else "#ffffff") if _IS_LIGHT else ("rgba(40,40,52,.5)" if _IS_GLASS else "rgba(255,255,255,.03)")
     _today_br  = "rgba(99,102,241,.18)"
-    _today_hd  = "#0f172a" if _THEME=="light" else "#e2e8f0"
-    _today_tx  = "#475569" if _THEME=="light" else "#94a3b8"
+    _today_hd  = "#0f172a" if _IS_LIGHT else "#e2e8f0"
+    _today_tx  = "#475569" if _IS_LIGHT else "#94a3b8"
     st.markdown(f'<div style="background:{_today_bg};border:1px solid {_today_br};border-radius:10px;'
                 f'padding:11px 13px;font-size:.78rem;color:{_today_tx};margin-bottom:10px">'
                 f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">Today</div>'
