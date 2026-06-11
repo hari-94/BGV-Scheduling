@@ -2264,10 +2264,10 @@ else:
             [lambda r:(f'<span style="font-weight:700;color:{_C["txt"]};font-size:.82rem">{e(r["name"])}</span>'
                        +(f'<br><span style="font-size:.68rem;color:{_C["txt3"]}">✅ Free</span>' if r["stat"]=="free" else "")),
              insp_role_tag, insp_bld_tags, insp_grp_pills, insp_complexity_tag,
-             lambda r:(f'<span style="font-size:.72rem;color:#475569;line-height:1.6">'
-                       +"<br>".join(f'<span style="color:#64748b">{e(gl)}</span> <span style="color:#0f172a;font-weight:500">{e(next((g.get("housekeeper","") for g in fg if g["label"]==gl),"—"))}</span>'
+             lambda r:(f'<span style="font-size:.72rem;line-height:1.6">'
+                       +"<br>".join(f'<span style="color:{_C["txt3"]}">{e(gl)}</span> <span style="color:{_C["txt"]};font-weight:600">{e(next((g.get("housekeeper","") for g in fg if g["label"]==gl),"—"))}</span>'
                                     for gl in r["groups"] if any(g["label"]==gl for g in fg))
-                       +"</span>" if r["groups"] else '<span style="color:#94a3b8">—</span>')],
+                       +"</span>" if r["groups"] else f'<span style="color:{_C["txt3"]}">—</span>')],
             lambda r:"#f0fdf4" if r["stat"]=="free" else "#fff")
         components.html(tbl_i, height=max(70+len(rows_insp)*52,120), scrolling=True)
         if inspectors:
