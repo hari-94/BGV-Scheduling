@@ -1100,6 +1100,10 @@ def assign_hk_building_aware(groups, present_hk, roster):
     # Movement rule: B1<->B2 ok, B1<->B3 ok, B2<->B3 blocked.
     ADJ = {1:[1,2,3], 2:[2,1], 3:[3,1]}
     def find_hk(group_blds, is_ds=False):
+        # A Full Clean group spanning BOTH B2 and B3 is structurally impossible
+        # for one housekeeper (B2<->B3 is blocked) — never assign it.
+        if not is_ds and (2 in group_blds and 3 in group_blds):
+            return "⚠️ No HK available"
         primary = min(group_blds) if group_blds else 1
         # 1) Try a housekeeper whose home building IS the group's primary building.
         for hk in list(available.get(primary,[])):
@@ -1116,6 +1120,16 @@ def assign_hk_building_aware(groups, present_hk, roster):
             for hk in list(available.get(b,[])):
                 if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
                     available[b].remove(hk); return hk
+        # 3.5) SHORTAGE fallback. When home/adjacent housekeepers are exhausted,
+        #      a housekeeper may be moved cross-building to cover a group, as long
+        #      as the GROUP itself spans only an allowed combination — B1&2 or B1&3
+        #      (or a single building), NEVER B2&3. This relaxes the per-housekeeper
+        #      home-building rule on busy days while keeping the hard B2<->B3 block.
+        group_spans_b2b3 = (2 in group_blds and 3 in group_blds)
+        if not group_spans_b2b3:
+            for b in [1,2,3]:
+                if available.get(b):
+                    return available[b].pop(0)
         # 4) Truly exhausted — leave clearly unassigned (do NOT reuse a name).
         return "⚠️ No HK available"
     # Priority HKs first
