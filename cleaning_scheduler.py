@@ -827,6 +827,8 @@ def can_add_ds(g, unit, allow_overflow=False):
     ut = sum(r["time"] for r in unit)
     cap = DS_OVER if allow_overflow else MAX_DS
     if g["time"]+ut > cap: return False
+    # Daily Service MAY span all three buildings — housekeepers wheel carts
+    # between towers. (Full Clean keeps the stricter B2<->B3 block; DS does not.)
     return True
 
 def unit_ok_fc(unit):
@@ -1086,30 +1088,33 @@ def assign_hk_building_aware(groups, present_hk, roster):
         if b in pool: pool[b].append(n)
     available = {1:list(pool[1]), 2:list(pool[2]), 3:list(pool[3])}
     assignment = {}; used = set()
-    def hk_can_take(hk_bld, group_blds):
+    def hk_can_take(hk_bld, group_blds, is_ds=False):
+        # Daily Service: housekeepers may wheel carts across all buildings,
+        # so the B2<->B3 block does NOT apply. Full Clean keeps the block.
+        if is_ds: return True
         for gb in group_blds:
             if hk_bld==2 and gb==3: return False
             if hk_bld==3 and gb==2: return False
         return True
-    # Which buildings a housekeeper from building X is allowed to cover.
+    # Which buildings a housekeeper from building X is allowed to cover (FC).
     # Movement rule: B1<->B2 ok, B1<->B3 ok, B2<->B3 blocked.
     ADJ = {1:[1,2,3], 2:[2,1], 3:[3,1]}
-    def find_hk(group_blds):
+    def find_hk(group_blds, is_ds=False):
         primary = min(group_blds) if group_blds else 1
         # 1) Try a housekeeper whose home building IS the group's primary building.
         for hk in list(available.get(primary,[])):
-            if hk_can_take(roster.get(hk,{}).get("building",0), group_blds):
+            if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
                 available[primary].remove(hk); return hk
-        # 2) Borrow from an ADJACENT allowed building before giving up.
-        #    e.g. a B2 group can borrow a B1 housekeeper (B1->B2 allowed).
-        for b in ADJ.get(primary, [1,2,3]):
+        # 2) Borrow from an ADJACENT allowed building (or any, for DS).
+        adj_order = [1,2,3] if is_ds else ADJ.get(primary, [1,2,3])
+        for b in adj_order:
             for hk in list(available.get(b,[])):
-                if hk_can_take(roster.get(hk,{}).get("building",0), group_blds):
+                if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
                     available[b].remove(hk); return hk
         # 3) Any remaining present housekeeper who can legally take the group.
         for b in [1,2,3]:
             for hk in list(available.get(b,[])):
-                if hk_can_take(roster.get(hk,{}).get("building",0), group_blds):
+                if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
                     available[b].remove(hk); return hk
         # 4) Truly exhausted — leave clearly unassigned (do NOT reuse a name).
         return "⚠️ No HK available"
@@ -1124,13 +1129,19 @@ def assign_hk_building_aware(groups, present_hk, roster):
             if phk in available.get(b,[]):
                 available[b].remove(phk); break
         assignment[g["label"]] = phk; used.add(phk)
-    # Everyone else
-    for g in groups:
+    # Everyone else — assign the most CONSTRAINED groups first so they get the
+    # scarce building-specific housekeepers. Order: Full Clean (strict building
+    # rule) → Dust n Vac → Daily Service (flexible, can take any HK).
+    def _order(g):
+        st_ = g.get("service_type","")
+        return {SVC_FC:0, SVC_DV:1, SVC_DS:2}.get(st_, 3)
+    for g in sorted(groups, key=_order):
         if g["label"] in assignment: continue
         if g.get("verify_group"):
             assignment[g["label"]] = ""; continue
         if g.get("dv_manager"): assignment[g["label"]]="Manager"; continue
-        matched = find_hk(g.get("blds",{1}))
+        is_ds = (g.get("service_type") == SVC_DS)
+        matched = find_hk(g.get("blds",{1}), is_ds)
         assignment[g["label"]] = matched
         if matched and not matched.startswith("⚠️"): used.add(matched)
     return assignment, used
@@ -1163,77 +1174,25 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     def units(grp_list):  # total rooms across a list of groups
         return sum(len(g["rooms"]) for g in grp_list)
 
-    # ── Who is available to inspect Full Clean? ──────────────────────────────
-    # Dedicated FC inspectors = present inspectors who are NOT rqs1/rqs2.
+    # ── Dedicated FC inspectors = present inspectors who are NOT rqs1/rqs2 ────
+    # These are used FIRST for Full Clean. RQS1/RQS2 only step in for FC when
+    # the dedicated inspectors can't cover everything.
     fc_inspectors = [n for n in present_insp if n not in (rqs1, rqs2)]
-    n_fc_groups   = len(fc_groups)
-    # Capacity of the dedicated FC inspectors at the normal per-inspector rate.
-    fc_capacity   = len(fc_inspectors) * per
-    # Shortage = more FC groups than the dedicated FC inspectors can cover.
-    fc_shortage   = n_fc_groups > fc_capacity
 
-    # ── RQS2: normally Daily Service, but can SHARE Full Clean on shortage ───
-    # When desperately needed, RQS2 picks up FC groups totalling up to 6 units.
-    rqs2_fc_groups = []
-    if fc_shortage and rqs2:
-        budget = 6  # max FC units RQS2 will take
-        # Prefer small, single-building FC groups so RQS2's DS load stays light.
-        for g in sorted(fc_groups, key=lambda g:(len(g["rooms"]), _primary_bld(g))):
-            if len(g["rooms"]) <= budget:
-                rqs2_fc_groups.append(g)
-                budget -= len(g["rooms"])
-            if budget <= 0: break
-
-    # Assign RQS2 to Daily Service (+ any shared FC groups it took)
-    if (ds_groups or rqs2_fc_groups) and rqs2:
-        r2_groups = ds_groups + rqs2_fc_groups
-        blds=sorted(set(b for g in r2_groups for b in g["blds"]))
-        entry={"id":len(inspectors)+1,"name":rqs2,"role":"RQS2",
-               "groups":[g["label"] for g in r2_groups],"buildings":blds}
-        for g in r2_groups: g["inspector"]=rqs2
-        inspectors.append(entry); assigned_names.add(rqs2)
-
-    # Remaining FC groups (after RQS2 shared some) go to dedicated inspectors + RQS1.
-    fc_remaining = [g for g in fc_groups if not g.get("inspector")]
-
-    # ── RQS1: prioritize Full Clean first, then Dust n Vac ───────────────────
-    # On a shortage, RQS1 takes FC groups (up to ~per rooms worth). If RQS1 ends
-    # up with 9+ FC units, he can't also do DV → Manager covers DV.
-    rqs1_fc_groups = []
-    rqs1_units = 0
-    if fc_shortage and rqs1:
-        for g in sorted(fc_remaining, key=lambda g:(_primary_bld(g), len(g["rooms"]))):
-            rqs1_fc_groups.append(g); rqs1_units += len(g["rooms"])
-            if len(rqs1_fc_groups) >= per: break
-        fc_remaining = [g for g in fc_remaining if g not in rqs1_fc_groups]
-
-    # Does RQS1 still do Dust n Vac? Only if he has < 9 FC units.
-    rqs1_does_dv = (rqs1_units < 9)
-
-    if rqs1 and (rqs1_fc_groups or (dv_groups and rqs1_does_dv)):
-        r1_groups = list(rqs1_fc_groups)
-        if dv_groups and rqs1_does_dv:
-            r1_groups += dv_groups
-        blds=sorted(set(b for g in r1_groups for b in g["blds"]))
-        role = "RQS1"
-        entry={"id":len(inspectors)+1,"name":rqs1,"role":role,
-               "groups":[g["label"] for g in r1_groups],"buildings":blds,
-               "complexity":round(_batch_complexity(rqs1_fc_groups),1) if rqs1_fc_groups else 0}
-        for g in r1_groups: g["inspector"]=rqs1
-        inspectors.append(entry); assigned_names.add(rqs1)
-
-    # If RQS1 has 9+ FC units (or isn't doing DV), Dust n Vac falls to Manager.
-    if dv_groups and not rqs1_does_dv:
-        for g in dv_groups:
-            if not g.get("inspector"): g["inspector"]="Manager"
-
-    # ── Dedicated FC inspectors handle the rest ──────────────────────────────
-    fc_sorted=sorted(fc_remaining, key=lambda g:(
+    # ── Assign dedicated FC inspectors to FC groups first ────────────────────
+    fc_sorted=sorted(fc_groups, key=lambda g:(
         _primary_bld(g),
         min(g.get("floors",{0})) if g.get("floors") else 0,
         min(r.get("num",0) for r in g["rooms"]) if g["rooms"] else 0
     ))
-    batches=[fc_sorted[i:i+per] for i in range(0,len(fc_sorted),per)]
+    # How many FC batches can the dedicated inspectors cover?
+    n_dedicated = len(fc_inspectors)
+    coverable   = n_dedicated * per   # FC groups the dedicated inspectors can take
+    dedicated_fc = fc_sorted[:coverable]
+    leftover_fc  = fc_sorted[coverable:]   # only these need RQS1/RQS2 help
+
+    batches=[dedicated_fc[i:i+per] for i in range(0,len(dedicated_fc),per)]
+    # Balance batches to reduce cross-building travel
     improved=True; max_iter=len(batches)*per*2 if batches else 0; iters=0
     while improved and iters<max_iter:
         improved=False; iters+=1
@@ -1247,10 +1206,65 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
                             batches[bi],batches[bj]=new_bi,new_bj; improved=True; break
                     if improved: break
                 if improved: break
-    remaining=[n for n in present_insp if n not in assigned_names]
+    fc_inspectors_q = list(fc_inspectors)
     for batch in batches:
         if not batch: continue
-        name=remaining.pop(0) if remaining else f"Inspector {len(inspectors)+1}"
+        name=fc_inspectors_q.pop(0) if fc_inspectors_q else f"Inspector {len(inspectors)+1}"
+        blds=sorted(set(b for g in batch for b in g["blds"]))
+        cx=_batch_complexity(batch)
+        entry={"id":len(inspectors)+1,"name":name,"role":"FC",
+               "groups":[g["label"] for g in batch],"buildings":blds,
+               "travel_warning":len(blds)>2,"heavy_warning":cx>15,"complexity":round(cx,1)}
+        for g in batch: g["inspector"]=name
+        inspectors.append(entry); assigned_names.add(name)
+
+    # ── Now decide if RQS1/RQS2 are needed for the LEFTOVER FC groups ────────
+    # If dedicated inspectors covered everything, RQS1 just does DV and RQS2
+    # just does DS (their normal roles). Only un-covered FC pulls them into FC.
+    fc_shortage = len(leftover_fc) > 0
+
+    # RQS2: normally Daily Service. On shortage, shares leftover FC (up to 6 units).
+    rqs2_fc_groups = []
+    if fc_shortage and rqs2:
+        budget = 6
+        for g in sorted(leftover_fc, key=lambda g:(len(g["rooms"]), _primary_bld(g))):
+            if len(g["rooms"]) <= budget:
+                rqs2_fc_groups.append(g); budget -= len(g["rooms"])
+            if budget <= 0: break
+        leftover_fc = [g for g in leftover_fc if g not in rqs2_fc_groups]
+
+    if (ds_groups or rqs2_fc_groups) and rqs2:
+        r2_groups = ds_groups + rqs2_fc_groups
+        blds=sorted(set(b for g in r2_groups for b in g["blds"]))
+        entry={"id":len(inspectors)+1,"name":rqs2,"role":"RQS2",
+               "groups":[g["label"] for g in r2_groups],"buildings":blds}
+        for g in r2_groups: g["inspector"]=rqs2
+        inspectors.append(entry); assigned_names.add(rqs2)
+
+    # RQS1: prioritize remaining leftover FC first, then Dust n Vac.
+    rqs1_fc_groups = []; rqs1_units = 0
+    if leftover_fc and rqs1:
+        for g in sorted(leftover_fc, key=lambda g:(_primary_bld(g), len(g["rooms"]))):
+            rqs1_fc_groups.append(g); rqs1_units += len(g["rooms"])
+            if len(rqs1_fc_groups) >= per: break
+        leftover_fc = [g for g in leftover_fc if g not in rqs1_fc_groups]
+
+    # RQS1 still does DV only if it has < 9 FC units; otherwise Manager covers DV.
+    rqs1_does_dv = (rqs1_units < 9)
+    if rqs1 and (rqs1_fc_groups or (dv_groups and rqs1_does_dv)):
+        r1_groups = list(rqs1_fc_groups)
+        if dv_groups and rqs1_does_dv: r1_groups += dv_groups
+        blds=sorted(set(b for g in r1_groups for b in g["blds"]))
+        entry={"id":len(inspectors)+1,"name":rqs1,"role":"RQS1",
+               "groups":[g["label"] for g in r1_groups],"buildings":blds,
+               "complexity":round(_batch_complexity(rqs1_fc_groups),1) if rqs1_fc_groups else 0}
+        for g in r1_groups: g["inspector"]=rqs1
+        inspectors.append(entry); assigned_names.add(rqs1)
+
+    # Any leftover FC still unassigned → extra inspector slots
+    while leftover_fc:
+        batch = leftover_fc[:per]; leftover_fc = leftover_fc[per:]
+        name = f"Inspector {len(inspectors)+1}"
         blds=sorted(set(b for g in batch for b in g["blds"]))
         cx=_batch_complexity(batch)
         entry={"id":len(inspectors)+1,"name":name,"role":"FC",
@@ -1259,7 +1273,7 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
         for g in batch: g["inspector"]=name
         inspectors.append(entry)
 
-    # Any DV group still without an inspector → Manager
+    # If RQS1 has 9+ FC units (or isn't doing DV), Dust n Vac falls to Manager.
     for g in dv_groups:
         if not g.get("inspector"): g["inspector"]="Manager"
     return inspectors
