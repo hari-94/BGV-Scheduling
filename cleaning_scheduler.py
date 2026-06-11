@@ -586,6 +586,13 @@ if not st.session_state.get("_did_initial_restore", False):
     st.session_state["_did_initial_restore"] = True
     try:
         saved = db.load_full_schedule()
+        if saved:
+            # Restore attendance rosters regardless of whether a schedule exists,
+            # so HK and inspector check-marks both survive a logout/login.
+            if saved.get("hk_roster"):
+                st.session_state["hk_roster"]   = saved["hk_roster"]
+            if saved.get("insp_roster"):
+                st.session_state["insp_roster"] = saved["insp_roster"]
         if saved and saved.get("groups_data"):
             _loaded_groups = saved.get("groups_data") or []
             # JSON serialization turns sets into lists (or strings). Restore them
@@ -604,8 +611,6 @@ if not st.session_state.get("_did_initial_restore", False):
             st.session_state["total_rooms"]     = saved.get("total_rooms", 0)
             st.session_state["inspectors_data"] = saved.get("inspectors_data", [])
             st.session_state["used_hk_set"]     = set(saved.get("used_hk_set", []))
-            if saved.get("hk_roster"):
-                st.session_state["hk_roster"]   = saved["hk_roster"]
     except Exception:
         pass
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1612,6 +1617,8 @@ with st.sidebar:
         st.caption("Check ✅ to mark present. Use ◀▶ buttons to move between buildings.")
         roster = st.session_state["hk_roster"]
         present_hk = []
+        import copy as _copy
+        _hk_before = _copy.deepcopy(roster)
         for bld in [1,2,3]:
             bld_hks = [n for n,v in roster.items() if v["building"]==bld]
             if not bld_hks: continue
@@ -1652,6 +1659,16 @@ with st.sidebar:
                             roster[name]["building"] = bld+1; st.rerun()
                 if roster[name]["present"]: present_hk.append(name)
 
+        # Persist HK attendance immediately so it survives logout/login.
+        if roster != _hk_before:
+            try:
+                _existing = db.load_full_schedule() or {}
+                _existing["hk_roster"]   = dict(roster)
+                _existing["insp_roster"] = dict(st.session_state.get("insp_roster",{}))
+                db.save_full_schedule(_existing)
+            except Exception:
+                pass
+
         st.markdown("---")
         with st.expander("➕ Add / 🗑 Remove Inspector"):
             new_insp = st.text_input("Name", key="new_insp_inp")
@@ -1666,9 +1683,20 @@ with st.sidebar:
         st.markdown("### 🔍 Inspectors")
         insp_roster = st.session_state["insp_roster"]
         present_insp = []
+        _insp_before = dict(insp_roster)
         for name in list(insp_roster.keys()):
             insp_roster[name] = st.checkbox(name, value=insp_roster[name], key=f"insp_att_{name}")
             if insp_roster[name]: present_insp.append(name)
+        # Persist attendance immediately so it survives logout/login even without
+        # regenerating the schedule.
+        if insp_roster != _insp_before:
+            try:
+                _existing = db.load_full_schedule() or {}
+                _existing["insp_roster"] = dict(insp_roster)
+                _existing["hk_roster"]   = dict(st.session_state.get("hk_roster",{}))
+                db.save_full_schedule(_existing)
+            except Exception:
+                pass
 
         st.markdown("---")
         st.markdown("### 🎯 RQS Roles Today")
@@ -1903,6 +1931,7 @@ if run:
                             "inspectors_data": inspectors,
                             "used_hk_set": list(used_hk_set),
                             "hk_roster": dict(st.session_state.get("hk_roster",{})),
+                            "insp_roster": dict(st.session_state.get("insp_roster",{})),
                             "generated_by": st.session_state.get("username","unknown"),
                         })
                     except Exception:
