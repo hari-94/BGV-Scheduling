@@ -114,6 +114,56 @@ section[data-testid="stSidebar"]{background:rgba(255,255,255,.92)!important;}
 .stSelectbox [data-baseweb="select"]>div,.stTextInput input,.stTextArea textarea{background:#ffffff!important;color:var(--txt)!important;}
 [data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:#ffffff!important;}
 </style>""", unsafe_allow_html=True)
+elif _THEME == "glass-light":
+    st.markdown("""<style>
+:root{--bg:#eef1f7;--bg2:rgba(255,255,255,.62);--border:rgba(255,255,255,.75);--border-hi:rgba(94,92,230,.45);
+  --indigo:#5e5ce6;--cyan:#0a84c1;--txt:#1c1c1e;--txt2:#5b5b60;--txt3:#9a9aa2;}
+.stApp{background:#eef1f7!important;background-image:
+  radial-gradient(ellipse 90% 60% at 15% -10%,rgba(94,92,230,.14) 0%,transparent 60%),
+  radial-gradient(ellipse 70% 50% at 90% 0%,rgba(10,132,193,.10) 0%,transparent 55%)!important;
+  background-attachment:fixed!important;}
+.kpi{background:rgba(255,255,255,.55)!important;backdrop-filter:blur(26px) saturate(180%)!important;
+  -webkit-backdrop-filter:blur(26px) saturate(180%)!important;border:1px solid rgba(255,255,255,.78)!important;
+  border-radius:18px!important;box-shadow:0 8px 28px rgba(31,38,135,.10), inset 0 1px 0 rgba(255,255,255,.95)!important;}
+.kpi .val{color:#1c1c1e!important;text-shadow:none!important;}
+.stTabs [data-baseweb="tab-list"]{background:rgba(255,255,255,.5)!important;border:1px solid rgba(255,255,255,.75)!important;
+  backdrop-filter:blur(20px) saturate(170%)!important;-webkit-backdrop-filter:blur(20px) saturate(170%)!important;border-radius:14px!important;}
+.stTabs [aria-selected="true"]{background:rgba(255,255,255,.92)!important;color:#5e5ce6!important;
+  box-shadow:0 2px 10px rgba(31,38,135,.12)!important;border-radius:10px!important;}
+.stButton>button{background:rgba(255,255,255,.6)!important;color:var(--txt)!important;border:1px solid rgba(255,255,255,.8)!important;
+  border-radius:13px!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;}
+section[data-testid="stSidebar"]{background:rgba(255,255,255,.55)!important;backdrop-filter:blur(34px) saturate(180%)!important;
+  -webkit-backdrop-filter:blur(34px) saturate(180%)!important;border-right:1px solid rgba(255,255,255,.7)!important;}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] *{color:var(--txt)!important;}
+.stSelectbox [data-baseweb="select"]>div,.stDateInput input,.stTextInput input,.stTextArea textarea{
+  background:rgba(255,255,255,.62)!important;color:var(--txt)!important;border:1px solid rgba(255,255,255,.85)!important;border-radius:13px!important;}
+[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:rgba(255,255,255,.92)!important;backdrop-filter:blur(28px)!important;border-radius:14px!important;}
+</style>""", unsafe_allow_html=True)
+
+elif _THEME == "glass-dark":
+    st.markdown("""<style>
+:root{--bg:#0b0b0f;--bg2:rgba(38,38,48,.5);--border:rgba(255,255,255,.14);--border-hi:rgba(125,122,255,.5);
+  --indigo:#7d7aff;--cyan:#64d2ff;--txt:#f2f2f7;--txt2:#aeaeb6;--txt3:#6c6c75;}
+.stApp{background:#0b0b0f!important;background-image:
+  radial-gradient(ellipse 90% 60% at 15% -10%,rgba(125,122,255,.16) 0%,transparent 60%),
+  radial-gradient(ellipse 70% 50% at 90% 0%,rgba(100,210,255,.09) 0%,transparent 55%)!important;
+  background-attachment:fixed!important;}
+.kpi{background:rgba(36,36,46,.45)!important;backdrop-filter:blur(26px) saturate(160%)!important;
+  -webkit-backdrop-filter:blur(26px) saturate(160%)!important;border:1px solid rgba(255,255,255,.14)!important;
+  border-radius:18px!important;box-shadow:0 8px 28px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.10)!important;}
+.kpi .val{color:#f2f2f7!important;text-shadow:0 0 20px rgba(125,122,255,.4)!important;}
+.stTabs [data-baseweb="tab-list"]{background:rgba(36,36,46,.45)!important;border:1px solid rgba(255,255,255,.13)!important;
+  backdrop-filter:blur(22px) saturate(150%)!important;-webkit-backdrop-filter:blur(22px) saturate(150%)!important;border-radius:14px!important;}
+.stTabs [aria-selected="true"]{background:rgba(125,122,255,.25)!important;color:#cfcdff!important;
+  box-shadow:0 0 0 1px rgba(125,122,255,.45)!important;border-radius:10px!important;}
+.stButton>button{background:rgba(46,46,58,.5)!important;color:var(--txt)!important;border:1px solid rgba(255,255,255,.15)!important;
+  border-radius:13px!important;backdrop-filter:blur(18px)!important;-webkit-backdrop-filter:blur(18px)!important;}
+section[data-testid="stSidebar"]{background:rgba(22,22,30,.55)!important;backdrop-filter:blur(36px) saturate(160%)!important;
+  -webkit-backdrop-filter:blur(36px) saturate(160%)!important;border-right:1px solid rgba(255,255,255,.12)!important;}
+.stSelectbox [data-baseweb="select"]>div,.stDateInput input,.stTextInput input,.stTextArea textarea{
+  background:rgba(36,36,46,.5)!important;color:var(--txt)!important;border:1px solid rgba(255,255,255,.15)!important;border-radius:13px!important;}
+[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:rgba(30,30,40,.92)!important;backdrop-filter:blur(30px)!important;border-radius:14px!important;}
+</style>""", unsafe_allow_html=True)
 
 cu = auth.current_user()
 
@@ -147,7 +197,7 @@ with tab_users:
     else:
         import html as _html
         # Theme-aware colors for the iframe table
-        if _THEME == "light":
+        if _THEME.endswith("light"):
             _t_txt="#0f172a"; _t_txt2="#64748b"; _t_th_bg="#f8fafc"; _t_th_tx="#64748b"
             _t_card_bg="#ffffff"; _t_card_br="#e2e8f0"; _t_row_br="#f1f5f9"
             _t_sh="0 2px 12px rgba(0,0,0,.05)"
@@ -155,8 +205,8 @@ with tab_users:
             _t_txt="#e2e8f0"; _t_txt2="#94a3b8"; _t_th_bg="rgba(99,102,241,.06)"; _t_th_tx="#475569"
             _t_card_bg="rgba(13,13,26,.9)"; _t_card_br="rgba(99,102,241,.18)"; _t_row_br="rgba(99,102,241,.08)"
             _t_sh="0 8px 32px rgba(0,0,0,.35)"
-        ROLE_COL = {"admin":"#a78bfa","rqs":"#5eead4","housekeeper":"#93c5fd"} if _THEME=="dark" else {"admin":"#7C3AED","rqs":"#0D9488","housekeeper":"#2563EB"}
-        ROLE_BG  = {"admin":"rgba(167,139,250,.15)","rqs":"rgba(20,184,166,.15)","housekeeper":"rgba(37,99,235,.15)"} if _THEME=="dark" else {"admin":"#F5F3FF","rqs":"#ECFDF5","housekeeper":"#EFF6FF"}
+        ROLE_COL = {"admin":"#a78bfa","rqs":"#5eead4","housekeeper":"#93c5fd"} if not _THEME.endswith("light") else {"admin":"#7C3AED","rqs":"#0D9488","housekeeper":"#2563EB"}
+        ROLE_BG  = {"admin":"rgba(167,139,250,.15)","rqs":"rgba(20,184,166,.15)","housekeeper":"rgba(37,99,235,.15)"} if not _THEME.endswith("light") else {"admin":"#F5F3FF","rqs":"#ECFDF5","housekeeper":"#EFF6FF"}
         rows_html = ""
         for u in users:
             role = u.get("role","")
