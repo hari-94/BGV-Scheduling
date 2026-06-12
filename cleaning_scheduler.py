@@ -299,10 +299,13 @@ header[data-testid="stHeader"]{
   .streamlit-expanderHeader{font-size:.82rem!important;padding:10px!important;}
 }
 
-/* ── BIG layout columns stack on mobile (input areas, filter bars) ── */
+/* ── BIG layout columns: phone-first behavior ── */
 @media(max-width:768px){
-  /* Stack any column block that contains a text area or text input
-     (the room-data/email input row and add-staff expanders) */
+  /* Default: every multi-column row may wrap instead of squishing */
+  [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:6px!important;}
+  [data-testid="stHorizontalBlock"]>[data-testid="column"]{min-width:0!important;}
+
+  /* Input areas (room data / front-desk email / add-staff) stack FULL width */
   [data-testid="stHorizontalBlock"]:has(.stTextArea),
   [data-testid="stHorizontalBlock"]:has(.stTextInput){
     flex-direction:column!important;
@@ -311,15 +314,39 @@ header[data-testid="stHeader"]{
   [data-testid="stHorizontalBlock"]:has(.stTextInput)>[data-testid="column"]{
     width:100%!important;min-width:100%!important;flex:1 1 100%!important;
   }
-  /* Stack filter selectbox rows (Live tab + Groups tab filters) */
-  [data-testid="stHorizontalBlock"]:has(.stSelectbox)>[data-testid="column"]{
-    min-width:48%!important;
+
+  /* Filter bars (Groups tab, Live tab): selectbox / multiselect / checkbox
+     columns flow as a 2-up grid instead of 5 squeezed slivers */
+  [data-testid="stHorizontalBlock"]:has(.stSelectbox)>[data-testid="column"],
+  [data-testid="stHorizontalBlock"]:has(.stMultiSelect)>[data-testid="column"],
+  [data-testid="stHorizontalBlock"]:has(.stCheckbox)>[data-testid="column"]{
+    flex:1 1 47%!important;min-width:47%!important;width:auto!important;
   }
-  /* Button-only rows (status actions) STAY horizontal — they have no
-     text area / text input / selectbox, just buttons. Keep them tight. */
-  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextArea)):not(:has(.stTextInput)):not(:has(.stSelectbox)){
+
+  /* Button-only rows (status actions) STAY horizontal & equal width —
+     thumb-friendly action bars under each room */
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextArea)):not(:has(.stTextInput)):not(:has(.stSelectbox)):not(:has(.stCheckbox)){
     flex-direction:row!important;flex-wrap:nowrap!important;gap:4px!important;
   }
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextArea)):not(:has(.stTextInput)):not(:has(.stSelectbox)):not(:has(.stCheckbox))>[data-testid="column"]{
+    flex:1 1 0!important;min-width:0!important;
+  }
+
+  /* Sticky tab bar — keep Housekeepers/Inspectors/Groups/Live reachable
+     while scrolling long schedules */
+  .stTabs [data-baseweb="tab-list"]{
+    position:sticky!important;top:0!important;z-index:99!important;
+    backdrop-filter:blur(18px)!important;-webkit-backdrop-filter:blur(18px)!important;
+  }
+
+  /* Group / staff / inspector cards (iframes) hug the screen edge */
+  iframe{width:100%!important;}
+
+  /* Expander internals breathe less */
+  .streamlit-expanderContent{padding:8px 6px!important;}
+
+  /* Download + Generate buttons: full-width thumb targets */
+  .stDownloadButton>button{width:100%!important;min-height:46px!important;}
 }
 
 /* ── Narrow phones ── */
@@ -327,6 +354,16 @@ header[data-testid="stHeader"]{
   .pg-title{font-size:1.1rem!important;}
   .sc .n{font-size:1.05rem!important;}
   .sc{padding:8px 5px!important;}
+  /* 4 stat cards per two rows is still a lot — drop label tracking further */
+  .sc .l{font-size:.46rem!important;}
+  /* Tab pills shrink to fit all 4 on one line */
+  .stTabs [data-baseweb="tab"]{padding:4px 7px!important;font-size:.64rem!important;}
+  /* Status action buttons: compact but still ≥40px tall */
+  .stButton>button{min-height:40px!important;padding:6px 4px!important;font-size:.72rem!important;}
+  /* Section headers tighter */
+  .sec{font-size:.55rem!important;margin:.8rem 0 .4rem!important;}
+  /* Hide the vertical gap Streamlit adds between stacked widgets */
+  [data-testid="stVerticalBlock"]{gap:.45rem!important;}
 }
 </style>""", unsafe_allow_html=True)
 
@@ -649,6 +686,9 @@ table{min-width:0;width:100%;border-collapse:collapse;}
 @media(max-width:600px){
   table{font-size:.72rem!important;}
   th,td{padding:5px 7px!important;}
+  /* Hide low-value columns on phones — Bld + Service already shown in the
+     card header, so the table keeps Room/Guest/Time/Pet/LateOut */
+  .m-hide{display:none!important;}
 }
 </style>"""
 
@@ -1622,9 +1662,9 @@ def group_card_html(g, idx):
         delay = f"{i*0.04:.2f}s"
         rows += f"""<tr style="background:{row_bg};border-bottom:1px solid {_C["row_br"]};animation:rowIn .3s {delay} both">
           <td style="font-family:'DM Mono',monospace;font-size:.76rem;font-weight:500;color:{ac};padding:8px 10px;white-space:nowrap">{e(r.get("room",""))}</td>
-          <td style="padding:8px 10px;color:#64748b;font-size:.75rem">B{r.get("bld","")}</td>
+          <td class="m-hide" style="padding:8px 10px;color:#64748b;font-size:.75rem">B{r.get("bld","")}</td>
           <td style="padding:8px 10px;color:{_C["txt"]};font-size:.78rem;font-weight:500;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{e(r.get("guest",""))}</td>
-          <td style="padding:8px 10px;color:{_C["txt2"]};font-size:.73rem">{e(r.get("service",""))}</td>
+          <td class="m-hide" style="padding:8px 10px;color:{_C["txt2"]};font-size:.73rem">{e(r.get("service",""))}</td>
           <td style="padding:8px 10px;font-family:'DM Mono',monospace;font-weight:500;color:{_C["txt"]};font-size:.76rem">{"—" if r.get("time",0)==0 else str(r.get("time",""))+"m"}</td>
           <td style="padding:8px 10px">{pet_badge}</td>
           <td style="padding:8px 10px">{late_badge2}</td>
@@ -1687,8 +1727,8 @@ def group_card_html(g, idx):
   <!-- Room table -->
   <table>
     <thead><tr>
-      <th style="{th}">Room</th><th style="{th}">Bld</th><th style="{th}">Guest</th>
-      <th style="{th}">Service</th><th style="{th}">Time</th>
+      <th style="{th}">Room</th><th class="m-hide" style="{th}">Bld</th><th style="{th}">Guest</th>
+      <th class="m-hide" style="{th}">Service</th><th style="{th}">Time</th>
       <th style="{th}">Pet</th><th style="{th}">Late Out</th>
     </tr></thead>
     <tbody>{rows}</tbody>
