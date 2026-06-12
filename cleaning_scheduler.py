@@ -604,6 +604,35 @@ else:
     }
     _BODY_TXT = "#e2e8f0"
 
+# ── Micro-interactions: animated buttons & status transitions (all themes) ───
+st.markdown("""
+<style>
+.stButton>button{
+  transition:transform .12s cubic-bezier(.34,1.56,.64,1), box-shadow .25s ease,
+             background .2s ease, border-color .2s ease, color .2s ease!important;
+  will-change:transform;
+}
+.stButton>button:hover{transform:translateY(-1px);}
+.stButton>button:active{
+  transform:scale(.93)!important;
+  box-shadow:0 0 0 5px rgba(99,102,241,.18)!important;
+}
+@keyframes statusPop{
+  0%{transform:scale(.55);opacity:0}
+  60%{transform:scale(1.1)}
+  100%{transform:scale(1);opacity:1}
+}
+@keyframes pulseDot{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.4;transform:scale(.8)}
+}
+@keyframes ringPulse{
+  0%{box-shadow:0 0 0 0 rgba(34,211,238,.45)}
+  70%{box-shadow:0 0 0 7px rgba(34,211,238,0)}
+  100%{box-shadow:0 0 0 0 rgba(34,211,238,0)}
+}
+</style>""", unsafe_allow_html=True)
+
 SHARED_CSS = """<style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -1030,8 +1059,12 @@ def can_add_fc(g, unit):
     if 2 in new_blds and 3 in new_blds: return False
     u140 = sum(1 for r in unit if r["time"]==140)
     u120 = sum(1 for r in unit if r["time"]==120)
-    if g["c140"]+u140 > 1: return False
-    if g["c140"]>=1 and g["c120"]>=1 and sum(1 for r in unit if r["time"]!=70)>0: return False
+    new_c140 = g["c140"] + u140
+    new_c120 = g["c120"] + u120
+    if new_c140 > 1: return False
+    # A group may not hold a 140 together with MORE THAN ONE 120.
+    # 120+140+70 ✓ · 120+120+120 ✓ · 120+120+140 ✗
+    if new_c140 >= 1 and new_c120 > 1: return False
     return True
 
 def can_add_ds(g, unit, allow_overflow=False):
@@ -1049,7 +1082,12 @@ def unit_ok_fc(unit):
     for i in range(len(ba)):
         for j in range(i+1,len(ba)):
             if (ba[i]==2 and ba[j]==3) or (ba[i]==3 and ba[j]==2): return False
-    return sum(1 for r in unit if r["time"]==140) <= 1
+    n140 = sum(1 for r in unit if r["time"]==140)
+    n120 = sum(1 for r in unit if r["time"]==120)
+    if n140 > 1: return False
+    # Same rule as can_add_fc: a 140 may coexist with at most ONE 120.
+    if n140 >= 1 and n120 > 1: return False
+    return True
 
 def mk(unit, svc):
     return {"rooms":list(unit),"time":sum(r["time"] for r in unit),
@@ -2202,6 +2240,11 @@ if _is_hk:
     _TZ  = zoneinfo.ZoneInfo("America/Denver")
     _NOW = lambda: datetime.now(_TZ).isoformat()
 
+    _tmsg_hk = st.session_state.pop("_live_toast", None)
+    if _tmsg_hk:
+        try: st.toast(_tmsg_hk)
+        except Exception: pass
+
     STATUS_META_HK = {
         "pending":          {"icon":"⬜","label":"Pending",       "color":"#475569","bg":"rgba(71,85,105,.2)","border":"rgba(71,85,105,.35)"},
         "already_clean":    {"icon":"✨","label":"Already Clean", "color":"#34d399","bg":"rgba(52,211,153,.12)","border":"rgba(52,211,153,.35)"},
@@ -2357,7 +2400,15 @@ if _is_hk:
                              if r.get("late_checkout") else "")
                 guest_disp = r.get("guest","")[:22]
 
-                # ── Info line: room + guest + status badge (one HTML block) ──
+                # ── Info line: room + guest + animated status badge ──
+                _hk_active = (cur == "cleaning_started")
+                _hk_dot = (f'<span style="display:inline-block;width:6px;height:6px;'
+                           f'border-radius:50%;background:{sm["color"]};margin-right:5px;'
+                           f'vertical-align:middle;'
+                           + ('animation:pulseDot 1.1s ease-in-out infinite;' if _hk_active else '')
+                           + '"></span>')
+                _hk_ring = 'animation:statusPop .35s cubic-bezier(.34,1.56,.64,1) both' \
+                           + (',ringPulse 2s ease-out infinite' if _hk_active else '')
                 st.markdown(
                     f'<div style="display:flex;align-items:center;justify-content:space-between;'
                     f'gap:8px;flex-wrap:wrap;padding:8px 10px;background:rgba(255,255,255,.02);'
@@ -2371,8 +2422,8 @@ if _is_hk:
                     f'  </div>'
                     f'  <div style="background:{sm["bg"]};border:1px solid {sm["border"]};'
                     f'border-radius:6px;padding:3px 9px;font-size:.7rem;font-weight:600;'
-                    f'color:{sm["color"]};white-space:nowrap;flex-shrink:0">'
-                    f'{sm["icon"]} {sm["label"]}</div>'
+                    f'color:{sm["color"]};white-space:nowrap;flex-shrink:0;{_hk_ring}">'
+                    f'{_hk_dot}{sm["icon"]} {sm["label"]}</div>'
                     f'</div>', unsafe_allow_html=True)
 
                 # ── Action buttons row — compact, equal width, stays horizontal ──
@@ -2381,6 +2432,7 @@ if _is_hk:
                     if cur == "pending":
                         if st.button("✨ Clean", key=f"hk_ac_{rm}", use_container_width=True):
                             _save_status_hk(rm, {"status":"already_clean","marked_clean_at":_NOW()})
+                            st.session_state["_live_toast"] = f"✨ {rm} marked Already Clean"
                             st.rerun()
                     elif cur == "already_clean":
                         if st.button("↩ Undo", key=f"hk_uac_{rm}", use_container_width=True):
@@ -2390,10 +2442,12 @@ if _is_hk:
                     if cur == "pending":
                         if st.button("🧹 Start", key=f"hk_s_{rm}", use_container_width=True):
                             _save_status_hk(rm, {"status":"cleaning_started","started_at":_NOW()})
+                            st.session_state["_live_toast"] = f"🧹 {rm} — cleaning started"
                             st.rerun()
                     elif cur == "cleaning_started":
                         if st.button("✅ Done", key=f"hk_d_{rm}", use_container_width=True):
                             _save_status_hk(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
+                            st.session_state["_live_toast"] = f"✅ {rm} — done, awaiting inspection"
                             st.rerun()
                 with b3:
                     if cur not in ("pending",):
@@ -2578,6 +2632,10 @@ else:
     #  LIVE TAB — Real-time cleaning & inspection tracking
     # ══════════════════════════════════════════════════════════════════════════════
     with tab_live:
+        _tmsg = st.session_state.pop("_live_toast", None)
+        if _tmsg:
+            try: st.toast(_tmsg)
+            except Exception: pass
         from datetime import datetime
         import json as _json, zoneinfo as _zi
 
@@ -2887,7 +2945,15 @@ else:
                             guest_disp = r.get("guest","")
                             if len(guest_disp) > 22: guest_disp = guest_disp[:21]+"…"
 
-                            # ── Info line: room + guest + status (single HTML block) ──
+                            # ── Info line: room + guest + animated status pill ──
+                            _is_active = (cur_status == "cleaning_started")
+                            _dot = (f'<span style="display:inline-block;width:6px;height:6px;'
+                                    f'border-radius:50%;background:{sm["color"]};margin-right:5px;'
+                                    f'vertical-align:middle;'
+                                    + ('animation:pulseDot 1.1s ease-in-out infinite;' if _is_active else '')
+                                    + '"></span>')
+                            _ring = 'animation:statusPop .35s cubic-bezier(.34,1.56,.64,1) both' \
+                                    + (',ringPulse 2s ease-out infinite' if _is_active else '')
                             st.markdown(
                                 f'<div style="display:flex;align-items:center;justify-content:space-between;'
                                 f'gap:8px;flex-wrap:wrap;padding:7px 10px;background:rgba(255,255,255,.02);'
@@ -2901,8 +2967,8 @@ else:
                                 f'  </div>'
                                 f'  <div style="background:{sm["bg"]};border:1px solid {sm["border"]};'
                                 f'border-radius:6px;padding:3px 9px;font-size:.68rem;font-weight:600;'
-                                f'color:{sm["color"]};white-space:nowrap;flex-shrink:0">'
-                                f'{sm["icon"]} {sm["label"]}</div>'
+                                f'color:{sm["color"]};white-space:nowrap;flex-shrink:0;{_ring}">'
+                                f'{_dot}{sm["icon"]} {sm["label"]}</div>'
                                 f'</div>', unsafe_allow_html=True)
 
                             # ── Action button row — 4 equal columns, stays horizontal ──
@@ -2911,24 +2977,29 @@ else:
                                 if cur_status == "pending":
                                     if st.button("✨ Clean", key=f"ac_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"already_clean","marked_clean_at":_NOW()})
+                                        st.session_state["_live_toast"] = f"✨ {rm} marked Already Clean"
                                         st.rerun()
                                 elif cur_status == "already_clean":
                                     if st.button("↩ Undo", key=f"undo_ac_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"pending","marked_clean_at":None})
+                                        st.session_state["_live_toast"] = f"↩ {rm} back to Pending"
                                         st.rerun()
                             with bc2:
                                 if cur_status == "pending":
                                     if st.button("🧹 Start", key=f"start_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"cleaning_started","started_at":_NOW()})
+                                        st.session_state["_live_toast"] = f"🧹 {rm} — cleaning started"
                                         st.rerun()
                                 elif cur_status == "cleaning_started":
                                     if st.button("✅ Done", key=f"done_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
+                                        st.session_state["_live_toast"] = f"✅ {rm} — cleaning done, awaiting inspection"
                                         st.rerun()
                             with bc3:
                                 if cur_status == "cleaning_done":
                                     if st.button("🔍 Inspect", key=f"insp_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"inspected","inspected_at":_NOW()})
+                                        st.session_state["_live_toast"] = f"🔍 {rm} inspected ✓"
                                         st.rerun()
                                 elif cur_status == "inspected":
                                     st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.64rem;color:#a78bfa;padding:8px 0;text-align:center">✓ {ts_insp}</div>', unsafe_allow_html=True)
