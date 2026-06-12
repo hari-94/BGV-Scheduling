@@ -1419,11 +1419,20 @@ def _insp_travel_score(batch):
         blds |= g["blds"]
         if len(g["blds"])>1: cross += len(g["blds"])-1
     return len(blds)*10+cross
+def _batch_heavy(batch):
+    """Count of big rooms (120/140 min) across a batch — used to spread the
+    hard-to-inspect rooms evenly across inspectors."""
+    return sum(1 for g in batch for r in g.get("rooms",[]) if r.get("time",70) >= 120)
 def _insp_combined_score(batches):
     tt = sum(_insp_travel_score(b) for b in batches)
-    cx = [_batch_complexity(b) for b in batches if b]
-    if len(cx)<2: return tt
-    return tt*3 + (max(cx)-min(cx))
+    nonempty = [b for b in batches if b]
+    if len(nonempty) < 2: return tt
+    cx = [_batch_complexity(b) for b in nonempty]
+    hv = [_batch_heavy(b)      for b in nonempty]
+    # Heavy-room fairness is the dominant balance term: no inspector should be
+    # stuck with all the 120/140 rooms while another gets only 70s. Travel
+    # still matters, complexity spread breaks ties.
+    return tt*2 + (max(hv)-min(hv))*8 + (max(cx)-min(cx))
 
 def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     # Verify groups (stayover / P-U Models) never get an inspector.
