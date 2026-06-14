@@ -163,8 +163,25 @@ section[data-testid="stSidebar"]{
   background:rgba(13,13,26,.88)!important;backdrop-filter:blur(20px)!important;
   -webkit-backdrop-filter:blur(20px)!important;border-right:1px solid var(--border)!important;
   box-shadow:4px 0 40px rgba(0,0,0,.5)!important;
+}
+/* Width only while EXPANDED — when collapsed, aria-expanded flips to "false"
+   and this rule stops applying, letting Streamlit fully hide the panel.
+   (Same pattern as the Dashboard page, which collapses correctly.) */
+section[data-testid="stSidebar"][aria-expanded="true"]{
   min-width:340px!important;max-width:380px!important;
 }
+/* When COLLAPSED, the element still exists at zero width — without this, its
+   40px glow shadow, border and backdrop blur stay visible as a strip down the
+   left edge ("partially hidden" sidebar). Kill every visual effect. */
+section[data-testid="stSidebar"][aria-expanded="false"]{
+  box-shadow:none!important;
+  border-right:none!important;
+  backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;
+  background:transparent!important;
+  overflow:hidden!important;
+}
+section[data-testid="stSidebar"][aria-expanded="false"]::before{display:none!important;}
 section[data-testid="stSidebar"]::before{
   content:'';position:absolute;top:0;left:0;right:0;height:2px;
   background:linear-gradient(90deg,var(--indigo),var(--cyan));z-index:10;
@@ -281,9 +298,13 @@ header[data-testid="stHeader"]{
   .stTabs [data-baseweb="tab-list"]{flex-wrap:wrap!important;gap:3px!important;}
   .stTabs [data-baseweb="tab"]{padding:5px 9px!important;font-size:.68rem!important;}
 
-  /* Sidebar wider on mobile */
-  section[data-testid="stSidebar"]{
+  /* Sidebar wider on mobile when open; fully off-screen when collapsed
+     (identical to the Dashboard page, which collapses correctly) */
+  section[data-testid="stSidebar"][aria-expanded="true"]{
     min-width:85vw!important;max-width:90vw!important;
+  }
+  section[data-testid="stSidebar"][aria-expanded="false"]{
+    min-width:0!important;max-width:0!important;margin-left:-92vw!important;
   }
 
   /* Bigger tap targets for buttons */
@@ -1454,11 +1475,27 @@ def _primary_bld(g): return min(g["blds"]) if g["blds"] else 0
 def _group_complexity(g): return sum(r.get("time",70)/70 for r in g.get("rooms",[]))
 def _batch_complexity(batch): return sum(_group_complexity(g) for g in batch)
 def _insp_travel_score(batch):
+    # Travel cost = buildings visited + floors visited within those buildings,
+    # plus the vertical spread (how many floors apart the highest and lowest
+    # rooms are). Keeping an inspector on one floor — or a tight floor band —
+    # scores lowest.
     blds=set(); cross=0
+    floor_keys=set()      # distinct (building, floor) stops
+    floors_by_bld={}
     for g in batch:
         blds |= g["blds"]
         if len(g["blds"])>1: cross += len(g["blds"])-1
-    return len(blds)*10+cross
+        for b in g["blds"]:
+            for f in (g.get("floors") or {0}):
+                floor_keys.add((b,f))
+                floors_by_bld.setdefault(b,set()).add(f)
+    # Vertical spread within each building (max floor - min floor)
+    spread=0
+    for b,fs in floors_by_bld.items():
+        if fs: spread += (max(fs)-min(fs))
+    # Weights: building hops are most expensive, then number of distinct
+    # floor-stops, then how far apart those floors are.
+    return len(blds)*12 + cross*4 + len(floor_keys)*3 + spread*2
 def _batch_heavy(batch):
     """Count of big rooms (120/140 min) across a batch — used to spread the
     hard-to-inspect rooms evenly across inspectors."""
@@ -1471,7 +1508,7 @@ def _insp_combined_score(batches):
     hv = [_batch_heavy(b)      for b in nonempty]
     # Heavy-room fairness is the dominant balance term: no inspector should be
     # stuck with all the 120/140 rooms while another gets only 70s. Travel
-    # still matters, complexity spread breaks ties.
+    # (now building + floor aware) still matters, complexity spread breaks ties.
     return tt*2 + (max(hv)-min(hv))*8 + (max(cx)-min(cx))
 
 def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
