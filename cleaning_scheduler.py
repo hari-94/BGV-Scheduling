@@ -2418,7 +2418,7 @@ if _is_hk:
 </div>""", unsafe_allow_html=True)
     else:
         # Render each group
-        for g in my_groups:
+        for _hgidx, g in enumerate(my_groups):
             g_label = g.get("label","")
             insp_name = g.get("inspector","—")
             g_rooms = g["rooms"]
@@ -2516,28 +2516,28 @@ if _is_hk:
                 b1,b2,b3 = st.columns(3)
                 with b1:
                     if cur == "pending":
-                        if st.button("✨ Clean", key=f"hk_ac_{rm}", use_container_width=True):
+                        if st.button("✨ Clean", key=f"hk_ac_{_hgidx}_{rm}", use_container_width=True):
                             _save_status_hk(rm, {"status":"already_clean","marked_clean_at":_NOW()})
                             st.session_state["_live_toast"] = f"✨ {rm} marked Already Clean"
                             st.rerun()
                     elif cur == "already_clean":
-                        if st.button("↩ Undo", key=f"hk_uac_{rm}", use_container_width=True):
+                        if st.button("↩ Undo", key=f"hk_uac_{_hgidx}_{rm}", use_container_width=True):
                             _save_status_hk(rm, {"status":"pending"})
                             st.rerun()
                 with b2:
                     if cur == "pending":
-                        if st.button("🧹 Start", key=f"hk_s_{rm}", use_container_width=True):
+                        if st.button("🧹 Start", key=f"hk_s_{_hgidx}_{rm}", use_container_width=True):
                             _save_status_hk(rm, {"status":"cleaning_started","started_at":_NOW()})
                             st.session_state["_live_toast"] = f"🧹 {rm} — cleaning started"
                             st.rerun()
                     elif cur == "cleaning_started":
-                        if st.button("✅ Done", key=f"hk_d_{rm}", use_container_width=True):
+                        if st.button("✅ Done", key=f"hk_d_{_hgidx}_{rm}", use_container_width=True):
                             _save_status_hk(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
                             st.session_state["_live_toast"] = f"✅ {rm} — done, awaiting inspection"
                             st.rerun()
                 with b3:
                     if cur not in ("pending",):
-                        if st.button("↩ Reset", key=f"hk_r_{rm}", use_container_width=True):
+                        if st.button("↩ Reset", key=f"hk_r_{_hgidx}_{rm}", use_container_width=True):
                             _save_status_hk(rm, {"status":"pending","started_at":None,"cleaned_at":None,"inspected_at":None,"marked_clean_at":None})
                             st.rerun()
 
@@ -2932,9 +2932,10 @@ else:
     </div>""", unsafe_allow_html=True)
 
                 # Render each group as a compact card
-                for g in groups:
+                for _gidx, g in enumerate(groups):
                     hk_name = g.get("housekeeper","—")
                     g_label = g.get("label","—")
+                    _gk = f"{g_label}_{_gidx}"   # unique per-group key prefix
 
                     # Filter by HK
                     rooms_in_g = g["rooms"]
@@ -2965,7 +2966,7 @@ else:
                                 st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.62rem;color:#475569;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">↕ Swap rooms to:</div>', unsafe_allow_html=True)
                                 swap_target = st.selectbox(
                                     "Swap to HK", ["— select HK —"] + [h for h in batch_hks if h != hk_name],
-                                    key=f"swap_target_{g_label}", label_visibility="collapsed"
+                                    key=f"swap_target_{_gk}", label_visibility="collapsed"
                                 )
 
                                 if swap_target and swap_target != "— select HK —":
@@ -2975,11 +2976,11 @@ else:
                                         swap_rooms_sel = st.multiselect(
                                             "Rooms to swap",
                                             [r["room"] for r in swappable],
-                                            key=f"swap_rooms_{g_label}",
+                                            key=f"swap_rooms_{_gk}",
                                             label_visibility="collapsed",
                                             placeholder="Select rooms to move..."
                                         )
-                                        if swap_rooms_sel and st.button(f"↕ Move {len(swap_rooms_sel)} room(s) → {swap_target}", key=f"do_swap_{g_label}", type="primary"):
+                                        if swap_rooms_sel and st.button(f"↕ Move {len(swap_rooms_sel)} room(s) → {swap_target}", key=f"do_swap_{_gk}", type="primary"):
                                             # Find the target group
                                             tgt_group = next((gg for gg in fg if gg.get("housekeeper","") == swap_target and gg.get("inspector","") == insp_name), None)
                                             if tgt_group:
@@ -3061,29 +3062,29 @@ else:
                             bc1, bc2, bc3, bc4 = st.columns(4)
                             with bc1:
                                 if cur_status == "pending":
-                                    if st.button("✨ Clean", key=f"ac_{rm}", use_container_width=True):
+                                    if st.button("✨ Clean", key=f"ac_{_gk}_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"already_clean","marked_clean_at":_NOW()})
                                         st.session_state["_live_toast"] = f"✨ {rm} marked Already Clean"
                                         st.rerun()
                                 elif cur_status == "already_clean":
-                                    if st.button("↩ Undo", key=f"undo_ac_{rm}", use_container_width=True):
+                                    if st.button("↩ Undo", key=f"undo_ac_{_gk}_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"pending","marked_clean_at":None})
                                         st.session_state["_live_toast"] = f"↩ {rm} back to Pending"
                                         st.rerun()
                             with bc2:
                                 if cur_status == "pending":
-                                    if st.button("🧹 Start", key=f"start_{rm}", use_container_width=True):
+                                    if st.button("🧹 Start", key=f"start_{_gk}_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"cleaning_started","started_at":_NOW()})
                                         st.session_state["_live_toast"] = f"🧹 {rm} — cleaning started"
                                         st.rerun()
                                 elif cur_status == "cleaning_started":
-                                    if st.button("✅ Done", key=f"done_{rm}", use_container_width=True):
+                                    if st.button("✅ Done", key=f"done_{_gk}_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
                                         st.session_state["_live_toast"] = f"✅ {rm} — cleaning done, awaiting inspection"
                                         st.rerun()
                             with bc3:
                                 if cur_status == "cleaning_done":
-                                    if st.button("🔍 Inspect", key=f"insp_{rm}", use_container_width=True):
+                                    if st.button("🔍 Inspect", key=f"insp_{_gk}_{rm}", use_container_width=True):
                                         _save_status(rm, {"status":"inspected","inspected_at":_NOW()})
                                         st.session_state["_live_toast"] = f"🔍 {rm} inspected ✓"
                                         st.rerun()
@@ -3091,7 +3092,7 @@ else:
                                     st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.64rem;color:#a78bfa;padding:8px 0;text-align:center">✓ {ts_insp}</div>', unsafe_allow_html=True)
                             with bc4:
                                 if cur_status != "pending":
-                                    if st.button("↩ Reset", key=f"reset_{rm}", use_container_width=True, help="Reset to Pending"):
+                                    if st.button("↩ Reset", key=f"reset_{_gk}_{rm}", use_container_width=True, help="Reset to Pending"):
                                         _save_status(rm, {
                                             "status":"pending",
                                             "started_at":None,"cleaned_at":None,
