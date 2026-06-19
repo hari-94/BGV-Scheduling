@@ -163,17 +163,14 @@ section[data-testid="stSidebar"]{
   background:rgba(13,13,26,.88)!important;backdrop-filter:blur(20px)!important;
   -webkit-backdrop-filter:blur(20px)!important;border-right:1px solid var(--border)!important;
   box-shadow:4px 0 40px rgba(0,0,0,.5)!important;
-}
-/* Width only while EXPANDED — when collapsed, aria-expanded flips to "false"
-   and this rule stops applying, letting Streamlit fully hide the panel.
-   (Same pattern as the Dashboard page, which collapses correctly.) */
-section[data-testid="stSidebar"][aria-expanded="true"]{
   min-width:340px!important;max-width:380px!important;
 }
-/* When COLLAPSED, the element still exists at zero width — without this, its
-   40px glow shadow, border and backdrop blur stay visible as a strip down the
-   left edge ("partially hidden" sidebar). Kill every visual effect. */
+/* Only when EXPLICITLY collapsed (aria-expanded="false") do we zero it out and
+   strip the shadow/border/blur so no ghost strip remains. The default rule
+   above always gives the sidebar a width, so it can never vanish on load even
+   if Streamlit doesn't set aria-expanded="true". */
 section[data-testid="stSidebar"][aria-expanded="false"]{
+  min-width:0!important;max-width:0!important;width:0!important;
   box-shadow:none!important;
   border-right:none!important;
   backdrop-filter:none!important;
@@ -300,11 +297,11 @@ header[data-testid="stHeader"]{
 
   /* Sidebar wider on mobile when open; fully off-screen when collapsed
      (identical to the Dashboard page, which collapses correctly) */
-  section[data-testid="stSidebar"][aria-expanded="true"]{
+  section[data-testid="stSidebar"]{
     min-width:85vw!important;max-width:90vw!important;
   }
   section[data-testid="stSidebar"][aria-expanded="false"]{
-    min-width:0!important;max-width:0!important;margin-left:-92vw!important;
+    min-width:0!important;max-width:0!important;width:0!important;margin-left:-92vw!important;
   }
 
   /* Bigger tap targets for buttons */
@@ -2458,9 +2455,15 @@ if _is_hk:
   </div>
 </div>""", unsafe_allow_html=True)
 
-            # Room rows
+            # Room rows (dedupe so a room repeated in a group can't collide)
+            _seen_hr = set(); _dedup_g_rooms = []
             for r in g_rooms:
+                _rc = r.get("room")
+                if _rc in _seen_hr: continue
+                _seen_hr.add(_rc); _dedup_g_rooms.append(r)
+            for _hridx, r in enumerate(_dedup_g_rooms):
                 rm = r["room"]
+                _hrk = f"{_hgidx}_{_hridx}_{rm}"   # fully unique row key
                 # Ensure room is initialised in rs with this HK's info
                 if rm not in rs:
                     rs[rm] = {"room":rm,"status":"pending","housekeeper":_my_name,
@@ -2516,28 +2519,28 @@ if _is_hk:
                 b1,b2,b3 = st.columns(3)
                 with b1:
                     if cur == "pending":
-                        if st.button("✨ Clean", key=f"hk_ac_{_hgidx}_{rm}", use_container_width=True):
+                        if st.button("✨ Clean", key=f"hk_ac_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"already_clean","marked_clean_at":_NOW()})
                             st.session_state["_live_toast"] = f"✨ {rm} marked Already Clean"
                             st.rerun()
                     elif cur == "already_clean":
-                        if st.button("↩ Undo", key=f"hk_uac_{_hgidx}_{rm}", use_container_width=True):
+                        if st.button("↩ Undo", key=f"hk_uac_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"pending"})
                             st.rerun()
                 with b2:
                     if cur == "pending":
-                        if st.button("🧹 Start", key=f"hk_s_{_hgidx}_{rm}", use_container_width=True):
+                        if st.button("🧹 Start", key=f"hk_s_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"cleaning_started","started_at":_NOW()})
                             st.session_state["_live_toast"] = f"🧹 {rm} — cleaning started"
                             st.rerun()
                     elif cur == "cleaning_started":
-                        if st.button("✅ Done", key=f"hk_d_{_hgidx}_{rm}", use_container_width=True):
+                        if st.button("✅ Done", key=f"hk_d_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
                             st.session_state["_live_toast"] = f"✅ {rm} — done, awaiting inspection"
                             st.rerun()
                 with b3:
                     if cur not in ("pending",):
-                        if st.button("↩ Reset", key=f"hk_r_{_hgidx}_{rm}", use_container_width=True):
+                        if st.button("↩ Reset", key=f"hk_r_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"pending","started_at":None,"cleaned_at":None,"inspected_at":None,"marked_clean_at":None})
                             st.rerun()
 
@@ -3003,8 +3006,17 @@ else:
                         st.markdown("---")
 
                         # ── Room status rows ─────────────────────────────────
+                        # Dedupe rooms within the group (a room can appear twice
+                        # if upstream grouping duplicated it) so widget keys and
+                        # the displayed list stay unique.
+                        _seen_rm = set(); _dedup_rooms = []
                         for r in rooms_in_g:
+                            _rc = r.get("room")
+                            if _rc in _seen_rm: continue
+                            _seen_rm.add(_rc); _dedup_rooms.append(r)
+                        for _ridx, r in enumerate(_dedup_rooms):
                             rm = r["room"]
+                            _rk = f"{_gk}_{_ridx}_{rm}"   # fully unique row key
                             r_state = rs.get(rm, {"status":"pending"})
                             cur_status = r_state.get("status","pending")
                             sm = STATUS_META.get(cur_status, STATUS_META["pending"])
@@ -3062,29 +3074,29 @@ else:
                             bc1, bc2, bc3, bc4 = st.columns(4)
                             with bc1:
                                 if cur_status == "pending":
-                                    if st.button("✨ Clean", key=f"ac_{_gk}_{rm}", use_container_width=True):
+                                    if st.button("✨ Clean", key=f"ac_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"already_clean","marked_clean_at":_NOW()})
                                         st.session_state["_live_toast"] = f"✨ {rm} marked Already Clean"
                                         st.rerun()
                                 elif cur_status == "already_clean":
-                                    if st.button("↩ Undo", key=f"undo_ac_{_gk}_{rm}", use_container_width=True):
+                                    if st.button("↩ Undo", key=f"undo_ac_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"pending","marked_clean_at":None})
                                         st.session_state["_live_toast"] = f"↩ {rm} back to Pending"
                                         st.rerun()
                             with bc2:
                                 if cur_status == "pending":
-                                    if st.button("🧹 Start", key=f"start_{_gk}_{rm}", use_container_width=True):
+                                    if st.button("🧹 Start", key=f"start_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"cleaning_started","started_at":_NOW()})
                                         st.session_state["_live_toast"] = f"🧹 {rm} — cleaning started"
                                         st.rerun()
                                 elif cur_status == "cleaning_started":
-                                    if st.button("✅ Done", key=f"done_{_gk}_{rm}", use_container_width=True):
+                                    if st.button("✅ Done", key=f"done_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
                                         st.session_state["_live_toast"] = f"✅ {rm} — cleaning done, awaiting inspection"
                                         st.rerun()
                             with bc3:
                                 if cur_status == "cleaning_done":
-                                    if st.button("🔍 Inspect", key=f"insp_{_gk}_{rm}", use_container_width=True):
+                                    if st.button("🔍 Inspect", key=f"insp_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"inspected","inspected_at":_NOW()})
                                         st.session_state["_live_toast"] = f"🔍 {rm} inspected ✓"
                                         st.rerun()
@@ -3092,7 +3104,7 @@ else:
                                     st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.64rem;color:#a78bfa;padding:8px 0;text-align:center">✓ {ts_insp}</div>', unsafe_allow_html=True)
                             with bc4:
                                 if cur_status != "pending":
-                                    if st.button("↩ Reset", key=f"reset_{_gk}_{rm}", use_container_width=True, help="Reset to Pending"):
+                                    if st.button("↩ Reset", key=f"reset_{_rk}", use_container_width=True, help="Reset to Pending"):
                                         _save_status(rm, {
                                             "status":"pending",
                                             "started_at":None,"cleaned_at":None,
