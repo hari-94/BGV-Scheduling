@@ -1953,7 +1953,8 @@ with st.sidebar:
         _hk_before = _copy.deepcopy(roster)
         for bld in [1,2,3]:
             bld_hks = [n for n,v in roster.items() if v["building"]==bld]
-            if not bld_hks: continue
+            # Note: we no longer skip empty buildings — the bulk-paste field
+            # below lets you populate an empty building from scratch.
             BLD_NEON_SB = {
                 1: ("rgba(99,102,241,.15)","#a5b4fc","rgba(99,102,241,.3)"),
                 2: ("rgba(20,184,166,.12)","#5eead4","rgba(20,184,166,.3)"),
@@ -1972,6 +1973,45 @@ with st.sidebar:
                 f'font-size:.62rem">{n_present}/{len(bld_hks)}</span>'
                 f'</div>',
                 unsafe_allow_html=True)
+
+            # ── Bulk replace: paste a list of names (e.g. from Excel) to replace
+            #    ALL housekeepers currently in this building ────────────────────
+            with st.expander(f"📋 Bulk set Building {bld} names"):
+                _bulk = st.text_area(
+                    "Paste names (one per line or comma-separated)",
+                    key=f"bulk_hk_b{bld}", height=90,
+                    placeholder="Maria Lopez\nAna Garcia\nRosa Diaz",
+                    label_visibility="collapsed")
+                if st.button(f"Replace Building {bld} list", key=f"bulk_apply_b{bld}",
+                             use_container_width=True):
+                    # Parse: split on newlines and commas, trim, drop blanks/dupes
+                    raw = re.split(r'[\n,]+', _bulk or "")
+                    new_names = []
+                    seen = set()
+                    for nm in raw:
+                        nm = re.sub(r'\s+', ' ', nm).strip()
+                        if nm and nm.lower() not in seen:
+                            seen.add(nm.lower()); new_names.append(nm)
+                    if new_names:
+                        # Remove every current HK in this building, then add the new
+                        # list. Housekeepers in OTHER buildings are untouched.
+                        for _n in [n for n,v in roster.items() if v["building"]==bld]:
+                            del roster[_n]
+                        for _n in new_names:
+                            roster[_n] = {"building":bld, "present":True}
+                        st.session_state["hk_roster"] = roster
+                        try:
+                            _ex = db.load_full_schedule() or {}
+                            _ex["hk_roster"]   = dict(roster)
+                            _ex["insp_roster"] = dict(st.session_state.get("insp_roster",{}))
+                            db.save_full_schedule(_ex)
+                        except Exception:
+                            pass
+                        st.toast(f"📋 Building {bld}: set {len(new_names)} housekeepers")
+                        st.rerun()
+                    else:
+                        st.warning("No valid names found to set.")
+
             for name in bld_hks:
                 c_chk, c_name, c_left, c_right = st.columns([0.4,3.2,0.6,0.6])
                 with c_chk:
@@ -2014,6 +2054,26 @@ with st.sidebar:
 
         st.markdown("### 🔍 Inspectors")
         insp_roster = st.session_state["insp_roster"]
+        # ── Shuffle RQS order so they pair with different housekeepers ───────
+        if st.button("🔀 Shuffle RQS order", key="btn_shuffle_rqs", use_container_width=True,
+                     help="Randomize inspector order so RQS get paired with different housekeepers each run"):
+            import random as _rnd
+            _items = list(insp_roster.items())
+            _rnd.shuffle(_items)
+            st.session_state["insp_roster"] = dict(_items)
+            insp_roster = st.session_state["insp_roster"]
+            # clear cached RQS role picks so they re-pick from the new order
+            for _k in ("rqs1","rqs2"):
+                if _k in st.session_state: st.session_state[_k] = ""
+            try:
+                _existing = db.load_full_schedule() or {}
+                _existing["insp_roster"] = dict(insp_roster)
+                _existing["hk_roster"]   = dict(st.session_state.get("hk_roster",{}))
+                db.save_full_schedule(_existing)
+            except Exception:
+                pass
+            st.toast("🔀 RQS order shuffled")
+            st.rerun()
         present_insp = []
         _insp_before = dict(insp_roster)
         for name in list(insp_roster.keys()):
