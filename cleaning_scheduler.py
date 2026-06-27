@@ -1161,6 +1161,41 @@ def absorb(g, unit):
     g["c140"]  += sum(1 for r in unit if r["time"]==140)
     g["c120"]  += sum(1 for r in unit if r["time"]==120)
 
+def _mix_penalty(g, unit):
+    """Steer Full-Clean charts toward the preferred shapes:
+        120+120+120  (360)
+        140+120+70   (330)
+        120+120+70+70(380)
+        70x5         (350)
+    A chart that already matches (or is a clean prefix of) one of these gets no
+    penalty; the further its room-count of each size is from the nearest target
+    shape, the higher the penalty. This is a soft preference used to break ties
+    in placement, never a hard rule — capacity/guest/building rules still win.
+    """
+    times = [r["time"] for r in g["rooms"]] + [r["time"] for r in unit]
+    if not times: return 0
+    n140 = sum(1 for t in times if t == 140)
+    n120 = sum(1 for t in times if t == 120)
+    n70  = sum(1 for t in times if t <= 70)   # 70s and anything smaller
+
+    # (n140, n120, n70) signatures of the four preferred end-states
+    TARGETS = [
+        (0,3,0),   # 120+120+120
+        (1,1,1),   # 140+120+70
+        (0,2,2),   # 120+120+70+70
+        (0,0,5),   # 70 x5
+    ]
+    # Distance to the closest target = sum of size-count mismatches. A chart
+    # that is "on the way" to a target (fewer rooms than the target, matching
+    # composition so far) is treated as a clean prefix → low penalty.
+    best = 99
+    for t140,t120,t70 in TARGETS:
+        # Over-shooting a size beyond its target is worse than under-shooting.
+        over  = max(0,n140-t140)+max(0,n120-t120)+max(0,n70-t70)
+        under = max(0,t140-n140)+max(0,t120-n120)+max(0,t70-n70)
+        best  = min(best, over*3 + under)   # overshoot weighted heavier
+    return best * 25   # scale into "minutes-equivalent" tie-shaping range
+
 def best_fit_generic(groups, unit, can_add_fn, same_bld_only, same_floor_only):
     ub  = set(r["bld"]         for r in unit)
     uf  = set(r.get("floor",0) for r in unit)
@@ -1173,7 +1208,9 @@ def best_fit_generic(groups, unit, can_add_fn, same_bld_only, same_floor_only):
         if same_floor_only and not (g["floors"] & uf):         continue
         prx = proximity_score(g["rooms"], unit)
         rem = cap - (g["time"] + u_t)
-        score = prx * 10000 + rem
+        # mix penalty only matters for Full Clean (DS rooms are all light)
+        mix = _mix_penalty(g, unit) if (unit and unit[0].get("service")!=SVC_DS) else 0
+        score = prx * 10000 + rem + mix
         if score < best_score: best_score, bi = score, i
     return bi
 
@@ -1229,7 +1266,7 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
             if improved: break
     cap2 = MAX_DS if svc == SVC_DS else MAX_FC
     active = [g for g in groups if g["rooms"]]
-    for _round in range(5):
+    for _round in range(6):
         changed = False
         targets = sorted([g for g in active if g["time"] < LOW_FILL], key=lambda g: g["time"])
         for target in targets:
@@ -1237,17 +1274,27 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
             target_blds = target["blds"]
             for donor in active:
                 if donor is target: continue
+                if not donor["rooms"]: continue
+                # CONSOLIDATION: if the WHOLE donor fits into the target, move all
+                # of it — this empties the donor and frees that housekeeper for
+                # other work (your "extra person is better" goal).
+                if len(donor["rooms"]) >= 1 and can_add_fn(target, donor["rooms"]):
+                    whole_time = donor["time"]
+                    remaining  = cap2 - (target["time"] + whole_time)
+                    if remaining >= 0:
+                        sb2 = all(r.get("bld",0) in target_blds for r in donor["rooms"])
+                        prx = proximity_score(target["rooms"], donor["rooms"])
+                        # Strong bonus (negative score) for fully clearing a donor.
+                        score = -2000 + (0 if sb2 else 500) + prx*10 + remaining
+                        candidates.append((score, remaining, list(donor["rooms"]), donor))
                 if len(donor["rooms"]) <= 1: continue
-                # Group donor rooms by guest so we move a guest's rooms together,
-                # never splitting the same guest across two housekeepers.
+                # PARTIAL: move a same-guest cluster (never split a guest).
                 donor_clusters = {}
                 for room in donor["rooms"]:
                     donor_clusters.setdefault(room.get("guest",""), []).append(room)
                 for guest, cluster in donor_clusters.items():
                     cluster_time = sum(r["time"] for r in cluster)
                     donor_after  = donor["time"] - cluster_time
-                    # Don't strip the donor below a usable load, and don't move
-                    # the donor's entire contents.
                     if donor_after < 120: continue
                     if len(cluster) >= len(donor["rooms"]): continue
                     if can_add_fn(target, cluster):
@@ -1497,16 +1544,28 @@ def _batch_heavy(batch):
     """Count of big rooms (120/140 min) across a batch — used to spread the
     hard-to-inspect rooms evenly across inspectors."""
     return sum(1 for g in batch for r in g.get("rooms",[]) if r.get("time",70) >= 120)
+def _is_heavy_chart(g):
+    """A housekeeper's chart is 'heavy' (hard to inspect) when it's loaded with
+    big rooms — e.g. 120+120+120 or 140+120+70. Defined as 2+ big rooms AND a
+    total at/above 330 min."""
+    big = sum(1 for r in g.get("rooms",[]) if r.get("time",70) >= 120)
+    return big >= 2 and g.get("time",0) >= 330
+def _batch_heavy_charts(batch):
+    return sum(1 for g in batch if _is_heavy_chart(g))
 def _insp_combined_score(batches):
     tt = sum(_insp_travel_score(b) for b in batches)
     nonempty = [b for b in batches if b]
     if len(nonempty) < 2: return tt
-    cx = [_batch_complexity(b) for b in nonempty]
-    hv = [_batch_heavy(b)      for b in nonempty]
-    # Heavy-room fairness is the dominant balance term: no inspector should be
-    # stuck with all the 120/140 rooms while another gets only 70s. Travel
-    # (now building + floor aware) still matters, complexity spread breaks ties.
-    return tt*2 + (max(hv)-min(hv))*8 + (max(cx)-min(cx))
+    cx = [_batch_complexity(b)     for b in nonempty]
+    hv = [_batch_heavy(b)          for b in nonempty]
+    hc = [_batch_heavy_charts(b)   for b in nonempty]
+    # Balance terms, in priority order:
+    #  1) heavy-CHART spread (hc) — no inspector should get all the housekeepers
+    #     who have 120+120+120-style charts. Dominant term.
+    #  2) heavy-ROOM spread (hv) — even count of individual 120/140 rooms.
+    #  3) travel (building + floor aware).
+    #  4) overall complexity spread — tie-breaker.
+    return (max(hc)-min(hc))*14 + (max(hv)-min(hv))*8 + tt*2 + (max(cx)-min(cx))
 
 def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     # Verify groups (stayover / P-U Models) never get an inspector.
