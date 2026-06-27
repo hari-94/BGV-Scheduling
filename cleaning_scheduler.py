@@ -1321,6 +1321,64 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
                 changed = True
                 if target["time"] >= LOW_FILL: break
         if not changed: break
+
+    # ── FINAL DRAIN PASS: empty the lowest-time housekeepers entirely ────────
+    # Goal: fewer housekeepers carrying partial loads. Take the smallest groups
+    # one at a time and try to redistribute ALL of their same-guest clusters
+    # into other groups (possibly several different targets). If every cluster
+    # finds a home, the donor is emptied and that housekeeper is freed. If even
+    # one cluster can't be placed, we roll back so we never leave rooms orphaned.
+    for _drain in range(4):
+        drained = False
+        active = [g for g in groups if g["rooms"]]
+        # smallest first — those are the ones we most want to clear
+        donors = sorted(active, key=lambda g: g["time"])
+        for donor in donors:
+            if not donor["rooms"]: continue
+            # Build this donor's same-guest clusters
+            clusters = {}
+            for room in donor["rooms"]:
+                clusters.setdefault(room.get("guest",""), []).append(room)
+            cluster_list = list(clusters.values())
+            # Plan a home for every cluster among the OTHER groups
+            plan = []          # (target, cluster)
+            # work on a scratch copy of target loads so we don't double-book
+            scratch = {id(g): g["time"] for g in groups if g["rooms"] and g is not donor}
+            ok = True
+            for cluster in cluster_list:
+                ctime = sum(r["time"] for r in cluster)
+                cblds = set(r.get("bld",0) for r in cluster)
+                best_t, best_key = None, None
+                for t in groups:
+                    if t is donor or not t["rooms"]: continue
+                    if not can_add_fn(t, cluster): continue
+                    rem = cap2 - (scratch[id(t)] + ctime)
+                    if rem < 0: continue
+                    # Prefer targets that: keep the same building (no extra travel),
+                    # don't create a diluted chart shape, and end up fullest.
+                    same_b = all(b in t["blds"] for b in cblds)
+                    mix    = _mix_penalty(t, cluster)        # 0 = good shape
+                    key = (0 if same_b else 1, mix, rem)
+                    if best_key is None or key < best_key:
+                        best_key, best_t = key, t
+                if best_t is None:
+                    ok = False; break
+                scratch[id(best_t)] += ctime
+                plan.append((best_t, cluster))
+            if ok and plan:
+                # Execute: move every cluster to its planned target
+                for t, cluster in plan:
+                    absorb(t, cluster)
+                    for room in cluster:
+                        donor["rooms"].remove(room)
+                        donor["time"] -= room["time"]
+                        donor["c140"] -= (1 if room["time"]==140 else 0)
+                        donor["c120"] -= (1 if room["time"]==120 else 0)
+                donor["blds"]   = set()
+                donor["floors"] = set()
+                drained = True
+        if not drained: break
+
     return [g for g in groups if g["rooms"]]
 
 def build_all_groups(rooms, priority_hks=None):
