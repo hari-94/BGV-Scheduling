@@ -1596,8 +1596,13 @@ def _insp_travel_score(batch):
     for b,fs in floors_by_bld.items():
         if fs: spread += (max(fs)-min(fs))
     # Weights: building hops are most expensive, then number of distinct
-    # floor-stops, then how far apart those floors are.
-    return len(blds)*12 + cross*4 + len(floor_keys)*3 + spread*2
+    # floor-stops, then how far apart those floors are. A batch that spans all
+    # THREE buildings is very hard to inspect, so it gets a steep extra penalty
+    # on top of the linear building cost — we want the optimizer to treat a
+    # 3-building inspector as nearly forbidden.
+    nbld = len(blds)
+    three_bld_penalty = 400 if nbld >= 3 else 0
+    return nbld*12 + three_bld_penalty + cross*4 + len(floor_keys)*3 + spread*2
 def _batch_heavy(batch):
     """Count of big rooms (120/140 min) across a batch — used to spread the
     hard-to-inspect rooms evenly across inspectors."""
@@ -1617,13 +1622,24 @@ def _insp_combined_score(batches):
     cx = [_batch_complexity(b)     for b in nonempty]
     hv = [_batch_heavy(b)          for b in nonempty]
     hc = [_batch_heavy_charts(b)   for b in nonempty]
-    # Balance terms, in priority order:
-    #  1) heavy-CHART spread (hc) — no inspector should get all the housekeepers
-    #     who have 120+120+120-style charts. Dominant term.
-    #  2) heavy-ROOM spread (hv) — even count of individual 120/140 rooms.
+    # Count inspectors forced across all 3 buildings — this is the worst case
+    # for an inspector and must be avoided even at the cost of heavy-work
+    # balance. Each such batch adds an overriding penalty that dwarfs the
+    # balance terms, so the optimizer will almost always restructure to remove
+    # a 3-building inspector before worrying about heavy-chart fairness.
+    three_bld_batches = sum(1 for b in nonempty
+                            if len(set().union(*[g["blds"] for g in b])) >= 3)
+    THREE_BLD = three_bld_batches * 10000
+    # Balance terms, in priority order (below the 3-building override):
+    #  1) heavy-CHART spread — no inspector gets all the 120+120+120 charts.
+    #  2) heavy-ROOM spread — even count of individual 120/140 rooms.
     #  3) travel (building + floor aware).
     #  4) overall complexity spread — tie-breaker.
-    return (max(hc)-min(hc))*14 + (max(hv)-min(hv))*8 + tt*2 + (max(cx)-min(cx))
+    return (THREE_BLD
+            + (max(hc)-min(hc))*14
+            + (max(hv)-min(hv))*8
+            + tt*2
+            + (max(cx)-min(cx)))
 
 def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     # Verify groups (stayover / P-U Models) never get an inspector.
