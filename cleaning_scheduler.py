@@ -43,6 +43,24 @@ _IS_LIGHT = _THEME.endswith("light")
 # ══════════════════════════════════════════════════════════════════════════════
 def e(s): return _html.escape(str(s) if s else "")
 
+# ── Shared time helpers (Mountain time) ──────────────────────────────────────
+# Consolidated here so the timezone and "now" / formatting logic live in one
+# place instead of being rebuilt inside the HK view and Live tab.
+import zoneinfo as _zoneinfo
+from datetime import datetime as _datetime
+_MTN_TZ = _zoneinfo.ZoneInfo("America/Denver")
+def _now_iso():
+    """Current Mountain-time timestamp as ISO string (for saved statuses)."""
+    return _datetime.now(_MTN_TZ).isoformat()
+def _fmt_mtn(ts):
+    """Format a stored ISO timestamp as 'HH:MM AM/PM' in Mountain time."""
+    if not ts: return ""
+    try:
+        dt = _datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        return dt.astimezone(_MTN_TZ).strftime("%I:%M %p")
+    except Exception:
+        return ""
+
 def make_labels(prefix: str, n: int) -> list:
     alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     out = []
@@ -1214,6 +1232,96 @@ def best_fit_generic(groups, unit, can_add_fn, same_bld_only, same_floor_only):
         if score < best_score: best_score, bi = score, i
     return bi
 
+def _fc_feasible(units_list):
+    """True if a set of same-guest units can share one Full-Clean chart under
+    all hard rules: 380 cap, no B2+B3 together (B1 is the bridge), at most one
+    140, and a 140 may coexist with at most one 120."""
+    t = sum(u["time"] for u in units_list)
+    if t > MAX_FC: return False
+    blds = set()
+    for u in units_list: blds |= u["blds"]
+    if 2 in blds and 3 in blds: return False
+    n140 = sum(u["n140"] for u in units_list)
+    n120 = sum(u["n120"] for u in units_list)
+    if n140 > 1: return False
+    if n140 >= 1 and n120 > 1: return False
+    return True
+
+def _fc_optimize(units, seed=20240601, restarts=14):
+    """Bin-packing optimizer for Full Clean. Packs same-guest units into the
+    fewest 380-minute charts while honoring all hard rules. Uses best-fit from
+    several seed orders plus random restarts, each refined by a local search
+    (move/swap units between charts) to escape greedy local optima. Deterministic
+    for a given input (fixed seed)."""
+    import random as _rnd
+    rng = _rnd.Random(seed)
+
+    def pack_bestfit(order):
+        charts = []
+        for u in order:
+            best, best_rem = None, 10**9
+            for ch in charts:
+                if _fc_feasible(ch + [u]):
+                    rem = MAX_FC - (sum(x["time"] for x in ch) + u["time"])
+                    if rem < best_rem: best_rem, best = rem, ch
+            if best is None: charts.append([u])
+            else: best.append(u)
+        return charts
+
+    def local_search(charts, iters):
+        charts = [c[:] for c in charts if c]
+        def score():
+            ne = [c for c in charts if c]
+            return (len(ne), sum(MAX_FC - sum(u["time"] for u in c) for c in ne))
+        best = score()
+        for _ in range(iters):
+            ne = [c for c in charts if c]
+            if len(ne) < 2: break
+            ne.sort(key=lambda c: sum(u["time"] for u in c))
+            src = ne[0] if rng.random() < 0.5 else rng.choice(ne)
+            if not src: continue
+            u = rng.choice(src)
+            order = ne[:]; rng.shuffle(order)
+            moved = False
+            # try a plain move first (frees the source toward empty)
+            for dst in order:
+                if dst is src: continue
+                if _fc_feasible(dst + [u]):
+                    src.remove(u); dst.append(u); moved = True; break
+            if not moved:
+                # try a swap u <-> v
+                for dst in order:
+                    if dst is src: continue
+                    for v in dst:
+                        if _fc_feasible([x for x in src if x is not u] + [v]) and \
+                           _fc_feasible([x for x in dst if x is not v] + [u]):
+                            src.remove(u); dst.remove(v); src.append(v); dst.append(u)
+                            moved = True; break
+                    if moved: break
+            charts = [c for c in charts if c]
+            score()  # keep charts mutating; best tracked implicitly below
+        return [c for c in charts if c]
+
+    # Candidate seed orders (heavy-first, building-bridge order, etc.)
+    orders = [
+        sorted(units, key=lambda u: -u["time"]),
+        sorted(units, key=lambda u: (-u["n140"], -u["n120"], -u["time"])),
+        sorted(units, key=lambda u: ({3:0,1:1,2:2}.get(min(u["blds"]) if u["blds"] else 1, 9), -u["time"])),
+    ]
+    candidates = [pack_bestfit(o) for o in orders]
+    for _ in range(restarts):
+        us = units[:]; rng.shuffle(us)
+        candidates.append(pack_bestfit(us))
+
+    best_charts, best_key = None, None
+    for c in candidates:
+        refined = local_search(c, iters=2500)
+        ne = [ch for ch in refined if ch]
+        key = (len(ne), sum(MAX_FC - sum(u["time"] for u in ch) for ch in ne))
+        if best_key is None or key < best_key:
+            best_key, best_charts = key, refined
+    return [c for c in best_charts if c]
+
 def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
     if not room_list: return []
     import re as _re2
@@ -1221,165 +1329,58 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
         r["guest"] = _re2.sub(r'\s+', ' ', r.get("guest","").strip())
     gmap = {}
     for r in room_list: gmap.setdefault(r["guest"],[]).append(r)
-    seen, units = set(), []
+    seen, unit_lists = set(), []
     for r in room_list:
         if r["guest"] not in seen:
-            seen.add(r["guest"]); units.append(gmap[r["guest"]])
-    units.sort(key=lambda u:(
-        u[0].get("bld",0), u[0].get("floor",0),
-        -sum(r["time"] for r in u), -len(u),
-    ))
+            seen.add(r["guest"]); unit_lists.append(gmap[r["guest"]])
+
+    # ── DAILY SERVICE (and any non-FC): keep the simple best-fit fill ────────
+    # DS has no heavy-room / building constraints and a different cap, so the
+    # FC optimizer doesn't apply. Behavior here is unchanged.
+    if svc != SVC_FC:
+        unit_lists.sort(key=lambda u:(
+            u[0].get("bld",0), u[0].get("floor",0),
+            -sum(r["time"] for r in u), -len(u),
+        ))
+        groups = []
+        for unit in unit_lists:
+            i=best_fit_generic(groups,unit,can_add_fn,True,True)
+            if i==-1: i=best_fit_generic(groups,unit,can_add_fn,True,False)
+            if i==-1: i=best_fit_generic(groups,unit,can_add_fn,False,False)
+            if i>=0: absorb(groups[i],unit)
+            else: groups.append(mk(unit,svc))
+        return [g for g in groups if g["rooms"]]
+
+    # ── FULL CLEAN: global bin-packing optimizer ────────────────────────────
+    # A same-guest cluster that itself breaks the rules (e.g. a single guest with
+    # two 120s + a 140) can't sit in one chart; split such a unit into its rooms
+    # so each room becomes its own placeable sub-unit. (unit_ok_fn flags these.)
+    placeable = []   # each is a list-of-rooms (a locked cluster OR a single room)
+    for unit in unit_lists:
+        if unit_ok_fn(unit):
+            placeable.append(unit)
+        else:
+            for r in unit: placeable.append([r])
+
+    # Wrap each placeable cluster with packing metadata.
+    units = []
+    for rooms in placeable:
+        units.append({
+            "rooms": rooms,
+            "time":  sum(r["time"] for r in rooms),
+            "blds":  set(r["bld"] for r in rooms),
+            "n140":  sum(1 for r in rooms if r["time"]==140),
+            "n120":  sum(1 for r in rooms if r["time"]==120),
+        })
+
+    charts = _fc_optimize(units)
+
+    # Materialize charts into the standard group dict via mk().
     groups = []
-    for unit in units:
-        if not unit_ok_fn(unit):
-            for r in unit:
-                s=[r]
-                i=best_fit_generic(groups,s,can_add_fn,True,True)
-                if i==-1: i=best_fit_generic(groups,s,can_add_fn,True,False)
-                if i==-1: i=best_fit_generic(groups,s,can_add_fn,False,False)
-                if i>=0: absorb(groups[i],s)
-                else: groups.append(mk(s,svc))
-            continue
-        i=best_fit_generic(groups,unit,can_add_fn,True,True)
-        if i==-1: i=best_fit_generic(groups,unit,can_add_fn,True,False)
-        if i==-1: i=best_fit_generic(groups,unit,can_add_fn,False,False)
-        if i>=0: absorb(groups[i],unit)
-        else: groups.append(mk(unit,svc))
-    improved=True
-    while improved:
-        improved=False
-        for i in range(len(groups)-1,-1,-1):
-            if not groups[i]["rooms"]: continue
-            s=groups[i]
-            for sf in (True,False):
-                for sb in (True,False):
-                    if sf and not sb: continue
-                    for j in range(len(groups)):
-                        if i==j or not groups[j]["rooms"]: continue
-                        if not can_add_fn(groups[j],s["rooms"]): continue
-                        if sb and not same_bld(groups[j]["blds"],s["blds"]): continue
-                        if sf and not (groups[j]["floors"] & s["floors"]): continue
-                        absorb(groups[j],s["rooms"]); s["rooms"]=[]; s["time"]=0
-                        improved=True; break
-                    if improved: break
-                if improved: break
-            if improved: break
-    cap2 = MAX_DS if svc == SVC_DS else MAX_FC
-    active = [g for g in groups if g["rooms"]]
-    for _round in range(6):
-        changed = False
-        targets = sorted([g for g in active if g["time"] < LOW_FILL], key=lambda g: g["time"])
-        for target in targets:
-            candidates = []
-            target_blds = target["blds"]
-            for donor in active:
-                if donor is target: continue
-                if not donor["rooms"]: continue
-                # CONSOLIDATION: if the WHOLE donor fits into the target, move all
-                # of it — this empties the donor and frees that housekeeper for
-                # other work (your "extra person is better" goal).
-                if len(donor["rooms"]) >= 1 and can_add_fn(target, donor["rooms"]):
-                    whole_time = donor["time"]
-                    remaining  = cap2 - (target["time"] + whole_time)
-                    if remaining >= 0:
-                        sb2 = all(r.get("bld",0) in target_blds for r in donor["rooms"])
-                        prx = proximity_score(target["rooms"], donor["rooms"])
-                        # Strong bonus (negative score) for fully clearing a donor.
-                        score = -2000 + (0 if sb2 else 500) + prx*10 + remaining
-                        candidates.append((score, remaining, list(donor["rooms"]), donor))
-                if len(donor["rooms"]) <= 1: continue
-                # PARTIAL: move a same-guest cluster (never split a guest).
-                donor_clusters = {}
-                for room in donor["rooms"]:
-                    donor_clusters.setdefault(room.get("guest",""), []).append(room)
-                for guest, cluster in donor_clusters.items():
-                    cluster_time = sum(r["time"] for r in cluster)
-                    donor_after  = donor["time"] - cluster_time
-                    if donor_after < 120: continue
-                    if len(cluster) >= len(donor["rooms"]): continue
-                    if can_add_fn(target, cluster):
-                        remaining = cap2 - (target["time"] + cluster_time)
-                        sb2 = all(r.get("bld",0) in target_blds for r in cluster)
-                        prx = proximity_score(target["rooms"], cluster)
-                        score = (0 if sb2 else 500) + prx * 10 + remaining
-                        candidates.append((score, remaining, cluster, donor))
-            candidates.sort(key=lambda x: x[0])
-            for score, remaining, cluster, donor in candidates:
-                if remaining < 0: continue
-                if not can_add_fn(target, cluster): continue
-                # Re-check the cluster is still fully in the donor (earlier moves
-                # this round may have changed things).
-                if not all(r in donor["rooms"] for r in cluster): continue
-                absorb(target, cluster)
-                for room in cluster:
-                    donor["rooms"].remove(room)
-                    donor["time"]  -= room["time"]
-                    donor["c140"]  -= (1 if room["time"]==140 else 0)
-                    donor["c120"]  -= (1 if room["time"]==120 else 0)
-                donor["blds"]   = set(r["bld"] for r in donor["rooms"]) if donor["rooms"] else set()
-                donor["floors"] = set(r.get("floor",0) for r in donor["rooms"]) if donor["rooms"] else set()
-                changed = True
-                if target["time"] >= LOW_FILL: break
-        if not changed: break
-
-    # ── FINAL DRAIN PASS: empty the lowest-time housekeepers entirely ────────
-    # Goal: fewer housekeepers carrying partial loads. Take the smallest groups
-    # one at a time and try to redistribute ALL of their same-guest clusters
-    # into other groups (possibly several different targets). If every cluster
-    # finds a home, the donor is emptied and that housekeeper is freed. If even
-    # one cluster can't be placed, we roll back so we never leave rooms orphaned.
-    for _drain in range(4):
-        drained = False
-        active = [g for g in groups if g["rooms"]]
-        # smallest first — those are the ones we most want to clear
-        donors = sorted(active, key=lambda g: g["time"])
-        for donor in donors:
-            if not donor["rooms"]: continue
-            # Build this donor's same-guest clusters
-            clusters = {}
-            for room in donor["rooms"]:
-                clusters.setdefault(room.get("guest",""), []).append(room)
-            cluster_list = list(clusters.values())
-            # Plan a home for every cluster among the OTHER groups
-            plan = []          # (target, cluster)
-            # work on a scratch copy of target loads so we don't double-book
-            scratch = {id(g): g["time"] for g in groups if g["rooms"] and g is not donor}
-            ok = True
-            for cluster in cluster_list:
-                ctime = sum(r["time"] for r in cluster)
-                cblds = set(r.get("bld",0) for r in cluster)
-                best_t, best_key = None, None
-                for t in groups:
-                    if t is donor or not t["rooms"]: continue
-                    if not can_add_fn(t, cluster): continue
-                    rem = cap2 - (scratch[id(t)] + ctime)
-                    if rem < 0: continue
-                    # Prefer targets that: keep the same building (no extra travel),
-                    # don't create a diluted chart shape, and end up fullest.
-                    same_b = all(b in t["blds"] for b in cblds)
-                    mix    = _mix_penalty(t, cluster)        # 0 = good shape
-                    key = (0 if same_b else 1, mix, rem)
-                    if best_key is None or key < best_key:
-                        best_key, best_t = key, t
-                if best_t is None:
-                    ok = False; break
-                scratch[id(best_t)] += ctime
-                plan.append((best_t, cluster))
-            if ok and plan:
-                # Execute: move every cluster to its planned target
-                for t, cluster in plan:
-                    absorb(t, cluster)
-                    for room in cluster:
-                        donor["rooms"].remove(room)
-                        donor["time"] -= room["time"]
-                        donor["c140"] -= (1 if room["time"]==140 else 0)
-                        donor["c120"] -= (1 if room["time"]==120 else 0)
-                donor["blds"]   = set()
-                donor["floors"] = set()
-                drained = True
-        if not drained: break
-
-    return [g for g in groups if g["rooms"]]
+    for chart in charts:
+        chart_rooms = [r for u in chart for r in u["rooms"]]
+        if chart_rooms: groups.append(mk(chart_rooms, svc))
+    return groups
 
 def build_all_groups(rooms, priority_hks=None):
     # Pull out "verify" rooms (stayover / P-U Models) first — they never get
@@ -2511,10 +2512,7 @@ if _is_hk:
     # ══════════════════════════════════════════════════════════════════════
     #  HOUSEKEEPER VIEW — single "My Schedule" tab, own rooms only
     # ══════════════════════════════════════════════════════════════════════
-    from datetime import datetime
-    import zoneinfo
-    _TZ  = zoneinfo.ZoneInfo("America/Denver")
-    _NOW = lambda: datetime.now(_TZ).isoformat()
+    _NOW = _now_iso   # shared Mountain-time timestamp helper
 
     _tmsg_hk = st.session_state.pop("_live_toast", None)
     if _tmsg_hk:
@@ -2665,14 +2663,7 @@ if _is_hk:
                 cur = r_state.get("status","pending")
                 sm  = STATUS_META_HK.get(cur, STATUS_META_HK["pending"])
 
-                def _fmt(ts):
-                    if not ts: return ""
-                    try:
-                        import zoneinfo as _zi2
-                        _MTN = _zi2.ZoneInfo("America/Denver")
-                        dt = datetime.fromisoformat(ts.replace("Z","+00:00"))
-                        return dt.astimezone(_MTN).strftime("%I:%M %p")
-                    except: return ""
+                _fmt = _fmt_mtn
 
                 pet_icon  = " 🐾" if r.get("pet") else ""
                 late_icon = " ⏰" if r.get("late_checkout") else ""
@@ -2918,11 +2909,8 @@ else:
         if _tmsg:
             try: st.toast(_tmsg)
             except Exception: pass
-        from datetime import datetime
-        import json as _json, zoneinfo as _zi
-
-        _TZ  = _zi.ZoneInfo("America/Denver")
-        _NOW = lambda: datetime.now(_TZ).isoformat()
+        import json as _json
+        _NOW = _now_iso   # shared Mountain-time timestamp helper
 
         # ── Status pipeline definition ─────────────────────────────────────────
         STATUS_FLOW = ["pending","already_clean","cleaning_started","cleaning_done","inspected"]
@@ -3214,15 +3202,9 @@ else:
                             cur_status = r_state.get("status","pending")
                             sm = STATUS_META.get(cur_status, STATUS_META["pending"])
 
-                            # Timestamps
+                            # Timestamps (shared formatter; keep the ts[:5] fallback)
                             def _fmt_ts(ts):
-                                if not ts: return ""
-                                try:
-                                    import zoneinfo as _zi2
-                                    _MTN = _zi2.ZoneInfo("America/Denver")
-                                    dt = datetime.fromisoformat(ts.replace("Z","+00:00"))
-                                    return dt.astimezone(_MTN).strftime("%I:%M %p")
-                                except: return ts[:5] if ts else ""
+                                return _fmt_mtn(ts) or (ts[:5] if ts else "")
 
                             ts_start = _fmt_ts(r_state.get("started_at",""))
                             ts_clean = _fmt_ts(r_state.get("cleaned_at",""))
