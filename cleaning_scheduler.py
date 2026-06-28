@@ -1247,12 +1247,32 @@ def _fc_feasible(units_list):
     if n140 >= 1 and n120 > 1: return False
     return True
 
+def _fc_spread(units_list):
+    """Travel cost of one chart: building span (heaviest), floor span within each
+    building, and number of distinct floor-stops. Lower = tighter / less walking."""
+    if not units_list: return 0
+    blds = set(); floors_by_bld = {}
+    for u in units_list:
+        blds |= u["blds"]
+        for r in u["rooms"]:
+            b = r.get("bld", 0)
+            floors_by_bld.setdefault(b, set()).add(r.get("floor", 0))
+    fspread = sum(max(fs) - min(fs) for fs in floors_by_bld.values())
+    nstops  = sum(len(fs) for fs in floors_by_bld.values())
+    return (len(blds) - 1) * 100 + fspread * 10 + nstops * 3
+
+def _fc_travel(charts):
+    return sum(_fc_spread(c) for c in charts if c)
+
 def _fc_optimize(units, seed=20240601, restarts=14):
-    """Bin-packing optimizer for Full Clean. Packs same-guest units into the
-    fewest 380-minute charts while honoring all hard rules. Uses best-fit from
-    several seed orders plus random restarts, each refined by a local search
-    (move/swap units between charts) to escape greedy local optima. Deterministic
-    for a given input (fixed seed)."""
+    """Two-phase optimizer for Full Clean.
+    Phase 1 — minimize the number of housekeepers: best-fit from several seed
+      orders + random restarts, each refined by a move/swap local search that
+      escapes greedy local optima (this is what matches the manual HK count).
+    Phase 2 — with the housekeeper count fixed, reduce room travel: only moves/
+      swaps that lower total building+floor spread WITHOUT increasing the chart
+      count are accepted, so charts become tight (same building / nearby floors)
+      like the manual schedule. Deterministic for a given input (fixed seed)."""
     import random as _rnd
     rng = _rnd.Random(seed)
 
@@ -1268,28 +1288,21 @@ def _fc_optimize(units, seed=20240601, restarts=14):
             else: best.append(u)
         return charts
 
-    def local_search(charts, iters):
+    # ── Phase 1: fewest charts ───────────────────────────────────────────────
+    def ls_mincount(charts, iters):
         charts = [c[:] for c in charts if c]
-        def score():
-            ne = [c for c in charts if c]
-            return (len(ne), sum(MAX_FC - sum(u["time"] for u in c) for c in ne))
-        best = score()
         for _ in range(iters):
             ne = [c for c in charts if c]
             if len(ne) < 2: break
             ne.sort(key=lambda c: sum(u["time"] for u in c))
             src = ne[0] if rng.random() < 0.5 else rng.choice(ne)
             if not src: continue
-            u = rng.choice(src)
-            order = ne[:]; rng.shuffle(order)
-            moved = False
-            # try a plain move first (frees the source toward empty)
+            u = rng.choice(src); order = ne[:]; rng.shuffle(order); moved = False
             for dst in order:
                 if dst is src: continue
                 if _fc_feasible(dst + [u]):
                     src.remove(u); dst.append(u); moved = True; break
             if not moved:
-                # try a swap u <-> v
                 for dst in order:
                     if dst is src: continue
                     for v in dst:
@@ -1299,10 +1312,8 @@ def _fc_optimize(units, seed=20240601, restarts=14):
                             moved = True; break
                     if moved: break
             charts = [c for c in charts if c]
-            score()  # keep charts mutating; best tracked implicitly below
         return [c for c in charts if c]
 
-    # Candidate seed orders (heavy-first, building-bridge order, etc.)
     orders = [
         sorted(units, key=lambda u: -u["time"]),
         sorted(units, key=lambda u: (-u["n140"], -u["n120"], -u["time"])),
@@ -1313,14 +1324,40 @@ def _fc_optimize(units, seed=20240601, restarts=14):
         us = units[:]; rng.shuffle(us)
         candidates.append(pack_bestfit(us))
 
-    best_charts, best_key = None, None
+    best_charts, best_n = None, None
     for c in candidates:
-        refined = local_search(c, iters=2500)
-        ne = [ch for ch in refined if ch]
-        key = (len(ne), sum(MAX_FC - sum(u["time"] for u in ch) for ch in ne))
-        if best_key is None or key < best_key:
-            best_key, best_charts = key, refined
-    return [c for c in best_charts if c]
+        refined = ls_mincount(c, 2500)
+        n = len([ch for ch in refined if ch])
+        if best_n is None or n < best_n:
+            best_n, best_charts = n, refined
+    charts = [c for c in best_charts if c]
+
+    # ── Phase 2: same chart count, minimize travel ──────────────────────────
+    def ls_travel(charts, iters):
+        charts = [c[:] for c in charts if c]
+        for _ in range(iters):
+            ne = [c for c in charts if c]
+            if len(ne) < 2: break
+            a, b = rng.sample(ne, 2)
+            # move a unit a->b if it lowers combined spread and doesn't empty a
+            if len(a) > 1:
+                u = rng.choice(a)
+                if _fc_feasible(b + [u]):
+                    a2 = [x for x in a if x is not u]
+                    if a2 and _fc_spread(a2) + _fc_spread(b + [u]) < _fc_spread(a) + _fc_spread(b):
+                        a.remove(u); b.append(u); continue
+            # swap u<->v if it lowers combined spread
+            u = rng.choice(a); v = rng.choice(b)
+            na = [x for x in a if x is not u] + [v]
+            nb = [x for x in b if x is not v] + [u]
+            if _fc_feasible(na) and _fc_feasible(nb) and \
+               _fc_spread(na) + _fc_spread(nb) < _fc_spread(a) + _fc_spread(b):
+                a.remove(u); a.append(v); b.remove(v); b.append(u)
+        return [c for c in charts if c]
+
+    charts = ls_travel(charts, 15000)
+    return [c for c in charts if c]
+
 
 def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
     if not room_list: return []
