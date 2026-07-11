@@ -1233,6 +1233,11 @@ def can_add_ds(g, unit, allow_overflow=False):
     return True
 
 def unit_ok_fc(unit):
+    # A same-guest cluster is only "OK to keep as one chart" if it can actually
+    # fit one chart under ALL hard rules. If it can't, pack_rooms splits it into
+    # individual rooms so they can be spread across housekeepers.
+    if sum(r["time"] for r in unit) > MAX_FC:   # over the 380 cap -> must split
+        return False
     blds = set(r["bld"] for r in unit)
     ba = list(blds)
     for i in range(len(ba)):
@@ -2420,6 +2425,12 @@ with col_data:
                         st.session_state["_room_xlsx_msg"] = (
                             "ok", f"✅ Read {_n_up} rooms from '{_sheet_up}'. "
                                   f"Click ⚡ Generate to build the schedule.")
+                    except ImportError:
+                        st.session_state["_room_xlsx_sig"] = _sig
+                        st.session_state["_room_xlsx_msg"] = (
+                            "err", "The .xlsx reader isn't installed on the server yet "
+                                   "(openpyxl). Once the app redeploys it'll work — for "
+                                   "now you can copy-paste the data below.")
                     except Exception as _e:
                         st.session_state["_room_xlsx_sig"] = _sig
                         st.session_state["_room_xlsx_msg"] = (
