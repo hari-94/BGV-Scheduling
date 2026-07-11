@@ -1374,6 +1374,8 @@ def _fc_optimize(units, seed=20240601, restarts=14):
         return charts
 
     # ── Phase 1: fewest charts ───────────────────────────────────────────────
+    def _spans_two_bld(chart):
+        return len(set(b for u in chart for b in u["blds"])) > 1
     def ls_mincount(charts, iters):
         charts = [c[:] for c in charts if c]
         for _ in range(iters):
@@ -1417,6 +1419,73 @@ def _fc_optimize(units, seed=20240601, restarts=14):
             best_n, best_charts = n, refined
     charts = [c for c in best_charts if c]
 
+    # ── Phase 1.5: un-cross cross-building charts (same count) ────────────────
+    # Phase 1 minimizes housekeepers but may leave a chart spanning two buildings
+    # (a B1 unit packed into a B2 chart, etc.). Removing such a crossing usually
+    # needs a rotation: move the foreign unit into a same-building chart and push
+    # that chart's displaced unit onward. We try 2-way swaps first, then 3-way
+    # rotations, accepting only changes that reduce the number of crossings while
+    # keeping the chart count fixed. Deterministic.
+    def _nblds(chart):
+        return len(set(b for u in chart for b in u["blds"]))
+    def _decross(charts):
+        charts = [c[:] for c in charts if c]
+        for _ in range(40):
+            crossed = [c for c in charts if _nblds(c) > 1]
+            if not crossed: break
+            improved = False
+            for a in crossed:
+                # foreign = the units belonging to a's minority building
+                cnt = {}
+                for u in a:
+                    for bd in u["blds"]: cnt[bd] = cnt.get(bd, 0) + 1
+                minority = min(set().union(*[u["blds"] for u in a]), key=lambda bd: cnt[bd])
+                foreign = [u for u in a if minority in u["blds"]]
+                for fu in foreign:
+                    # 2-way: swap fu with a unit bu from another chart b
+                    for b in charts:
+                        if b is a: continue
+                        for bu in b:
+                            na = [x for x in a if x is not fu] + [bu]
+                            nb = [x for x in b if x is not bu] + [fu]
+                            if not (_fc_feasible(na) and _fc_feasible(nb)): continue
+                            if (_nblds(na) + _nblds(nb)) < (_nblds(a) + _nblds(b)):
+                                a.remove(fu); a.append(bu); b.remove(bu); b.append(fu)
+                                improved = True; break
+                        if improved: break
+                    if improved: break
+                    # 3-way rotation: a gives fu to b, b gives bu to c, c gives cu to a
+                    for b in charts:
+                        if b is a: continue
+                        if not _fc_feasible(b + [fu]): continue
+                        b2 = b + [fu]
+                        for bu in b:
+                            for c in charts:
+                                if c is a or c is b: continue
+                                if not _fc_feasible(c + [bu]): continue
+                                c2 = c + [bu]
+                                for cu in c:
+                                    na = [x for x in a if x is not fu] + [cu]
+                                    nb = [x for x in b2 if x is not bu]
+                                    nc = [x for x in c2 if x is not cu]
+                                    if not (_fc_feasible(na) and _fc_feasible(nb) and _fc_feasible(nc)):
+                                        continue
+                                    before = _nblds(a)+_nblds(b)+_nblds(c)
+                                    after  = _nblds(na)+_nblds(nb)+_nblds(nc)
+                                    if after < before:
+                                        a.remove(fu); a.append(cu)
+                                        b.remove(bu); b.append(fu)
+                                        c.remove(cu); c.append(bu)
+                                        improved = True; break
+                                if improved: break
+                            if improved: break
+                        if improved: break
+                    if improved: break
+                if improved: break
+            if not improved: break
+        return [c for c in charts if c]
+    charts = [c for c in charts if c]
+
     # ── Phase 2: same chart count, minimize travel ──────────────────────────
     def ls_travel(charts, iters):
         charts = [c[:] for c in charts if c]
@@ -1440,6 +1509,7 @@ def _fc_optimize(units, seed=20240601, restarts=14):
                 a.remove(u); a.append(v); b.remove(v); b.append(u)
         return [c for c in charts if c]
 
+    charts = _decross(charts)        # remove gratuitous building-crossings
     charts = ls_travel(charts, 15000)
     return [c for c in charts if c]
 
