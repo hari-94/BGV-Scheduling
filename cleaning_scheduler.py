@@ -79,12 +79,24 @@ MAX_DS   = 560
 DS_OVER  = 700
 LOW_FILL = 350
 
+# Daily Service charts target this range (each DS housekeeper's workload).
+DS_MIN   = 460
+DS_MAX   = 570
+# IH charts below this total are treated as scraps and spill to Daily Service
+# (kept charts at/above this are inspected by RQS 2).
+IH_KEEP_MIN = 310
+
 SVC_FC   = "Full Clean"
+SVC_IH   = "Full Clean (IH)"
 SVC_DS   = "Daily Service"
 SVC_DV   = "Dust n Vac"
 
+# RQS assigned to inspect all IH charts.
+IH_RQS   = "RQS 2"
+
 DEFAULT_TIMES = {
     SVC_FC: {"A":120,"B":70,"C":70,"D":120,"E":140,"F":70,"G":70,"H":70,"I":70},
+    SVC_IH: {"A":120,"B":70,"C":70,"D":120,"E":140,"F":70,"G":70,"H":70,"I":70},
     SVC_DS: {"A":35, "B":20,"C":20,"D":35, "E":40, "F":20,"G":20,"H":20,"I":20},
     SVC_DV: {},
 }
@@ -107,6 +119,7 @@ PALETTE = [
 ]
 SVC_PALETTE = {
     SVC_FC: ("#2563EB","#EFF6FF"),
+    SVC_IH: ("#7C3AED","#F5F3FF"),
     SVC_DS: ("#0D9488","#ECFDF5"),
     SVC_DV: ("#D97706","#FFFBEB"),
 }
@@ -921,6 +934,10 @@ def normalize_service(raw: str) -> str:
     if s in SKIP_SERVICES or "p/u" in s or (s.startswith("p") and "model" in s):
         return "__SKIP__"
     if "daily" in s: return SVC_DS
+    # "Full Clean (IH)" / "Full Clean( IH)" / "... IH" -> separate IH stream,
+    # packed apart from regular Full Clean and inspected by RQS 2.
+    if ("full clean" in s or s.startswith("fc")) and "ih" in s:
+        return SVC_IH
     if s.startswith("full clean") or s.startswith("fc"): return SVC_FC
     if "dust" in s or "d&v" in s or "dnv" in s: return SVC_DV
     if "vac" in s: return SVC_DV
@@ -1544,15 +1561,43 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
         return [g for g in groups if g["rooms"]]
 
     # ── FULL CLEAN: global bin-packing optimizer ────────────────────────────
-    # A same-guest cluster that itself breaks the rules (e.g. a single guest with
-    # two 120s + a 140) can't sit in one chart; split such a unit into its rooms
-    # so each room becomes its own placeable sub-unit. (unit_ok_fn flags these.)
-    placeable = []   # each is a list-of-rooms (a locked cluster OR a single room)
+    # A same-guest cluster that itself breaks the rules (too big for one chart,
+    # spans B2+B3, too many heavy rooms) can't sit in one chart. Rather than
+    # atomizing it into single rooms — which lets the optimizer scatter a guest's
+    # rooms across many housekeepers — we split it into the FEWEST legal
+    # sub-clusters, keeping as many of the guest's rooms together as the rules
+    # allow (same building, <=380, <=one 140, a 140 with <=one 120). This keeps
+    # e.g. a guest's two same-floor rooms on one cart instead of two.
+    def _split_into_legal_subclusters(unit):
+        # Sort rooms so heavy rooms seed sub-clusters and same building/floor
+        # rooms stay adjacent, then greedily fill sub-clusters under the rules.
+        rooms_sorted = sorted(unit, key=lambda r: (r.get("bld",0), r.get("floor",0), -r["time"]))
+        subs = []   # each: {"rooms":[...],"time","blds","n140","n120"}
+        for r in rooms_sorted:
+            placed = False
+            for s in subs:
+                nb = s["blds"] | {r["bld"]}
+                if 2 in nb and 3 in nb: continue
+                n140 = s["n140"] + (1 if r["time"]==140 else 0)
+                n120 = s["n120"] + (1 if r["time"]==120 else 0)
+                if s["time"] + r["time"] > MAX_FC: continue
+                if n140 > 1: continue
+                if n140 >= 1 and n120 > 1: continue
+                s["rooms"].append(r); s["time"] += r["time"]
+                s["blds"] = nb; s["n140"] = n140; s["n120"] = n120
+                placed = True; break
+            if not placed:
+                subs.append({"rooms":[r],"time":r["time"],"blds":{r["bld"]},
+                             "n140":1 if r["time"]==140 else 0,
+                             "n120":1 if r["time"]==120 else 0})
+        return [s["rooms"] for s in subs]
+
+    placeable = []   # each is a list-of-rooms (a locked cluster OR a legal sub-cluster)
     for unit in unit_lists:
         if unit_ok_fn(unit):
             placeable.append(unit)
         else:
-            for r in unit: placeable.append([r])
+            placeable.extend(_split_into_legal_subclusters(unit))
 
     # Wrap each placeable cluster with packing metadata.
     units = []
@@ -1574,15 +1619,199 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
         if chart_rooms: groups.append(mk(chart_rooms, svc))
     return groups
 
+def _bld(r):   return r.get("bld", 0)
+def _flr(r):   return r.get("floor", 0)
+def _rnum(r):  return r.get("num", 0)
+
+def _chart_feasible(chart, single_building=False):
+    """Hard rules for a Full Clean / IH chart (list of room dicts)."""
+    times = [r["time"] for r in chart]
+    if sum(times) > MAX_FC: return False
+    if times.count(140) > 1: return False
+    if times.count(140) >= 1 and times.count(120) > 1: return False
+    blds = set(_bld(r) for r in chart)
+    if 2 in blds and 3 in blds: return False          # B2 and B3 never share
+    if single_building and len(blds) > 1: return False
+    return True
+
+def _chart_nbld(chart): return len(set(_bld(r) for r in chart))
+def _chart_spread(chart):
+    if not chart: return 0
+    fl = [_flr(r) for r in chart]; nm = [_rnum(r) for r in chart]
+    return (_chart_nbld(chart)-1)*100 + (max(fl)-min(fl))*10 + (max(nm)-min(nm))
+def _charts_xb(charts):     return sum(1 for c in charts if _chart_nbld(c) > 1)
+def _charts_spread(charts): return sum(_chart_spread(c) for c in charts if c)
+
+def _fc_bestfit(order):
+    """Best-fit that prefers not introducing a new building into a chart."""
+    charts = []
+    for r in order:
+        best = None; bkey = None
+        for c in charts:
+            if _chart_feasible(c + [r]):
+                rem = MAX_FC - (sum(x["time"] for x in c) + r["time"])
+                intro = _chart_nbld(c + [r]) > _chart_nbld(c)
+                key = (1 if intro else 0, rem)
+                if bkey is None or key < bkey: bkey = key; best = c
+        if best is None: charts.append([r])
+        else: best.append(r)
+    return charts
+
+def _fc_ls_count(charts, iters, rng, avoid_xb=True):
+    """Local search to reduce housekeeper count (move/swap). When avoid_xb, don't
+    create a new building-crossing unless the move frees a whole housekeeper."""
+    charts = [c[:] for c in charts if c]
+    for _ in range(iters):
+        ne = [c for c in charts if c]
+        if len(ne) < 2: break
+        ne.sort(key=lambda c: sum(x["time"] for x in c))
+        src = ne[0] if rng.random() < 0.5 else rng.choice(ne)
+        if not src: continue
+        u = rng.choice(src); order = ne[:]; rng.shuffle(order); moved = False
+        for dst in order:
+            if dst is src: continue
+            if _chart_feasible(dst + [u]):
+                frees = (len(src) == 1)
+                makes = avoid_xb and _chart_nbld(dst + [u]) > _chart_nbld(dst)
+                if frees or not makes:
+                    src.remove(u); dst.append(u); moved = True; break
+        if not moved:
+            for dst in order:
+                if dst is src: continue
+                for v in dst:
+                    if _chart_feasible([x for x in src if x is not u] + [v]) and \
+                       _chart_feasible([x for x in dst if x is not v] + [u]):
+                        ns = [x for x in src if x is not u] + [v]
+                        nd = [x for x in dst if x is not v] + [u]
+                        if avoid_xb and ((_chart_nbld(ns) > _chart_nbld(src)) or
+                                         (_chart_nbld(nd) > _chart_nbld(dst))): continue
+                        src.remove(u); dst.remove(v); src.append(v); dst.append(u)
+                        moved = True; break
+                if moved: break
+        charts = [c for c in charts if c]
+    return [c for c in charts if c]
+
+def _fc_ls_tidy(charts, iters, rng):
+    """Within a fixed housekeeper count, move/swap to reduce travel (spread)."""
+    charts = [c[:] for c in charts if c]
+    for _ in range(iters):
+        ne = [c for c in charts if c]
+        if len(ne) < 2: break
+        a, b = rng.sample(ne, 2)
+        if len(a) > 1:
+            u = rng.choice(a)
+            if _chart_feasible(b + [u]):
+                a2 = [x for x in a if x is not u]
+                if a2 and _chart_spread(a2) + _chart_spread(b + [u]) < _chart_spread(a) + _chart_spread(b):
+                    a.remove(u); b.append(u); continue
+        u = rng.choice(a); v = rng.choice(b)
+        na = [x for x in a if x is not u] + [v]; nb = [x for x in b if x is not v] + [u]
+        if _chart_feasible(na) and _chart_feasible(nb) and \
+           _chart_spread(na) + _chart_spread(nb) < _chart_spread(a) + _chart_spread(b):
+            a.remove(u); a.append(v); b.remove(v); b.append(u)
+    return [c for c in charts if c]
+
+def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
+    """Tidy-first, min-count Full Clean solver. Priority: (1) fewest housekeepers,
+    (2) tidiest charts (single-building, contiguous) within that count. Returns a
+    list of charts (each a list of room dicts). Deterministic (fixed seed)."""
+    if not fc_rooms: return []
+    import random as _rnd
+    rng = _rnd.Random(seed)
+    BLD = {3:0, 1:1, 2:2}
+    orders = [
+        sorted(fc_rooms, key=lambda r: -r["time"]),
+        sorted(fc_rooms, key=lambda r: (-(r["time"]==140), -(r["time"]==120), -r["time"])),
+        sorted(fc_rooms, key=lambda r: (BLD.get(_bld(r),1), _flr(r), _rnum(r))),
+    ]
+    cands = [_fc_bestfit(o) for o in orders]
+    for _ in range(restarts):
+        rr = list(fc_rooms); rng.shuffle(rr); cands.append(_fc_bestfit(rr))
+    # Phase 1: building-aware count minimization
+    best = None
+    for c in cands:
+        r = _fc_ls_count(c, 1500, rng, avoid_xb=True)
+        nb = len([x for x in r if x])
+        key = (nb, _charts_xb(r), _charts_spread(r))
+        if best is None or key < best[0]: best = (key, r)
+    nb0 = best[0][0]
+    # Phase 2: if crossings were forbidden at a cost, retry allowing them to see
+    # whether a lower count is reachable (manual bridges B1 only when it saves a HK)
+    for c in cands:
+        r = _fc_ls_count(c, 1500, rng, avoid_xb=False)
+        nb = len([x for x in r if x])
+        if nb < nb0:
+            key = (nb, _charts_xb(r), _charts_spread(r))
+            if key < best[0]: best = (key, r); nb0 = nb
+    charts = [c[:] for c in best[1] if c]
+    charts = _fc_ls_tidy(charts, 8000, rng)   # tidy within the locked count
+    return charts
+
+def solve_ih(ih_rooms, seed=20240601):
+    """Pack IH rooms into SINGLE-building charts <=380, keeping a guest's rooms
+    together where possible. Returns (kept_charts, leftover_rooms). Charts totalling
+    >= IH_KEEP_MIN are kept (inspected by RQS 2); genuine scraps spill to Daily
+    Service."""
+    if not ih_rooms: return [], []
+    BLD = {3:0, 1:1, 2:2}
+    pool = sorted(ih_rooms, key=lambda r: (BLD.get(_bld(r),1), r.get("guest",""), _flr(r), _rnum(r)))
+    used = [False]*len(pool); charts = []
+    for i in range(len(pool)):
+        if used[i]: continue
+        chart = [pool[i]]; used[i] = True
+        while sum(r["time"] for r in chart) < MAX_FC:
+            best = None
+            for j in range(len(pool)):
+                if used[j]: continue
+                if not _chart_feasible(chart + [pool[j]], single_building=True): continue
+                rj = pool[j]
+                gj = rj.get("guest","")
+                same_g = 0 if any(r.get("guest","")==gj and gj not in ("","Unallocated")
+                                  for r in chart) else 1
+                d = min(abs(_flr(r)-_flr(rj))*30 + abs(_rnum(r)-_rnum(rj)) for r in chart)
+                key = (same_g, d)
+                if best is None or key < best[0]: best = (key, j)
+            if best is None: break
+            used[best[1]] = True; chart.append(pool[best[1]])
+        charts.append(chart)
+    keep = []; leftover = []
+    for c in charts:
+        if sum(r["time"] for r in c) >= IH_KEEP_MIN: keep.append(c)
+        else: leftover.extend(c)
+    return keep, leftover
+
+def split_daily_service(ds_rooms, extra_rooms=None, lo=DS_MIN, hi=DS_MAX):
+    """Split Daily Service rooms into charts of lo..hi minutes each, by building
+    and contiguity. Any extra_rooms (leftover IH) are appended to the pool."""
+    rooms = list(ds_rooms) + list(extra_rooms or [])
+    if not rooms: return []
+    BLD = {3:0, 1:1, 2:2}
+    rooms = sorted(rooms, key=lambda r: (BLD.get(_bld(r),1), _flr(r), _rnum(r)))
+    charts = []; cur = []
+    for r in rooms:
+        if cur and sum(x["time"] for x in cur) + r["time"] > hi:
+            charts.append(cur); cur = []
+        cur.append(r)
+    if cur: charts.append(cur)
+    # If the final chart is under `lo`, pull rooms from the previous chart's tail.
+    if len(charts) >= 2 and sum(x["time"] for x in charts[-1]) < lo:
+        prev, last = charts[-2], charts[-1]
+        while sum(x["time"] for x in last) < lo and sum(x["time"] for x in prev) > lo:
+            last.insert(0, prev.pop())
+    return charts
+
 def build_all_groups(rooms, priority_hks=None):
-    # Pull out "verify" rooms (stayover / P-U Models) first — they never get
-    # auto-assigned an HK or RQS and are surfaced separately for manual review.
     verify_rooms = [r for r in rooms if r.get("verify")]
     rooms        = [r for r in rooms if not r.get("verify")]
 
     fc_rooms = [r for r in rooms if r.get("service")==SVC_FC]
+    ih_rooms = [r for r in rooms if r.get("service")==SVC_IH]
     ds_rooms = [r for r in rooms if r.get("service")==SVC_DS]
     dv_rooms = [r for r in rooms if r.get("service")==SVC_DV]
+
+    # ── Stage 1: regular Full Clean — tidy-first, minimum housekeepers ────────
+    # (priority_hks preserved: any rooms pre-claimed by a named housekeeper are
+    # packed first via the legacy path, the rest go through the new solver.)
     priority_groups = []
     remaining_fc    = list(fc_rooms)
     priority_hks    = priority_hks or []
@@ -1654,16 +1883,31 @@ def build_all_groups(rooms, priority_hks=None):
                 priority_groups.append(grp)
                 used_ids = {id(r) for r in state["rooms"]}
                 remaining_fc = [r for r in remaining_fc if id(r) not in used_ids]
-    fc_groups_normal = pack_rooms(remaining_fc, SVC_FC, can_add_fc, unit_ok_fn=lambda u: unit_ok_fc(u))
+
+    fc_charts = solve_full_clean(remaining_fc)
+    fc_groups_normal = [mk(c, SVC_FC) for c in fc_charts]
     fc_groups = priority_groups + fc_groups_normal
-    if ds_rooms:
-        ds_groups_pre = pack_rooms(ds_rooms, SVC_DS, lambda g,u:can_add_ds(g,u,False), unit_ok_fn=lambda u:True)
-        if ds_groups_pre:
-            last = ds_groups_pre[-1]
-            last["ds_overflow"] = last["time"] > MAX_DS
-        ds_groups = ds_groups_pre
+
+    # ── Stage 2: Full Clean (IH) — packed separately, inspected by RQS 2 ──────
+    ih_leftover = []
+    ih_groups = []
+    if ih_rooms:
+        ih_charts, ih_leftover = solve_ih(ih_rooms)
+        for c in ih_charts:
+            g = mk(c, SVC_IH)
+            g["ih_group"] = True
+            g["rqs"] = IH_RQS          # RQS 2 inspects all IH charts
+            ih_groups.append(g)
+
+    # ── Stage 3: Daily Service — split into DS_MIN..DS_MAX charts, +leftover IH ─
+    if ds_rooms or ih_leftover:
+        ds_charts = split_daily_service(ds_rooms, extra_rooms=ih_leftover)
+        ds_groups = [mk(c, SVC_DS) for c in ds_charts]
+        for g in ds_groups:
+            g["ds_overflow"] = g["time"] > DS_MAX
     else:
         ds_groups = []
+
     if dv_rooms:
         dv_groups = [{"rooms":list(dv_rooms),"time":0,"blds":set(r["bld"] for r in dv_rooms),
                       "floors":set(r.get("floor",0) for r in dv_rooms),"c140":0,"c120":0,
@@ -1682,7 +1926,8 @@ def build_all_groups(rooms, priority_hks=None):
         }]
     else:
         verify_groups = []
-    return fc_groups + ds_groups + dv_groups + verify_groups
+    # Sequencing: Full Clean (regular + IH) first, then Daily Service, then DV.
+    return fc_groups + ih_groups + ds_groups + dv_groups + verify_groups
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  STAFF ASSIGNMENT
@@ -1754,7 +1999,7 @@ def assign_hk_building_aware(groups, present_hk, roster):
     # rule) → Dust n Vac → Daily Service (flexible, can take any HK).
     def _order(g):
         st_ = g.get("service_type","")
-        return {SVC_FC:0, SVC_DV:1, SVC_DS:2}.get(st_, 3)
+        return {SVC_FC:0, SVC_IH:1, SVC_DV:2, SVC_DS:3}.get(st_, 4)
     for g in sorted(groups, key=_order):
         if g["label"] in assignment: continue
         if g.get("verify_group"):
@@ -1840,9 +2085,14 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     for g in verify_groups: g["inspector"] = ""
     groups = [g for g in groups if not g.get("verify_group")]
     fc_groups = [g for g in groups if g.get("service_type")==SVC_FC]
+    ih_groups = [g for g in groups if g.get("service_type")==SVC_IH]
     ds_groups = [g for g in groups if g.get("service_type")==SVC_DS]
     dv_groups = [g for g in groups if g.get("service_type")==SVC_DV]
     inspectors=[]; assigned_names=set()
+
+    # IH groups are always inspected by RQS 2 (regardless of FC/DS load).
+    for g in ih_groups:
+        g["inspector"] = rqs2 or IH_RQS
 
     def units(grp_list):  # total rooms across a list of groups
         return sum(len(g["rooms"]) for g in grp_list)
@@ -2628,40 +2878,29 @@ if run:
                         })
                     fg = build_all_groups(rds, priority_hks=st.session_state.get("priority_hks",[]))
                     fc_gs=[g for g in fg if g.get("service_type")==SVC_FC and not g.get("verify_group")]
+                    ih_gs=[g for g in fg if g.get("service_type")==SVC_IH and not g.get("verify_group")]
                     ds_gs=[g for g in fg if g.get("service_type")==SVC_DS and not g.get("verify_group")]
                     dv_gs=[g for g in fg if g.get("service_type")==SVC_DV and not g.get("verify_group")]
                     vr_gs=[g for g in fg if g.get("verify_group")]
                     for g,lbl in zip(fc_gs, make_labels("FC",len(fc_gs))): g["label"]=lbl
+                    for g,lbl in zip(ih_gs, make_labels("IH",len(ih_gs))): g["label"]=lbl
                     for g,lbl in zip(ds_gs, make_labels("DS",len(ds_gs))): g["label"]=lbl
                     for g,lbl in zip(dv_gs, make_labels("DV",len(dv_gs))): g["label"]=lbl
                     for g,lbl in zip(vr_gs, make_labels("VERIFY",len(vr_gs))): g["label"]=lbl
                     for g in fg: g["cross_bld"] = len(g["blds"])>1
 
-                    changed=True
-                    while changed:
-                        changed=False
-                        tiny_fc=[g for g in fg if g.get("service_type")==SVC_FC and g["time"]<200 and g["rooms"] and not g.get("priority_hk") and not g.get("verify_group")]
-                        for tg in tiny_fc:
-                            best_i,best_rem=-1,9999
-                            for j,cand in enumerate(fg):
-                                if cand is tg or not cand["rooms"]: continue
-                                if cand.get("service_type")!=SVC_FC or cand.get("priority_hk") or cand.get("verify_group"): continue
-                                if not can_add_fc(cand,tg["rooms"]): continue
-                                rem=MAX_FC-(cand["time"]+tg["time"])
-                                if 0<=rem<best_rem: best_rem,best_i=rem,j
-                            if best_i>=0:
-                                cand=fg[best_i]
-                                for r in tg["rooms"]:
-                                    cand["rooms"].append(r); cand["blds"].add(r["bld"]); cand["floors"].add(r.get("floor",0))
-                                cand["time"]+=tg["time"]; cand["c140"]+=tg["c140"]; cand["c120"]+=tg["c120"]
-                                tg["rooms"]=[]; changed=True
+                    # (The new solve_full_clean already consolidates to the fewest
+                    # charts, so the legacy tiny-merge pass below is disabled to
+                    # avoid undoing its tidy, building-coherent packing.)
                     fg=[g for g in fg if g["rooms"]]
                     p_fc=[g for g in fg if g.get("service_type")==SVC_FC and g.get("priority_hk") and not g.get("verify_group")]
                     n_fc=[g for g in fg if g.get("service_type")==SVC_FC and not g.get("priority_hk") and not g.get("verify_group")]
+                    ih2=[g for g in fg if g.get("service_type")==SVC_IH and not g.get("verify_group")]
                     ds2=[g for g in fg if g.get("service_type")==SVC_DS and not g.get("verify_group")]
                     dv2=[g for g in fg if g.get("service_type")==SVC_DV and not g.get("verify_group")]
                     vr2=[g for g in fg if g.get("verify_group")]
                     for g,lbl in zip(p_fc+n_fc, make_labels("FC",len(p_fc)+len(n_fc))): g["label"]=lbl
+                    for g,lbl in zip(ih2, make_labels("IH",len(ih2))): g["label"]=lbl
                     for g,lbl in zip(ds2, make_labels("DS",len(ds2))): g["label"]=lbl
                     for g,lbl in zip(dv2, make_labels("DV",len(dv2))): g["label"]=lbl
                     for g,lbl in zip(vr2, make_labels("VERIFY",len(vr2))): g["label"]=lbl
