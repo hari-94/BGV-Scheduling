@@ -46,7 +46,7 @@ with st.sidebar:
     if _u: st.caption(f"Signed in as **{_u}** · {_r.title()}")
 
 # ── Theme (shared with main app via session_state) ─────────────────────────────
-_THEME = st.session_state.get("theme", "dark")
+_THEME = "light"   # locked to formal office theme
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -130,18 +130,23 @@ header[data-testid="stHeader"]{background:transparent!important;height:0!importa
 # Light theme override
 if _THEME == "light":
     st.markdown("""<style>
-:root{--bg:#f7f8fc;--bg2:#ffffff;--border:rgba(99,102,241,.18);--border-hi:rgba(99,102,241,.5);
-  --txt:#1e293b;--txt2:#64748b;--txt3:#94a3b8;}
-.stApp{background:#f7f8fc!important;background-image:
-  radial-gradient(ellipse 80% 50% at 20% -10%,rgba(99,102,241,.08) 0%,transparent 60%)!important;}
-.kpi{background:#ffffff!important;box-shadow:0 1px 4px rgba(15,23,42,.06)!important;}
-.kpi .val{color:#0f172a!important;text-shadow:none!important;}
-.stTabs [data-baseweb="tab-list"]{background:#ffffff!important;}
-.stTabs [aria-selected="true"]{background:rgba(99,102,241,.12)!important;color:var(--indigo)!important;}
-.stButton>button{background:#ffffff!important;color:var(--txt)!important;}
-section[data-testid="stSidebar"]{background:rgba(255,255,255,.92)!important;}
-.stSelectbox [data-baseweb="select"]>div,.stDateInput input,.stTextInput input{background:#ffffff!important;color:var(--txt)!important;}
+:root{--bg:#f4f5f7;--bg2:#ffffff;--border:#e2e5ea;--border-hi:#c3c9d4;
+  --indigo:#2563a8;--cyan:#3b7fb8;
+  --txt:#1f2733;--txt2:#5b6675;--txt3:#8a93a1;}
+.stApp{background:#f4f5f7!important;background-image:none!important;}
+/* Flat, solid page title — no gradient text. */
+.pg-title{color:#16202e!important;-webkit-text-fill-color:#16202e!important;background:none!important;font-weight:700!important;}
+.sec{color:#5b6675!important;border-bottom:1px solid var(--border)!important;}
+.kpi{background:#ffffff!important;border:1px solid var(--border)!important;box-shadow:0 1px 2px rgba(20,32,54,.06)!important;}
+.kpi .val{color:#16202e!important;text-shadow:none!important;}
+.stTabs [data-baseweb="tab-list"]{background:#ffffff!important;border:1px solid var(--border)!important;}
+.stTabs [aria-selected="true"]{background:#2563a8!important;color:#ffffff!important;}
+.stButton>button{background:#ffffff!important;color:var(--txt)!important;border:1px solid var(--border-hi)!important;}
+.stButton>button:hover{background:#2563a8!important;color:#ffffff!important;border-color:#2563a8!important;}
+section[data-testid="stSidebar"]{background:#ffffff!important;border-right:1px solid var(--border)!important;}
+.stSelectbox [data-baseweb="select"]>div,.stDateInput input,.stTextInput input{background:#ffffff!important;color:var(--txt)!important;border:1px solid var(--border-hi)!important;}
 [data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"]{background:#ffffff!important;}
+::-webkit-scrollbar-thumb{background:#c3c9d4!important;}
 </style>""", unsafe_allow_html=True)
 elif _THEME == "glass-light":
     st.markdown("""<style>
