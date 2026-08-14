@@ -969,7 +969,15 @@ footer{visibility:hidden!important;}
         else:
             _user = db.authenticate(_uname.strip(), _pw)
             if _user:
-                auth.login(_user); st.rerun()
+                auth.login(_user)
+                # Record who signed in and when (best-effort; never blocks login).
+                try:
+                    db.log_login(_user.get("username",""),
+                                 _user.get("display_name") or _user.get("username",""),
+                                 _user.get("role",""))
+                except Exception:
+                    pass
+                st.rerun()
             else:
                 st.error("Invalid username or password.")
 
