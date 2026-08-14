@@ -198,6 +198,60 @@ def delete_snapshot(date_str: str):
         print(f"[db] delete_snapshot error: {ex}")
 
 # ════════════════════════════════════════════════════════════════════════════
+#  USAGE / LOGIN TRACKING
+#  Records who signs in and when, so admins can see who is using the app.
+#  Requires a `login_events` table (see supabase_setup.sql).
+# ════════════════════════════════════════════════════════════════════════════
+def log_login(username: str, display_name: str = "", role: str = ""):
+    """Record a login event with a UTC timestamp. Best-effort — never blocks the
+    login if the write fails (e.g. table missing or DB unreachable)."""
+    from datetime import datetime, timezone
+    try:
+        _client().table("login_events").insert({
+            "username":     username,
+            "display_name": display_name or username,
+            "role":         role,
+            "ts":           datetime.now(timezone.utc).isoformat(),
+        }).execute()
+    except Exception as ex:
+        print(f"[db] log_login error: {ex}")
+
+def load_login_events(limit: int = 200) -> list:
+    """Return the most recent login events, newest first."""
+    try:
+        r = (_client().table("login_events")
+             .select("*")
+             .order("ts", desc=True)
+             .limit(limit)
+             .execute())
+        return r.data or []
+    except Exception as ex:
+        print(f"[db] load_login_events error: {ex}")
+        return []
+
+def login_summary(limit: int = 1000) -> list:
+    """Per-user rollup: total logins and the most recent login time. Newest
+    activity first. Computed from the recent event rows."""
+    events = load_login_events(limit)
+    by_user = {}
+    for e in events:
+        u = e.get("username", "?")
+        rec = by_user.setdefault(u, {
+            "username":     u,
+            "display_name": e.get("display_name") or u,
+            "role":         e.get("role", ""),
+            "count":        0,
+            "last_ts":      "",
+        })
+        rec["count"] += 1
+        ts = e.get("ts", "")
+        if ts > rec["last_ts"]:
+            rec["last_ts"] = ts
+            rec["display_name"] = e.get("display_name") or u
+            rec["role"] = e.get("role", rec["role"])
+    return sorted(by_user.values(), key=lambda r: r["last_ts"], reverse=True)
+
+# ════════════════════════════════════════════════════════════════════════════
 #  USER MANAGEMENT
 # ════════════════════════════════════════════════════════════════════════════
 ROLES = ["admin", "rqs", "housekeeper"]
