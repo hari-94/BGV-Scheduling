@@ -100,6 +100,40 @@ def save_full_schedule(data: dict):
         print(f"[db] save_full_schedule error: {ex}")
         raise
 
+def save_roster(hk_roster: dict, insp_roster: dict):
+    """Persist the standing housekeeper + inspector rosters as a single settings
+    record, independent of any day's schedule. This is what makes add/remove of
+    staff STICK across sessions, reloads, and redeploys — instead of resetting to
+    the hard-coded defaults. Stored in schedule_full under the fixed key 'roster'
+    (reusing the existing table so no schema change is needed)."""
+    payload = json.dumps({"hk_roster": hk_roster, "insp_roster": insp_roster}, default=str)
+    try:
+        _client().table("schedule_full").upsert(
+            {"date": "roster", "payload": payload},
+            on_conflict="date"
+        ).execute()
+    except Exception as ex:
+        print(f"[db] save_roster error: {ex}")
+        raise
+
+def load_roster() -> dict | None:
+    """Load the persisted standing rosters. Returns
+    {'hk_roster':..., 'insp_roster':...} or None if none saved yet."""
+    try:
+        r = (_client().table("schedule_full")
+             .select("*")
+             .eq("date", "roster")
+             .limit(1)
+             .execute())
+        rows = r.data or []
+        if not rows:
+            return None
+        payload = rows[0]["payload"]
+        return json.loads(payload) if isinstance(payload, str) else payload
+    except Exception as ex:
+        print(f"[db] load_roster error: {ex}")
+        return None
+
 def load_full_schedule(date_str: str = None) -> dict | None:
     """
     Load the full schedule for a given date (defaults to today).
