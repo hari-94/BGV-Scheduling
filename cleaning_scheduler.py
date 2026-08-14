@@ -79,9 +79,10 @@ MAX_DS   = 560
 DS_OVER  = 700
 LOW_FILL = 350
 
-# Daily Service charts target this range (each DS housekeeper's workload).
-DS_MIN   = 460
-DS_MAX   = 570
+# Daily Service: HARD cap per housekeeper. Fill up to DS_CAP, never exceed;
+# leftover rooms form new charts (blank housekeeper if none available, filled in
+# manually later based on how the day goes).
+DS_CAP   = 460
 # IH charts below this total are treated as scraps and spill to Daily Service
 # (kept charts at/above this are inspected by RQS 2).
 IH_KEEP_MIN = 310
@@ -1025,6 +1026,19 @@ def parse_email_notes(text: str) -> dict:
         if not rooms: continue
         qty = re.search(r'x(\d+)', content, re.IGNORECASE)
         qty_s = f" x{qty.group(1)}" if qty else ""
+        if section == "special requests":
+            # Capture the actual request detail (e.g. "2135A - Humidifier" ->
+            # "Special Request: Humidifier"). Skip "n/a". Strip the room codes and
+            # surrounding punctuation to leave just the request text.
+            detail = ROOM_RE.sub('', content.upper() if False else content)
+            detail = re.sub(r'\b[1-9]\d{3}[A-Z]{1,4}\b', '', detail)
+            detail = detail.strip(" -\u2013:;,\t").strip()
+            if detail.lower() in ("n/a","na",""):
+                for rm in rooms: notes.setdefault(rm, []).append(f"{label}{qty_s}")
+            else:
+                for rm in rooms:
+                    notes.setdefault(rm, []).append(f"{label}: {detail}{qty_s}")
+            continue
         for rm in rooms: notes.setdefault(rm, []).append(f"{label}{qty_s}")
     return {"late_checkout": late_co, "notes": notes}
 
@@ -1623,6 +1637,50 @@ def _bld(r):   return r.get("bld", 0)
 def _flr(r):   return r.get("floor", 0)
 def _rnum(r):  return r.get("num", 0)
 
+def _norm_guest(r):
+    g = re.sub(r'\s+', ' ', str(r.get("guest","")).strip())
+    return g if g.lower() not in {"","unallocated","---","deposit, deposit",
+                                  "room, walk","p/u models"} else ""
+
+def _cluster_adjacent_same_guest(rooms):
+    """HARD same-guest adjacency rule: rooms that share the SAME building, floor
+    AND room-number and belong to the same (real) guest are the same physical
+    unit and must never be split across housekeepers. Returns a list of "bundles"
+    (each a list of room dicts) — a bundle of >1 is locked together; singles pass
+    through as one-room bundles. Bundles are only kept together when they can
+    still form a legal chart (<=380, <=one 140, 140+<=one 120); if a guest's
+    adjacent rooms are collectively too big for one chart, they're split minimally
+    so each piece is chart-legal (a genuine no-option case)."""
+    from collections import defaultdict
+    by_key = defaultdict(list)
+    singles = []
+    for r in rooms:
+        g = _norm_guest(r)
+        if g:
+            # key on same physical room: building + floor + room number + guest
+            by_key[(_bld(r), _flr(r), _rnum(r), g)].append(r)
+        else:
+            singles.append([r])
+    bundles = []
+    for key, grp in by_key.items():
+        if len(grp) == 1:
+            bundles.append(grp); continue
+        # keep the adjacent same-guest rooms together, but if they can't legally
+        # share one chart, split into the fewest legal sub-bundles.
+        if _chart_feasible(grp):
+            bundles.append(grp)
+        else:
+            cur = []
+            for r in sorted(grp, key=lambda x: -x["time"]):
+                if cur and _chart_feasible(cur + [r]):
+                    cur.append(r)
+                elif cur:
+                    bundles.append(cur); cur = [r]
+                else:
+                    cur = [r]
+            if cur: bundles.append(cur)
+    return bundles + singles
+
 def _chart_feasible(chart, single_building=False):
     """Hard rules for a Full Clean / IH chart (list of room dicts)."""
     times = [r["time"] for r in chart]
@@ -1638,7 +1696,9 @@ def _chart_nbld(chart): return len(set(_bld(r) for r in chart))
 def _chart_spread(chart):
     if not chart: return 0
     fl = [_flr(r) for r in chart]; nm = [_rnum(r) for r in chart]
-    return (_chart_nbld(chart)-1)*100 + (max(fl)-min(fl))*10 + (max(nm)-min(nm))
+    # Weight room-number proximity more (walking down a hall) alongside floor
+    # changes, so charts group physically close rooms and cut housekeeper travel.
+    return (_chart_nbld(chart)-1)*100 + (max(fl)-min(fl))*10 + (max(nm)-min(nm))*2
 def _charts_xb(charts):     return sum(1 for c in charts if _chart_nbld(c) > 1)
 def _charts_spread(charts): return sum(_chart_spread(c) for c in charts if c)
 
@@ -1711,22 +1771,52 @@ def _fc_ls_tidy(charts, iters, rng):
             a.remove(u); a.append(v); b.remove(v); b.append(u)
     return [c for c in charts if c]
 
+def _bundle_to_unit(bundle):
+    """Collapse a locked bundle of adjacent same-guest rooms into one composite
+    'unit' the packer treats atomically. Carries the sub-rooms in _members."""
+    if len(bundle) == 1:
+        u = dict(bundle[0]); u["_members"] = bundle; return u
+    return {
+        "room":  bundle[0]["room"],
+        "time":  sum(r["time"] for r in bundle),
+        "bld":   bundle[0].get("bld", 0),
+        "floor": bundle[0].get("floor", 0),
+        "num":   bundle[0].get("num", 0),
+        "guest": bundle[0].get("guest", ""),
+        "_members": bundle,
+    }
+
+def _unpack_units(charts):
+    """Expand composite units back into their real room dicts."""
+    out = []
+    for c in charts:
+        rooms = []
+        for u in c:
+            rooms.extend(u.get("_members", [u]))
+        out.append(rooms)
+    return out
+
 def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
     """Tidy-first, min-count Full Clean solver. Priority: (1) fewest housekeepers,
-    (2) tidiest charts (single-building, contiguous) within that count. Returns a
-    list of charts (each a list of room dicts). Deterministic (fixed seed)."""
+    (2) tidiest charts (single-building, contiguous) within that count. Adjacent
+    same-guest rooms (same building+floor+room#) are locked together as one unit
+    and never split. Returns a list of charts (each a list of room dicts).
+    Deterministic (fixed seed)."""
     if not fc_rooms: return []
     import random as _rnd
     rng = _rnd.Random(seed)
+    # HARD adjacency rule: bundle adjacent same-guest rooms, then pack bundles.
+    bundles = _cluster_adjacent_same_guest(fc_rooms)
+    units = [_bundle_to_unit(b) for b in bundles]
     BLD = {3:0, 1:1, 2:2}
     orders = [
-        sorted(fc_rooms, key=lambda r: -r["time"]),
-        sorted(fc_rooms, key=lambda r: (-(r["time"]==140), -(r["time"]==120), -r["time"])),
-        sorted(fc_rooms, key=lambda r: (BLD.get(_bld(r),1), _flr(r), _rnum(r))),
+        sorted(units, key=lambda r: -r["time"]),
+        sorted(units, key=lambda r: (-(r["time"]==140), -(r["time"]==120), -r["time"])),
+        sorted(units, key=lambda r: (BLD.get(_bld(r),1), _flr(r), _rnum(r))),
     ]
     cands = [_fc_bestfit(o) for o in orders]
     for _ in range(restarts):
-        rr = list(fc_rooms); rng.shuffle(rr); cands.append(_fc_bestfit(rr))
+        rr = list(units); rng.shuffle(rr); cands.append(_fc_bestfit(rr))
     # Phase 1: building-aware count minimization
     best = None
     for c in cands:
@@ -1745,7 +1835,7 @@ def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
             if key < best[0]: best = (key, r); nb0 = nb
     charts = [c[:] for c in best[1] if c]
     charts = _fc_ls_tidy(charts, 8000, rng)   # tidy within the locked count
-    return charts
+    return _unpack_units(charts)
 
 def solve_ih(ih_rooms, seed=20240601):
     """Pack IH rooms into SINGLE-building charts <=380, keeping a guest's rooms
@@ -1780,24 +1870,22 @@ def solve_ih(ih_rooms, seed=20240601):
         else: leftover.extend(c)
     return keep, leftover
 
-def split_daily_service(ds_rooms, extra_rooms=None, lo=DS_MIN, hi=DS_MAX):
-    """Split Daily Service rooms into charts of lo..hi minutes each, by building
-    and contiguity. Any extra_rooms (leftover IH) are appended to the pool."""
+def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP):
+    """Split Daily Service rooms into charts with a HARD cap of `cap` minutes each
+    (fill up to cap, never exceed), by building and contiguity. Any extra_rooms
+    (leftover IH) are appended. Leftover rooms that don't fit an existing chart
+    open a new one; if there aren't enough housekeepers to cover every chart, the
+    later charts simply get a blank housekeeper (assigned manually later)."""
     rooms = list(ds_rooms) + list(extra_rooms or [])
     if not rooms: return []
     BLD = {3:0, 1:1, 2:2}
     rooms = sorted(rooms, key=lambda r: (BLD.get(_bld(r),1), _flr(r), _rnum(r)))
     charts = []; cur = []
     for r in rooms:
-        if cur and sum(x["time"] for x in cur) + r["time"] > hi:
+        if cur and sum(x["time"] for x in cur) + r["time"] > cap:
             charts.append(cur); cur = []
         cur.append(r)
     if cur: charts.append(cur)
-    # If the final chart is under `lo`, pull rooms from the previous chart's tail.
-    if len(charts) >= 2 and sum(x["time"] for x in charts[-1]) < lo:
-        prev, last = charts[-2], charts[-1]
-        while sum(x["time"] for x in last) < lo and sum(x["time"] for x in prev) > lo:
-            last.insert(0, prev.pop())
     return charts
 
 def build_all_groups(rooms, priority_hks=None):
@@ -1899,19 +1987,21 @@ def build_all_groups(rooms, priority_hks=None):
             g["rqs"] = IH_RQS          # RQS 2 inspects all IH charts
             ih_groups.append(g)
 
-    # ── Stage 3: Daily Service — split into DS_MIN..DS_MAX charts, +leftover IH ─
+    # ── Stage 3: Daily Service — HARD 460-min cap per chart, +leftover IH ──────
     if ds_rooms or ih_leftover:
         ds_charts = split_daily_service(ds_rooms, extra_rooms=ih_leftover)
         ds_groups = [mk(c, SVC_DS) for c in ds_charts]
         for g in ds_groups:
-            g["ds_overflow"] = g["time"] > DS_MAX
+            g["ds_overflow"] = g["time"] > DS_CAP   # shouldn't happen with hard cap
     else:
         ds_groups = []
 
     if dv_rooms:
+        # All Dust n Vac goes to RQS 2 (alongside Daily Service + IH inspection),
+        # not the Manager.
         dv_groups = [{"rooms":list(dv_rooms),"time":0,"blds":set(r["bld"] for r in dv_rooms),
                       "floors":set(r.get("floor",0) for r in dv_rooms),"c140":0,"c120":0,
-                      "service_type":SVC_DV,"dv_manager":True}]
+                      "service_type":SVC_DV,"dv_rqs2":True}]
     else:
         dv_groups = []
     # Verify group(s): stayover / P-U Models — no HK, no RQS, flagged for review.
@@ -1989,7 +2079,7 @@ def assign_hk_building_aware(groups, present_hk, roster):
             assignment[g["label"]] = ""; continue
         phk = g.get("priority_hk","")
         if not phk: continue
-        if g.get("dv_manager"): assignment[g["label"]]="Manager"; continue
+        if g.get("dv_rqs2"): assignment[g["label"]]=""; continue  # DV -> RQS2 inspector
         for b in [1,2,3]:
             if phk in available.get(b,[]):
                 available[b].remove(phk); break
@@ -2004,7 +2094,9 @@ def assign_hk_building_aware(groups, present_hk, roster):
         if g["label"] in assignment: continue
         if g.get("verify_group"):
             assignment[g["label"]] = ""; continue
-        if g.get("dv_manager"): assignment[g["label"]]="Manager"; continue
+        # Dust n Vac is carried by RQS 2 (inspector), not a housekeeper — leave the
+        # housekeeper field blank here; assign_inspectors puts it on RQS 2.
+        if g.get("dv_rqs2"): assignment[g["label"]]=""; continue
         is_ds = (g.get("service_type") == SVC_DS)
         matched = find_hk(g.get("blds",{1}), is_ds)
         assignment[g["label"]] = matched
@@ -2033,6 +2125,17 @@ def _insp_travel_score(batch):
     spread=0
     for b,fs in floors_by_bld.items():
         if fs: spread += (max(fs)-min(fs))
+    # Horizontal spread: how far apart the room numbers are within each building
+    # (walking down a long hall). Grouping physically close rooms cuts RQS travel.
+    nums_by_bld={}
+    for g in batch:
+        for b in g["blds"]:
+            for r in g.get("rooms",[]):
+                if r.get("bld")==b:
+                    nums_by_bld.setdefault(b,[]).append(r.get("num",0))
+    hspread=0
+    for b,ns in nums_by_bld.items():
+        if ns: hspread += (max(ns)-min(ns))
     # Weights: building hops are most expensive, then number of distinct
     # floor-stops, then how far apart those floors are. A batch that spans all
     # THREE buildings is very hard to inspect, so it gets a steep extra penalty
@@ -2040,7 +2143,7 @@ def _insp_travel_score(batch):
     # 3-building inspector as nearly forbidden.
     nbld = len(blds)
     three_bld_penalty = 400 if nbld >= 3 else 0
-    return nbld*12 + three_bld_penalty + cross*4 + len(floor_keys)*3 + spread*2
+    return nbld*12 + three_bld_penalty + cross*4 + len(floor_keys)*3 + spread*2 + hspread
 def _batch_heavy(batch):
     """Count of big rooms (120/140 min) across a batch — used to spread the
     hard-to-inspect rooms evenly across inspectors."""
@@ -2068,12 +2171,19 @@ def _insp_combined_score(batches):
     three_bld_batches = sum(1 for b in nonempty
                             if len(set().union(*[g["blds"] for g in b])) >= 3)
     THREE_BLD = three_bld_batches * 10000
-    # Balance terms, in priority order (below the 3-building override):
+    # An inspector must never be sent between Building 2 and Building 3 — they are
+    # at opposite ends with Building 1 as the only bridge, so covering both means
+    # walking the entire property. Penalize any batch spanning B2 and B3 as hard
+    # as a 3-building batch.
+    b2b3_batches = sum(1 for b in nonempty
+                       if {2,3}.issubset(set().union(*[g["blds"] for g in b])))
+    B2B3 = b2b3_batches * 10000
+    # Balance terms, in priority order (below the building overrides):
     #  1) heavy-CHART spread — no inspector gets all the 120+120+120 charts.
     #  2) heavy-ROOM spread — even count of individual 120/140 rooms.
     #  3) travel (building + floor aware).
     #  4) overall complexity spread — tie-breaker.
-    return (THREE_BLD
+    return (THREE_BLD + B2B3
             + (max(hc)-min(hc))*14
             + (max(hv)-min(hv))*8
             + tt*2
@@ -2141,12 +2251,16 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
         for g in batch: g["inspector"]=name
         inspectors.append(entry); assigned_names.add(name)
 
-    # ── Now decide if RQS1/RQS2 are needed for the LEFTOVER FC groups ────────
-    # If dedicated inspectors covered everything, RQS1 just does DV and RQS2
-    # just does DS (their normal roles). Only un-covered FC pulls them into FC.
+    # ── RQS role assignment (per operations policy) ──────────────────────────
+    #   • RQS 2 carries Daily Service + ALL Dust n Vac, and inspects IH.
+    #   • RQS 1 is NOT auto-assigned any rooms — left free for manual assignment
+    #     later based on how the day goes.
+    #   • Leftover Full Clean that dedicated inspectors can't cover opens extra
+    #     inspector slots (never dumped on RQS 1).
     fc_shortage = len(leftover_fc) > 0
 
-    # RQS2: normally Daily Service. On shortage, shares leftover FC (up to 6 units).
+    # RQS 2 shares leftover FC only if there genuinely aren't enough inspectors,
+    # but its primary load is DS + DV (+ IH already assigned above).
     rqs2_fc_groups = []
     if fc_shortage and rqs2:
         budget = 6
@@ -2156,35 +2270,17 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
             if budget <= 0: break
         leftover_fc = [g for g in leftover_fc if g not in rqs2_fc_groups]
 
-    if (ds_groups or rqs2_fc_groups) and rqs2:
-        r2_groups = ds_groups + rqs2_fc_groups
+    if (ds_groups or dv_groups or rqs2_fc_groups) and rqs2:
+        r2_groups = ds_groups + dv_groups + rqs2_fc_groups
         blds=sorted(set(b for g in r2_groups for b in g["blds"]))
         entry={"id":len(inspectors)+1,"name":rqs2,"role":"RQS2",
                "groups":[g["label"] for g in r2_groups],"buildings":blds}
         for g in r2_groups: g["inspector"]=rqs2
         inspectors.append(entry); assigned_names.add(rqs2)
 
-    # RQS1: prioritize remaining leftover FC first, then Dust n Vac.
-    rqs1_fc_groups = []; rqs1_units = 0
-    if leftover_fc and rqs1:
-        for g in sorted(leftover_fc, key=lambda g:(_primary_bld(g), len(g["rooms"]))):
-            rqs1_fc_groups.append(g); rqs1_units += len(g["rooms"])
-            if len(rqs1_fc_groups) >= per: break
-        leftover_fc = [g for g in leftover_fc if g not in rqs1_fc_groups]
+    # RQS 1: intentionally left with NO auto-assigned rooms.
 
-    # RQS1 still does DV only if it has < 9 FC units; otherwise Manager covers DV.
-    rqs1_does_dv = (rqs1_units < 9)
-    if rqs1 and (rqs1_fc_groups or (dv_groups and rqs1_does_dv)):
-        r1_groups = list(rqs1_fc_groups)
-        if dv_groups and rqs1_does_dv: r1_groups += dv_groups
-        blds=sorted(set(b for g in r1_groups for b in g["blds"]))
-        entry={"id":len(inspectors)+1,"name":rqs1,"role":"RQS1",
-               "groups":[g["label"] for g in r1_groups],"buildings":blds,
-               "complexity":round(_batch_complexity(rqs1_fc_groups),1) if rqs1_fc_groups else 0}
-        for g in r1_groups: g["inspector"]=rqs1
-        inspectors.append(entry); assigned_names.add(rqs1)
-
-    # Any leftover FC still unassigned → extra inspector slots
+    # Any leftover FC still unassigned → extra inspector slots (not RQS 1).
     while leftover_fc:
         batch = leftover_fc[:per]; leftover_fc = leftover_fc[per:]
         name = f"Inspector {len(inspectors)+1}"
@@ -2196,9 +2292,10 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
         for g in batch: g["inspector"]=name
         inspectors.append(entry)
 
-    # If RQS1 has 9+ FC units (or isn't doing DV), Dust n Vac falls to Manager.
+    # Safety net: if RQS 2 wasn't present, any DV without an inspector falls back
+    # to RQS 2's label so it's never silently dropped.
     for g in dv_groups:
-        if not g.get("inspector"): g["inspector"]="Manager"
+        if not g.get("inspector"): g["inspector"] = rqs2 or IH_RQS
     return inspectors
 
 # ══════════════════════════════════════════════════════════════════════════════
