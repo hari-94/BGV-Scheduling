@@ -3,6 +3,7 @@ Admin panel — user management (admin only).
 """
 import streamlit as st
 import sys, os
+import html as _html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import db, auth
 
@@ -187,7 +188,8 @@ st.markdown('<p class="pg-title">👑 Admin Panel</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">Logged in as <strong>{cu["username"]}</strong> · User management & system settings</p>',
             unsafe_allow_html=True)
 
-tab_users, tab_create, tab_pw = st.tabs(["👥 All Users", "➕ Create User", "🔑 Reset Password"])
+tab_users, tab_create, tab_pw, tab_activity = st.tabs(
+    ["👥 All Users", "➕ Create User", "🔑 Reset Password", "📊 Activity"])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ALL USERS
@@ -350,3 +352,79 @@ with tab_pw:
             else:
                 ok, msg = db.update_password(cu["username"], new_pw_own)
                 st.success(msg) if ok else st.error(msg)
+# ═══════════════════════════════════════════════════════════════════════════════
+# ACTIVITY — who is using the app
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_activity:
+    st.markdown('<p class="sec">App Usage</p>', unsafe_allow_html=True)
+    st.caption("Who has signed in, how often, and when they were last active.")
+
+    from datetime import datetime, timezone, timedelta
+    _MTN = timezone(timedelta(hours=-7))   # Mountain Time (matches the schedule app)
+    def _fmt_mtn(ts):
+        if not ts: return "—"
+        try:
+            s = str(ts).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(_MTN).strftime("%b %d, %Y · %I:%M %p")
+        except Exception:
+            return str(ts)
+    def _ago(ts):
+        try:
+            s = str(ts).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - dt
+            secs = int(delta.total_seconds())
+            if secs < 60:    return "just now"
+            if secs < 3600:  return f"{secs//60}m ago"
+            if secs < 86400: return f"{secs//3600}h ago"
+            return f"{secs//86400}d ago"
+        except Exception:
+            return ""
+
+    summary = db.login_summary()
+    events  = db.load_login_events(100)
+
+    if not summary:
+        st.info("No sign-ins recorded yet. Activity will appear here as people log in.")
+    else:
+        # Top-line metrics
+        c1, c2, c3 = st.columns(3)
+        c1.metric("People signed in", len(summary))
+        c2.metric("Total sign-ins", sum(r["count"] for r in summary))
+        _last = summary[0]["last_ts"] if summary else ""
+        c3.metric("Most recent", _ago(_last) or "—")
+
+        ROLE_LBL = {"admin":"Admin","rqs":"RQS","housekeeper":"Housekeeper"}
+
+        # Per-user rollup
+        st.markdown('<p class="sec" style="margin-top:1.2rem">By Person</p>', unsafe_allow_html=True)
+        for r in summary:
+            role_lbl = ROLE_LBL.get(r["role"], r["role"] or "—")
+            st.markdown(
+                f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                f'background:#ffffff;border:1px solid #e2e5ea;border-radius:10px;'
+                f'padding:10px 14px;margin-bottom:6px">'
+                f'<div><span style="font-weight:600;color:#16202e">{_html.escape(r["display_name"])}</span>'
+                f'<span style="color:#8a93a1;font-size:.78rem;margin-left:8px">{role_lbl}</span></div>'
+                f'<div style="text-align:right">'
+                f'<div style="color:#16202e;font-size:.82rem">{_fmt_mtn(r["last_ts"])}</div>'
+                f'<div style="color:#8a93a1;font-size:.72rem">{r["count"]} sign-in(s) · {_ago(r["last_ts"])}</div>'
+                f'</div></div>',
+                unsafe_allow_html=True)
+
+        # Recent sign-in feed
+        st.markdown('<p class="sec" style="margin-top:1.2rem">Recent Sign-ins</p>', unsafe_allow_html=True)
+        feed = ""
+        for e in events[:40]:
+            nm = _html.escape(e.get("display_name") or e.get("username","?"))
+            role_lbl = ROLE_LBL.get(e.get("role",""), e.get("role","") or "")
+            feed += (f'<div style="display:flex;justify-content:space-between;'
+                     f'padding:6px 2px;border-bottom:1px solid #eef0f3;font-size:.8rem">'
+                     f'<span style="color:#1f2733">{nm}'
+                     f'<span style="color:#8a93a1;font-size:.72rem;margin-left:6px">{role_lbl}</span></span>'
+                     f'<span style="color:#5b6675">{_fmt_mtn(e.get("ts",""))}</span></div>')
+        st.markdown(f'<div style="background:#ffffff;border:1px solid #e2e5ea;'
+                    f'border-radius:10px;padding:8px 14px">{feed}</div>', unsafe_allow_html=True)
