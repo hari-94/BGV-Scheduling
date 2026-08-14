@@ -816,13 +816,37 @@ table{min-width:0;width:100%;border-collapse:collapse;}
 # ══════════════════════════════════════════════════════════════════════════════
 #  SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
+def _persist_roster():
+    """Save the current housekeeper + inspector rosters to the database so all
+    changes (add, remove, present-toggle, building move, bulk set) survive page
+    reloads, new sessions, and redeploys. Silent no-op if the DB is unreachable."""
+    try:
+        db.save_roster(st.session_state.get("hk_roster", {}),
+                       st.session_state.get("insp_roster", {}))
+    except Exception as _ex:
+        print(f"[app] _persist_roster failed: {_ex}")
+
 def _init_state():
     if "hk_roster" not in st.session_state:
-        roster = {}
-        for bld, names in DEFAULT_HK.items():
-            for n in names:
-                roster[n] = {"building": bld, "present": True}
-        st.session_state["hk_roster"] = roster
+        # Load the standing roster from the database first — this is what people
+        # actually see, so add/remove of staff must persist. Only if nothing has
+        # ever been saved do we seed from the hard-coded DEFAULT_HK.
+        saved_roster = None
+        try:
+            saved_roster = db.load_roster()
+        except Exception:
+            saved_roster = None
+        if saved_roster and saved_roster.get("hk_roster"):
+            st.session_state["hk_roster"]   = saved_roster["hk_roster"]
+            st.session_state["insp_roster"] = saved_roster.get("insp_roster") \
+                or {n: True for n in DEFAULT_INSPECTORS}
+        else:
+            roster = {}
+            for bld, names in DEFAULT_HK.items():
+                for n in names:
+                    roster[n] = {"building": bld, "present": True}
+            st.session_state["hk_roster"] = roster
+            st.session_state["insp_roster"] = {n: True for n in DEFAULT_INSPECTORS}
     if "insp_roster" not in st.session_state:
         st.session_state["insp_roster"] = {n: True for n in DEFAULT_INSPECTORS}
     for k, default in [("groups_data",None),("total_rooms",None),
@@ -965,13 +989,11 @@ if not st.session_state.get("_did_initial_restore", False):
     st.session_state["_did_initial_restore"] = True
     try:
         saved = db.load_full_schedule()
-        if saved:
-            # Restore attendance rosters regardless of whether a schedule exists,
-            # so HK and inspector check-marks both survive a logout/login.
-            if saved.get("hk_roster"):
-                st.session_state["hk_roster"]   = saved["hk_roster"]
-            if saved.get("insp_roster"):
-                st.session_state["insp_roster"] = saved["insp_roster"]
+        # NOTE: we deliberately do NOT restore hk_roster / insp_roster from the
+        # daily schedule here. The authoritative, persistent roster is loaded in
+        # _init_state() from db.load_roster(). A day's saved schedule can contain
+        # a stale roster (e.g. someone you removed yesterday), and restoring it
+        # here would bring removed people back — the exact bug we're fixing.
         if saved and saved.get("groups_data"):
             _loaded_groups = saved.get("groups_data") or []
             # JSON serialization turns sets into lists (or strings). Restore them
@@ -2676,10 +2698,12 @@ with st.sidebar:
             if st.button("Add HK", key="btn_add_hk"):
                 n = new_hk_name.strip()
                 if n and n not in st.session_state["hk_roster"]:
-                    st.session_state["hk_roster"][n] = {"building":new_hk_bld,"present":True}; st.success(f"Added {n}")
+                    st.session_state["hk_roster"][n] = {"building":new_hk_bld,"present":True}
+                    _persist_roster(); st.success(f"Added {n}")
             rm_hk = st.selectbox("Remove", ["—"]+list(st.session_state["hk_roster"].keys()), key="rm_hk_sel")
             if st.button("Remove", key="btn_rm_hk") and rm_hk != "—":
-                del st.session_state["hk_roster"][rm_hk]; st.success(f"Removed {rm_hk}")
+                del st.session_state["hk_roster"][rm_hk]
+                _persist_roster(); st.success(f"Removed {rm_hk}")
 
         st.markdown("### 🧑‍🔧 Housekeepers")
         st.caption("Check ✅ to mark present. Use ◀▶ buttons to move between buildings.")
@@ -2736,13 +2760,7 @@ with st.sidebar:
                         for _n in new_names:
                             roster[_n] = {"building":bld, "present":True}
                         st.session_state["hk_roster"] = roster
-                        try:
-                            _ex = db.load_full_schedule() or {}
-                            _ex["hk_roster"]   = dict(roster)
-                            _ex["insp_roster"] = dict(st.session_state.get("insp_roster",{}))
-                            db.save_full_schedule(_ex)
-                        except Exception:
-                            pass
+                        _persist_roster()
                         st.toast(f"📋 Building {bld}: set {len(new_names)} housekeepers")
                         st.rerun()
                     else:
@@ -2752,7 +2770,11 @@ with st.sidebar:
                 c_chk, c_name, c_left, c_right = st.columns([0.4,3.2,0.6,0.6])
                 with c_chk:
                     checked = st.checkbox("", value=roster[name]["present"], key=f"att_{name}", label_visibility="collapsed")
-                    roster[name]["present"] = checked
+                    if roster[name]["present"] != checked:
+                        roster[name]["present"] = checked
+                        _persist_roster()
+                    else:
+                        roster[name]["present"] = checked
                 with c_name:
                     col2 = "inherit" if checked else "#94a3b8"
                     td   = "none"    if checked else "line-through"
@@ -2760,11 +2782,11 @@ with st.sidebar:
                 with c_left:
                     if bld > 1:
                         if st.button("◀", key=f"ml_{name}", use_container_width=True):
-                            roster[name]["building"] = bld-1; st.rerun()
+                            roster[name]["building"] = bld-1; _persist_roster(); st.rerun()
                 with c_right:
                     if bld < 3:
                         if st.button("▶", key=f"mr_{name}", use_container_width=True):
-                            roster[name]["building"] = bld+1; st.rerun()
+                            roster[name]["building"] = bld+1; _persist_roster(); st.rerun()
                 if roster[name]["present"]: present_hk.append(name)
 
         # Persist HK attendance immediately so it survives logout/login.
@@ -2783,10 +2805,10 @@ with st.sidebar:
             if st.button("Add Inspector", key="btn_add_insp"):
                 n = new_insp.strip()
                 if n and n not in st.session_state["insp_roster"]:
-                    st.session_state["insp_roster"][n]=True; st.success(f"Added {n}")
+                    st.session_state["insp_roster"][n]=True; _persist_roster(); st.success(f"Added {n}")
             rm_insp = st.selectbox("Remove",["—"]+list(st.session_state["insp_roster"].keys()),key="rm_insp_sel")
             if st.button("Remove", key="btn_rm_insp") and rm_insp != "—":
-                del st.session_state["insp_roster"][rm_insp]; st.success(f"Removed {rm_insp}")
+                del st.session_state["insp_roster"][rm_insp]; _persist_roster(); st.success(f"Removed {rm_insp}")
 
         st.markdown("### 🔍 Inspectors")
         insp_roster = st.session_state["insp_roster"]
