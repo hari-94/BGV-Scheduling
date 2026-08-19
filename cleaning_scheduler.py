@@ -4079,6 +4079,112 @@ else:
                     "HSKP","RQS","Notes","Status","Carpet","Stripping","Arriving Guest"]
     if not export_df.empty:
         export_df = export_df[[c for c in _EXPORT_COLS if c in export_df.columns]]
-    # utf-8-sig adds a BOM so Excel reads emoji/accents correctly (no more mojibake)
-    csv = export_df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("⬇️ Download CSV", data=csv, file_name="cleaning_schedule.csv", mime="text/csv")
+
+    # ── Build a formatted Excel workbook: the 12-column schedule up top, a 7-row
+    #    gap, then a pivot summary (RQS → HSKP → rooms, with subtotals and a grand
+    #    total) matching the reference layout. ──────────────────────────────────
+    def _build_excel(main_df, rows_for_pivot):
+        from io import BytesIO
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        from collections import OrderedDict
+
+        def _to_int(v):
+            try:    return int(float(v))
+            except: return 0
+
+        wb = Workbook(); ws = wb.active; ws.title = "Schedule"
+        FONT   = "Arial"
+        reg    = Font(name=FONT, size=10)
+        bold   = Font(name=FONT, size=10, bold=True)
+        hdr_f  = Font(name=FONT, size=10, bold=True, color="FFFFFF")
+        hdr_fl = PatternFill("solid", fgColor="2563A8")
+        sub_fl = PatternFill("solid", fgColor="EEF0F3")
+        rqs_fl = PatternFill("solid", fgColor="D9E1EC")
+        thin   = Side(style="thin", color="D0D5DD")
+        border = Border(bottom=thin)
+
+        # ── Main table ───────────────────────────────────────────────────────
+        cols = list(main_df.columns)
+        for ci, h in enumerate(cols, 1):
+            c = ws.cell(row=1, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
+            c.alignment = Alignment(horizontal="left", vertical="center")
+        r_i = 2
+        for _, row in main_df.iterrows():
+            for ci, h in enumerate(cols, 1):
+                val = row[h]
+                if h == "Time (min)":
+                    val = _to_int(val) if str(val) != "" else ""
+                ws.cell(row=r_i, column=ci, value=val).font = reg
+            r_i += 1
+        main_end = r_i - 1
+
+        # Column widths for the main table
+        widths = {"Room":10,"Service":16,"Time (min)":11,"Pet":6,
+                  "Current Guest or Status":30,"HSKP":16,"RQS":14,"Notes":26,
+                  "Status":12,"Carpet":9,"Stripping":10,"Arriving Guest":18}
+        for ci, h in enumerate(cols, 1):
+            ws.column_dimensions[get_column_letter(ci)].width = widths.get(h, 14)
+
+        # ── 7-row gap, then the pivot ────────────────────────────────────────
+        pivot_start = main_end + 7 + 1     # leave exactly 7 blank rows
+
+        # Group by RQS → HSKP in first-seen order (preserves the schedule order)
+        piv = OrderedDict()
+        for r in rows_for_pivot:
+            rqs = (r.get("RQS","") or "").strip() or "(blank)"
+            hk  = (r.get("HSKP","") or "").strip() or "(blank)"
+            piv.setdefault(rqs, OrderedDict()).setdefault(hk, []).append(r)
+
+        PH = ["RQS","HSKP","Room","Service","Sum of Time (min)"]
+        pr = pivot_start
+        for ci, h in enumerate(PH, 1):
+            c = ws.cell(row=pr, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
+        pr += 1
+        grand = 0
+        for rqs, hks in piv.items():
+            rqs_total = 0; first_rqs = True
+            for hk, items in hks.items():
+                hk_total = 0; first_hk = True
+                for it in items:
+                    ws.cell(row=pr, column=1, value=(rqs if first_rqs else "")).font = reg
+                    ws.cell(row=pr, column=2, value=(hk  if first_hk  else "")).font = reg
+                    ws.cell(row=pr, column=3, value=it.get("Room","")).font = reg
+                    ws.cell(row=pr, column=4, value=it.get("Service","")).font = reg
+                    tv = it.get("Time (min)","")
+                    t  = _to_int(tv)
+                    ws.cell(row=pr, column=5, value=(t if str(tv) != "" else "")).font = reg
+                    hk_total += t; first_rqs = False; first_hk = False; pr += 1
+                # Housekeeper subtotal
+                ws.cell(row=pr, column=2, value=f"{hk} Total").font = bold
+                ws.cell(row=pr, column=5, value=(hk_total or "")).font = bold
+                for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = sub_fl
+                rqs_total += hk_total; pr += 1
+            # RQS subtotal
+            ws.cell(row=pr, column=1, value=f"{rqs} Total").font = bold
+            ws.cell(row=pr, column=5, value=(rqs_total or "")).font = bold
+            for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = rqs_fl
+            grand += rqs_total; pr += 1
+        # Grand total
+        ws.cell(row=pr, column=1, value="Grand Total").font = bold
+        ws.cell(row=pr, column=5, value=grand).font = bold
+        for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = rqs_fl
+
+        ws.freeze_panes = "A2"
+        buf = BytesIO(); wb.save(buf); return buf.getvalue()
+
+    # Rows for the pivot, in the same confirmed→uncertain→verify order as the table
+    _pivot_rows = export_df.to_dict("records") if not export_df.empty else []
+    try:
+        xlsx_bytes = _build_excel(export_df, _pivot_rows)
+        st.download_button("⬇️ Download Excel", data=xlsx_bytes,
+                           file_name="cleaning_schedule.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    except Exception as _xl_ex:
+        # Fall back to CSV if Excel generation ever fails, so the download button
+        # is never dead.
+        csv = export_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("⬇️ Download CSV", data=csv,
+                           file_name="cleaning_schedule.csv", mime="text/csv")
+        st.caption(f"(Excel export unavailable: {_xl_ex})")
