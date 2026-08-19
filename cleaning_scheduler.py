@@ -3299,22 +3299,26 @@ present_insp= [n for n,v in st.session_state["insp_roster"].items() if v]
 
 st.markdown("---")
 fc_g=[g for g in fg if g.get("service_type")==SVC_FC]
+ih_g=[g for g in fg if g.get("service_type")==SVC_IH]
 ds_g=[g for g in fg if g.get("service_type")==SVC_DS]
 dv_g=[g for g in fg if g.get("service_type")==SVC_DV]
-avg_t=sum(g["time"] for g in fg)//max(len(fg),1)
+# Room counts per service (what actually matters day-to-day), not group counts.
+fc_rooms_n = sum(len(g["rooms"]) for g in fc_g)
+ih_rooms_n = sum(len(g["rooms"]) for g in ih_g)
+ds_rooms_n = sum(len(g["rooms"]) for g in ds_g)
+dv_rooms_n = sum(len(g["rooms"]) for g in dv_g)
 n_free_hk=sum(1 for n in present_hk if n not in used_hk_set)
 n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager" and g["time"]<LOW_MIN)
 
 st.markdown(f"""<div class="stat-row">
-  <div class="sc hi"><div class="n">{len(fg)}</div><div class="l">Total Groups</div></div>
-  <div class="sc"><div class="n"style="color:#2563EB">{len(fc_g)}</div><div class="l">Full Clean</div></div>
-  <div class="sc ds"><div class="n">{len(ds_g)}</div><div class="l">Daily Service</div></div>
-  <div class="sc dv"><div class="n">{len(dv_g)}</div><div class="l">Dust &amp; Vac</div></div>
-  <div class="sc"><div class="n">{total_rooms}</div><div class="l">Rooms</div></div>
-  <div class="sc"><div class="n">{avg_t}m</div><div class="l">Avg Time</div></div>
-  <div class="sc"><div class="n"style="color:{'#059669' if n_free_hk==0 else '#d97706'}">{n_free_hk}</div>
+  <div class="sc hi"><div class="n">{total_rooms}</div><div class="l">Total Rooms</div></div>
+  <div class="sc"><div class="n" style="color:#2563EB">{fc_rooms_n}</div><div class="l">Full Clean</div></div>
+  <div class="sc"><div class="n" style="color:#7C3AED">{ih_rooms_n}</div><div class="l">Full Clean (IH)</div></div>
+  <div class="sc ds"><div class="n">{ds_rooms_n}</div><div class="l">Daily Service</div></div>
+  <div class="sc dv"><div class="n">{dv_rooms_n}</div><div class="l">Dust &amp; Vac</div></div>
+  <div class="sc"><div class="n" style="color:{'#059669' if n_free_hk==0 else '#d97706'}">{n_free_hk}</div>
     <div class="l">Free HKs</div></div>
-  <div class="sc"><div class="n"style="color:{'#059669' if n_low_hk==0 else '#dc2626'}">{n_low_hk}</div>
+  <div class="sc"><div class="n" style="color:{'#059669' if n_low_hk==0 else '#dc2626'}">{n_low_hk}</div>
     <div class="l">Low-Hour HKs</div></div>
 </div>""", unsafe_allow_html=True)
 
@@ -3564,155 +3568,162 @@ if _is_hk:
 
 else:
     # ══════════════════════════════════════════════════════════════════════
-    # ADMIN / RQS VIEW — full 4-tab interface
+    # ADMIN / RQS VIEW — one comprehensive schedule table + Live tracking
     # ══════════════════════════════════════════════════════════════════════
-    tab_hk, tab_insp, tab_grp, tab_live = st.tabs(["Housekeepers","Inspectors","Groups","Live"])
+    tab_sched, tab_live = st.tabs(["Schedule", "Live"])
 
-    with tab_hk:
-        hk_time={}; hk_grps={}
+    with tab_sched:
+        # Optional filter bar
+        f1, f2, f3 = st.columns([2,2,2])
+        _all_hk  = sorted(set(g.get("housekeeper","") for g in fg if g.get("housekeeper","")))
+        _all_rqs = sorted(set(g.get("inspector","")   for g in fg if g.get("inspector","")))
+        with f1: _fhk  = st.selectbox("Housekeeper", ["All"]+_all_hk,  key="sch_hk_filter")
+        with f2: _frqs = st.selectbox("Inspector (RQS)", ["All"]+_all_rqs, key="sch_rqs_filter")
+        with f3: _fsvc = st.selectbox("Service", ["All",SVC_FC,SVC_IH,SVC_DS,SVC_DV], key="sch_svc_filter")
+
+        # ── Build one row per housekeeper, grouping all their rooms together ──
+        # Verify/blank-housekeeper groups are collected under an "Unassigned" row.
+        by_hk = {}   # hk_name -> {"insp":set, "bld":set, "rooms":[room dicts + svc], "time":int}
         for g in fg:
-            hk=g.get("housekeeper","")
-            if hk and hk!="Manager":
-                hk_time[hk]=hk_time.get(hk,0)+g["time"]
-                hk_grps.setdefault(hk,[]).append(g["label"])
-        rows_hk=[]
-        for name in present_hk:
-            t=hk_time.get(name,0); gs=hk_grps.get(name,[])
-            b=st.session_state["hk_roster"].get(name,{}).get("building","?")
-            stat="free" if not gs else ("low" if t<LOW_MIN else "ok")
-            rows_hk.append({"name":name,"bld":b,"groups":gs,"time":t,"stat":stat})
-        rows_hk.sort(key=lambda r:{"free":0,"low":1,"ok":2}[r["stat"]])
-        def hk_bld_tag(r):
-            ac2,bg2=BLD_COLORS.get(r["bld"],("#888","#eee"))
-            return f'<span style="background:{bg2};color:{ac2};border-radius:5px;padding:1px 7px;font-size:.7rem;font-weight:700">Bldg {r["bld"]}</span>'
-        def hk_status_tag(r):
-            if r["stat"]=="free": return '<span style="background:#dcfce7;color:#15803d;border-radius:5px;padding:2px 8px;font-size:.69rem;font-weight:700"> Free</span>'
-            if r["stat"]=="low": return '<span style="background:#fef9c3;color:#a16207;border-radius:5px;padding:2px 8px;font-size:.69rem;font-weight:700"> Low</span>'
-            return ""
-        def hk_pills(r):
-            if not r["groups"]: return '<span style="color:#94a3b8">—</span>'
-            out=""
-            for gl in r["groups"]:
-                idx=next((j for j,g in enumerate(fg) if g["label"]==gl),-1)
-                ac2,bg2=pal(idx) if idx>=0 else ("#888","#eee")
-                g_obj=next((g for g in fg if g["label"]==gl),{})
-                svc_short={"Full Clean":"FC","Daily Service":"DS","Dust n Vac":"DV"}.get(g_obj.get("service_type",""),"")
-                out+=f'<span style="background:{bg2};color:{ac2};border:1px solid {ac2}44;border-radius:5px;padding:1px 7px;font-size:.7rem;font-weight:700;margin-right:3px">{gl} <span style="opacity:.6;font-size:.65rem">{svc_short}</span></span>'
-            return out
-        def hk_bar(r):
-            if not r["time"]: return '<span style="color:#94a3b8">—</span>'
-            pct=min(int(r["time"]/380*100),100)
-            col="#10b981" if r["stat"]=="ok" else "#f59e0b"
-            return (f'<div style="display:flex;align-items:center;gap:7px">'
-                    f'<span style="font-weight:600;color:#1e293b;min-width:48px">{r["time"]}m</span>'
-                    f'<div style="background:#e5e7eb;border-radius:4px;height:7px;width:75px">'
-                    f'<div style="background:{col};width:{pct}%;height:7px;border-radius:4px"></div></div></div>')
-        tbl=staff_table_html(rows_hk,["Housekeeper","Building","Status","Groups","Time"],
-            [lambda r:f'<span style="font-weight:600;color:{_C["txt"]}">{e(r["name"])}</span>',
-             hk_bld_tag,hk_status_tag,hk_pills,hk_bar],
-            lambda r:{"free":"#f0fdf4","low":"#fefce8","ok":"#fff"}[r["stat"]])
-        components.html(tbl, height=max(70+len(rows_hk)*42,120), scrolling=False)
+            hk   = g.get("housekeeper","") or ("Unassigned" if g.get("verify_group") else "")
+            insp = g.get("inspector","")
+            svc  = g.get("service_type","")
+            if not hk: hk = "Unassigned"
+            rec = by_hk.setdefault(hk, {"insp":set(), "bld":set(), "rooms":[], "time":0})
+            if insp: rec["insp"].add(insp)
+            for r in g["rooms"]:
+                rec["bld"].add(r.get("bld",0))
+                rec["rooms"].append({**r, "_svc":svc})
+            rec["time"] += g["time"]
+
+        # Apply filters
+        def _keep(hk, rec):
+            if _fhk  != "All" and hk != _fhk: return False
+            if _frqs != "All" and _frqs not in rec["insp"]: return False
+            if _fsvc != "All" and not any(x["_svc"]==_fsvc for x in rec["rooms"]): return False
+            return True
+
+        # Order: assigned housekeepers first (by building then name), Unassigned last
+        ordered = sorted(
+            [(hk,rec) for hk,rec in by_hk.items() if _keep(hk,rec)],
+            key=lambda kv:(kv[0]=="Unassigned", min(kv[1]["bld"]) if kv[1]["bld"] else 9, kv[0].lower())
+        )
+
+        SVC_SHORT = {SVC_FC:"FC", SVC_IH:"IH", SVC_DS:"DS", SVC_DV:"DV"}
+        SVC_COL   = {SVC_FC:"#2563a8", SVC_IH:"#7c3aed", SVC_DS:"#0f766e", SVC_DV:"#b45309"}
+
+        def _rooms_cell(rec):
+            # filter this row's rooms by the service filter too, for a clean view
+            rooms = rec["rooms"]
+            if _fsvc != "All": rooms = [x for x in rooms if x["_svc"]==_fsvc]
+            # sort rooms by building, floor, number
+            rooms = sorted(rooms, key=lambda x:(x.get("bld",0), x.get("floor",0), x.get("num",0)))
+            out = []
+            for x in rooms:
+                col = SVC_COL.get(x["_svc"], "#475569")
+                tm  = x.get("time",0)
+                tm_s = f' <span style="color:#9aa4b2;font-size:.66rem">{tm}m</span>' if tm else ""
+                out.append(
+                    f'<span style="display:inline-block;background:{col}14;color:{col};'
+                    f'border:1px solid {col}33;border-radius:6px;padding:2px 8px;margin:2px 3px 2px 0;'
+                    f'font-size:.72rem;font-weight:600;white-space:nowrap">'
+                    f'{e(x.get("room",""))}{tm_s}</span>')
+            return "".join(out) or '<span style="color:#9aa4b2">—</span>'
+
+        def _svc_cell(rec):
+            svcs = []
+            for s in [SVC_FC,SVC_IH,SVC_DS,SVC_DV]:
+                if any(x["_svc"]==s for x in rec["rooms"]):
+                    if _fsvc!="All" and s!=_fsvc: continue
+                    c=SVC_COL[s]
+                    svcs.append(f'<span style="background:{c}14;color:{c};border-radius:5px;'
+                                f'padding:1px 7px;font-size:.68rem;font-weight:700;margin-right:3px;'
+                                f'white-space:nowrap">{SVC_SHORT[s]}</span>')
+            return "".join(svcs) or '<span style="color:#9aa4b2">—</span>'
+
+        def _notes_cell(rec):
+            parts = []
+            seen = set()
+            for x in rec["rooms"]:
+                n = (x.get("notes","") or "").strip()
+                if n and n not in seen:
+                    seen.add(n)
+                    parts.append(f'<div style="font-size:.7rem;color:#5b6675;line-height:1.5">'
+                                 f'<span style="color:#8a93a1">{e(x.get("room",""))}:</span> {e(n)}</div>')
+            return "".join(parts) or '<span style="color:#9aa4b2">—</span>'
+
+        def _late_cell(rec):
+            parts = []
+            for x in sorted(rec["rooms"], key=lambda x:x.get("room","")):
+                lc = (x.get("late_checkout","") or "").strip()
+                if lc:
+                    t = lc.replace("Late Out: ","").replace("Late Out","").strip() or "Late"
+                    parts.append(f'<div style="font-size:.7rem;color:#b45309;font-weight:600;'
+                                 f'line-height:1.5">{e(x.get("room",""))} · {e(t)}</div>')
+            return "".join(parts) or '<span style="color:#9aa4b2">—</span>'
+
+        def _insp_cell(rec):
+            if not rec["insp"]: return '<span style="color:#9aa4b2">—</span>'
+            return " · ".join(f'<span style="color:#16202e;font-weight:600">{e(i)}</span>'
+                              for i in sorted(rec["insp"]))
+
+        def _hk_cell(hk, rec):
+            blds = "".join(
+                f'<span style="background:{BLD_COLORS.get(b,("#888","#eee"))[1]};'
+                f'color:{BLD_COLORS.get(b,("#888","#eee"))[0]};border-radius:4px;'
+                f'padding:0 6px;font-size:.62rem;font-weight:700;margin-left:5px">B{b}</span>'
+                for b in sorted(rec["bld"]) if b)
+            low = ""
+            if hk!="Unassigned" and rec["time"] and rec["time"]<LOW_MIN:
+                low = ('<span style="background:#fff4e5;color:#b45309;border-radius:4px;'
+                       'padding:0 6px;font-size:.6rem;font-weight:700;margin-left:5px">LOW</span>')
+            nm_col = "#9aa4b2" if hk=="Unassigned" else "#16202e"
+            return (f'<span style="font-weight:700;color:{nm_col};font-size:.85rem">{e(hk)}</span>'
+                    f'{blds}{low}'
+                    f'<div style="font-size:.66rem;color:#8a93a1;margin-top:2px">{rec["time"]}m</div>')
+
+        # Render the comprehensive table
+        th = ("padding:10px 12px;text-align:left;font-family:'DM Mono',monospace;"
+              "font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.09em;"
+              f"color:{_C['txt3']};background:{_C['th_bg']};border-bottom:1px solid {_C['row_br']};"
+              "position:sticky;top:0;z-index:2")
+        cols = ["Housekeeper","Service","Rooms","Inspector","Notes","Late Out"]
+        widths = ["15%","9%","34%","12%","20%","10%"]
+        head = "".join(f'<th style="{th};width:{w}">{c}</th>' for c,w in zip(cols,widths))
+        body = ""
+        for i,(hk,rec) in enumerate(ordered):
+            delay=f"{min(i*0.025,0.6):.2f}s"
+            cells = [_hk_cell(hk,rec), _svc_cell(rec), _rooms_cell(rec),
+                     _insp_cell(rec), _notes_cell(rec), _late_cell(rec)]
+            tds = "".join(
+                f'<td style="padding:9px 12px;border-bottom:1px solid {_C["row_br"]};'
+                f'vertical-align:top">{c}</td>' for c in cells)
+            body += (f'<tr style="animation:rowIn .3s {delay} both" '
+                     f'onmouseover="this.style.background=\'{_C["th_bg"]}\'" '
+                     f'onmouseout="this.style.background=\'transparent\'" '
+                     f'style="transition:background .15s">{tds}</tr>')
+        table_html = f"""<!DOCTYPE html><html><head>{SHARED_CSS}
+<style>
+tr{{transition:background .15s ease}}
+tr:hover td{{background:{_C['th_bg']}!important}}
+td{{transition:background .15s ease}}
+</style></head><body>
+<div style="border-radius:12px;overflow:hidden;border:1px solid {_C['card_br']};
+            background:{_C['tbl_bg']};box-shadow:{_C['card_sh']}">
+<table style="width:100%;border-collapse:collapse;font-size:.8rem">
+  <thead><tr>{head}</tr></thead><tbody>{body}</tbody>
+</table></div></body></html>"""
+        _row_h = 0
+        for hk,rec in ordered:
+            nrooms = len(rec["rooms"]) if _fsvc=="All" else len([x for x in rec["rooms"] if x["_svc"]==_fsvc])
+            _row_h += max(52, 30 + ((nrooms+5)//6)*30)
+        components.html(table_html, height=min(max(_row_h+70, 160), 4000), scrolling=True)
+
         if n_free_hk or n_low_hk:
             parts=[]
             if n_free_hk: parts.append(f"**{n_free_hk}** HK(s) unassigned")
-            if n_low_hk: parts.append(f"**{n_low_hk}** HK(s) low hours")
-            st.warning(" · ".join(parts))
-
-    with tab_insp:
-        used_insp={insp.get("name","") for insp in inspectors}
-        rows_insp=[]
-        for insp in inspectors:
-            rows_insp.append({"name":insp.get("name",""),"role":insp.get("role","FC"),
-                               "groups":insp["groups"],"buildings":insp.get("buildings",[]),
-                               "stat":"","complexity":insp.get("complexity","—"),
-                               "heavy_warning":insp.get("heavy_warning",False)})
-        for nm in present_insp:
-            if nm not in used_insp:
-                rows_insp.append({"name":nm,"role":"—","groups":[],"buildings":[],"stat":"free","complexity":"—","heavy_warning":False})
-        def insp_role_tag(r):
-            rm={"RQS1":("#92400e","#fef3c7","RQS1"),"RQS2":("#15803d","#dcfce7","RQS2"),"FC":("#1d4ed8","#dbeafe","FC"),"—":("#94a3b8","#f1f5f9","—")}
-            c2,bg2,lbl=rm.get(r["role"],("#888","#eee",r["role"]))
-            return f'<span style="background:{bg2};color:{c2};border-radius:5px;padding:2px 8px;font-size:.69rem;font-weight:700">{lbl}</span>'
-        def insp_bld_tags(r):
-            out=""
-            for b in r["buildings"]:
-                ac2,bg2=BLD_COLORS.get(b,("#888","#eee"))
-                out+=f'<span style="background:{bg2};color:{ac2};border-radius:4px;padding:1px 6px;font-size:.68rem;font-weight:700;margin-right:3px">Bldg {b}</span>'
-            return out or '<span style="color:#94a3b8">—</span>'
-        def insp_grp_pills(r):
-            if not r["groups"]: return '<span style="color:#94a3b8">—</span>'
-            out=""
-            for gl in r["groups"]:
-                idx=next((j for j,g in enumerate(fg) if g["label"]==gl),-1)
-                ac2,bg2=pal(idx) if idx>=0 else ("#888","#eee")
-                out+=f'<span style="background:{bg2};color:{ac2};border:1px solid {ac2}44;border-radius:5px;padding:1px 7px;font-size:.7rem;font-weight:700;margin-right:3px">{gl}</span>'
-            return out
-        def insp_complexity_tag(r):
-            c=r.get("complexity","—"); heavy=r.get("heavy_warning",False)
-            col="#9b1c1c" if heavy else "#475569"; bg2="#fde8e8" if heavy else "#f1f5f9"
-            return f'<span style="background:{bg2};color:{col};border-radius:5px;padding:2px 8px;font-size:.72rem;font-weight:700">{c}{"" if heavy else ""}</span>'
-        tbl_i=staff_table_html(rows_insp,
-            ["Inspector","Role","Buildings","Groups","Load","Housekeepers"],
-            [lambda r:(f'<span style="font-weight:700;color:{_C["txt"]};font-size:.82rem">{e(r["name"])}</span>'
-                       +(f'<br><span style="font-size:.68rem;color:{_C["txt3"]}"> Free</span>' if r["stat"]=="free" else "")),
-             insp_role_tag, insp_bld_tags, insp_grp_pills, insp_complexity_tag,
-             lambda r:(f'<span style="font-size:.72rem;line-height:1.6">'
-                       +"<br>".join(f'<span style="color:{_C["txt3"]}">{e(gl)}</span> <span style="color:{_C["txt"]};font-weight:600">{e(next((g.get("housekeeper","") for g in fg if g["label"]==gl),"—"))}</span>'
-                                    for gl in r["groups"] if any(g["label"]==gl for g in fg))
-                       +"</span>" if r["groups"] else f'<span style="color:{_C["txt3"]}">—</span>')],
-            lambda r:"#f0fdf4" if r["stat"]=="free" else "#fff")
-        components.html(tbl_i, height=max(70+len(rows_insp)*52,120), scrolling=True)
-        if inspectors:
-            n_cols=min(len(inspectors),3); icols=st.columns(n_cols)
-            for i,insp in enumerate(inspectors):
-                with icols[i%n_cols]:
-                    components.html(insp_card_html(insp,fg,IC[i%len(IC)]), height=140+len(insp["groups"])*26, scrolling=False)
-
-    with tab_grp:
-        fc1,fc2,fc3,fc4,fc5,fc6 = st.columns([2,2,2,2,1,1])
-        all_hk_names = sorted(set(g.get("housekeeper","") for g in fg if g.get("housekeeper","")))
-        all_rqs_names = sorted(set(g.get("inspector","") for g in fg if g.get("inspector","")))
-        all_blds = sorted(set(b for g in fg for b in g["blds"]))
-        with fc1: sel_hk_name = st.selectbox("Housekeeper", ["All"]+all_hk_names, key="grp_hk_filter")
-        with fc2: sel_rqs_name = st.selectbox("Inspector (RQS)",["All"]+all_rqs_names, key="grp_rqs_filter")
-        with fc3: svc_filter = st.selectbox("Service", ["All",SVC_FC,SVC_DS,SVC_DV], key="grp_svc_filter")
-        with fc4: bld_sel = st.selectbox("Building", ["All"]+[f"Bldg {b}" for b in all_blds], key="grp_bld_filter")
-        with fc5:
-            if "grp_pet_only" not in st.session_state: st.session_state["grp_pet_only"] = False
-            pet_only = st.checkbox("Pet", key="grp_pet_only")
-        with fc6:
-            if "grp_late_only" not in st.session_state: st.session_state["grp_late_only"] = False
-            lateout_only = st.checkbox("Late Out", key="grp_late_only")
-        # HKs only see their own groups
-        _is_hk = auth.is_housekeeper()
-        _my_name = auth.my_display_name()
-
-        # Render order: normal groups first, verify groups dead last.
-        ordered_fg = ([g for g in fg if not g.get("verify_group")] +
-                      [g for g in fg if g.get("verify_group")])
-
-        for idx, g in enumerate(ordered_fg):
-            hk = g.get("housekeeper","")
-            insp2= g.get("inspector","")
-            svc2 = g.get("service_type","")
-
-            # Housekeepers never see verify groups (manager/RQS task)
-            if _is_hk and g.get("verify_group"): continue
-            # Housekeepers only see their own groups
-            if _is_hk and hk != _my_name:
-                continue
-            if sel_hk_name != "All" and hk != sel_hk_name: continue
-            if sel_rqs_name != "All" and insp2 != sel_rqs_name: continue
-            if svc_filter != "All" and svc2 != svc_filter and not g.get("verify_group"): continue
-            if bld_sel != "All":
-                sel_b=int(bld_sel.split()[1])
-                if sel_b not in g["blds"]: continue
-            rooms=g["rooms"]
-            if pet_only: rooms=[r for r in rooms if r.get("pet")]
-            if lateout_only: rooms=[r for r in rooms if r.get("late_checkout","")]
-            if not rooms: continue
-            gd=dict(g); gd["rooms"]=rooms
-            components.html(group_card_html(gd,idx), height=135+len(rooms)*42, scrolling=False)
+            if n_low_hk:  parts.append(f"**{n_low_hk}** HK(s) low hours")
+            st.caption(" · ".join(p.replace("**","") for p in parts))
 
     # ══════════════════════════════════════════════════════════════════════════════
     # LIVE TAB — Real-time cleaning & inspection tracking
