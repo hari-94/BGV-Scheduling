@@ -11,7 +11,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="Cleaning Schedule",
-    page_icon="🧹",
+    page_icon="GC8",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -31,7 +31,7 @@ st.markdown("""<style>
 }
 </style>""", unsafe_allow_html=True)
 
-# ── Theme: locked to a single formal "light" theme for office use ─────────────
+# ── Theme: locked to a single formal "light"theme for office use ─────────────
 st.session_state["theme"] = "light"
 _THEME    = "light"
 _IS_GLASS = False
@@ -473,7 +473,7 @@ if _THEME == "light":
 .sc .l{color:var(--txt2)!important;}
 .rules-box{background:#ffffff!important;border:1px solid var(--border)!important;}
 
-/* Accent top-bars on cards → flat, single tone (no indigo→cyan gradient). */
+/* Accent top-bars on cards flat, single tone (no indigocyan gradient). */
 .sc::before,.rules-box::before{background:var(--indigo)!important;}
 
 /* Sidebar: solid white panel with a clean divider (no blur/glow). */
@@ -827,7 +827,7 @@ def _persist_roster():
         print(f"[app] _persist_roster failed: {_ex}")
 
 def _init_state():
-    if "hk_roster" not in st.session_state:
+    if "hk_roster"not in st.session_state:
         # Load the standing roster from the database first — this is what people
         # actually see, so add/remove of staff must persist. Only if nothing has
         # ever been saved do we seed from the hard-coded DEFAULT_HK.
@@ -847,7 +847,7 @@ def _init_state():
                     roster[n] = {"building": bld, "present": True}
             st.session_state["hk_roster"] = roster
             st.session_state["insp_roster"] = {n: True for n in DEFAULT_INSPECTORS}
-    if "insp_roster" not in st.session_state:
+    if "insp_roster"not in st.session_state:
         st.session_state["insp_roster"] = {n: True for n in DEFAULT_INSPECTORS}
     for k, default in [("groups_data",None),("total_rooms",None),
                         ("inspectors_data",None),("used_hk_set",None),
@@ -931,7 +931,7 @@ footer{visibility:hidden!important;}
 <div style="text-align:center;margin-bottom:28px">
   <div style="width:52px;height:52px;margin:0 auto 14px;border-radius:12px;
               background:#2563a8;display:flex;align-items:center;justify-content:center;
-              box-shadow:0 2px 8px rgba(37,99,168,.25);font-size:1.5rem">🧹</div>
+              box-shadow:0 2px 8px rgba(37,99,168,.25);font-size:1.05rem;font-weight:700;font-family:'Syne',sans-serif;color:#ffffff;letter-spacing:.02em">GC8</div>
   <div style="font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:700;letter-spacing:-.02em;
               color:#16202e;margin-bottom:5px">Grand Timber GC8</div>
   <div style="font-family:'DM Sans',sans-serif;font-size:.76rem;color:#5b6675;letter-spacing:.06em;
@@ -945,7 +945,7 @@ footer{visibility:hidden!important;}
             border-radius:14px;padding:30px 28px 26px;
             box-shadow:0 1px 3px rgba(20,32,54,.08),0 8px 24px rgba(20,32,54,.06)">
   <div style="font-family:'Syne',sans-serif;font-size:1.02rem;font-weight:700;color:#16202e;
-              margin-bottom:4px">Welcome back 👋</div>
+              margin-bottom:4px">Welcome back</div>
   <div style="font-family:'DM Sans',sans-serif;font-size:.8rem;color:#5b6675;margin-bottom:24px">
     Sign in with your Grand Timber email
   </div>
@@ -956,7 +956,7 @@ footer{visibility:hidden!important;}
     except Exception as _ex:
         _db_ok = False; _db_msg = str(_ex)
     if not _db_ok:
-        st.error("⚠️ Cannot connect to database.")
+        st.error("Cannot connect to database.")
         st.markdown(f"**Error:** `{_db_msg}`\n\n**Fix:** Add `SUPABASE_URL` and `SUPABASE_KEY` to Streamlit Secrets.")
         st.stop()
     with st.form("login_form"):
@@ -1009,7 +1009,7 @@ if not st.session_state.get("_did_initial_restore", False):
             for _g in _loaded_groups:
                 _b = _g.get("blds", [])
                 if isinstance(_b, str):
-                    # e.g. "{1, 2}" → extract digits
+                    # e.g. "{1, 2}"extract digits
                     _b = [int(x) for x in re.findall(r'\d+', _b)]
                 _g["blds"] = set(_b) if not isinstance(_b, set) else _b
                 _f = _g.get("floors", [])
@@ -1027,16 +1027,16 @@ SKIP_SERVICES = {"p/u models","pu models","p/u model","showcase","model unit","p
 
 def normalize_service(raw: str) -> str:
     s = re.sub(r'\s+', ' ', str(raw).strip().lower())
-    if s in SKIP_SERVICES or "p/u" in s or (s.startswith("p") and "model" in s):
+    if s in SKIP_SERVICES or "p/u"in s or (s.startswith("p") and "model"in s):
         return "__SKIP__"
-    if "daily" in s: return SVC_DS
+    if "daily"in s: return SVC_DS
     # "Full Clean (IH)" / "Full Clean( IH)" / "... IH" -> separate IH stream,
     # packed apart from regular Full Clean and inspected by RQS 2.
-    if ("full clean" in s or s.startswith("fc")) and "ih" in s:
+    if ("full clean"in s or s.startswith("fc")) and "ih"in s:
         return SVC_IH
     if s.startswith("full clean") or s.startswith("fc"): return SVC_FC
-    if "dust" in s or "d&v" in s or "dnv" in s: return SVC_DV
-    if "vac" in s: return SVC_DV
+    if "dust"in s or "d&v"in s or "dnv"in s: return SVC_DV
+    if "vac"in s: return SVC_DV
     return SVC_FC
 
 def parse_room_code(room: str) -> dict:
@@ -1108,8 +1108,8 @@ def parse_email_notes(text: str) -> dict:
             for mv in MOVE_RE.finditer(content.upper()):
                 for rf in expand_compound_room(mv.group(1)):
                     for rt in expand_compound_room(mv.group(2)):
-                        notes.setdefault(rf, []).append(f"Room Move → {rt}")
-                        notes.setdefault(rt, []).append(f"Room Move ← {rf}")
+                        notes.setdefault(rf, []).append(f"Room Move {rt}")
+                        notes.setdefault(rt, []).append(f"Room Move {rf}")
             continue
         if section == "celebrations":
             cm = CELEB_RE.match(content)
@@ -1120,7 +1120,7 @@ def parse_email_notes(text: str) -> dict:
         rooms = expand_rooms(ROOM_RE.findall(content.upper()))
         if not rooms: continue
         qty = re.search(r'x(\d+)', content, re.IGNORECASE)
-        qty_s = f" x{qty.group(1)}" if qty else ""
+        qty_s = f"x{qty.group(1)}"if qty else ""
         if section == "special requests":
             # Capture the actual request detail (e.g. "2135A - Humidifier" ->
             # "Special Request: Humidifier"). Skip "n/a". Strip the room codes and
@@ -1147,17 +1147,17 @@ def excel_to_room_text(file_obj):
     xls = pd.ExcelFile(file_obj)
     sheet = None
     for cand in xls.sheet_names:
-        if "housekeeping dashboard" in str(cand).strip().lower():
+        if "housekeeping dashboard"in str(cand).strip().lower():
             sheet = cand; break
     if sheet is None:
         sheet = xls.sheet_names[1] if len(xls.sheet_names) > 1 else xls.sheet_names[0]
     df = pd.read_excel(xls, sheet_name=sheet, header=None)
 
-    # Find the header row (contains both "Room" and "Service").
+    # Find the header row (contains both "Room"and "Service").
     hdr = None
     for i in range(min(30, len(df))):
         vals = [str(v).strip().lower() for v in df.iloc[i] if pd.notna(v)]
-        if "room" in vals and "service" in vals:
+        if "room"in vals and "service"in vals:
             hdr = i; break
     if hdr is None:
         raise ValueError("Couldn't find a 'Room'/'Service' header row in the sheet.")
@@ -1219,7 +1219,7 @@ def parse_rooms(text: str) -> pd.DataFrame:
 
     def col(*names):
         # Prefer an EXACT header match before falling back to substring, so a
-        # query like "status" doesn't accidentally match "current guest or
+        # query like "status"doesn't accidentally match "current guest or
         # status". Names are tried in priority order.
         for n in names:
             for i, h in enumerate(header):
@@ -1257,7 +1257,7 @@ def parse_rooms(text: str) -> pd.DataFrame:
         if not room: continue
         norm_svc = normalize_service(svc)
         # P/U Models used to be dropped (__SKIP__). Now we keep them as a
-        # "verify" room (no HK/RQS, pushed to the bottom for manual review).
+        # "verify"room (no HK/RQS, pushed to the bottom for manual review).
         is_pu_skip = (norm_svc == "__SKIP__")
         if is_pu_skip:
             norm_svc = SVC_FC   # give it a real service type so it can render
@@ -1278,18 +1278,18 @@ def parse_rooms(text: str) -> pd.DataFrame:
         guest_raw      = norm_guest.lower().strip()
         notes_raw_val  = get(row, i_notes).strip().lower()
         svc_raw_lower  = str(svc).strip().lower()
-        has_stayover_excel = "stayover" in notes_raw_val or "stay over" in notes_raw_val
+        has_stayover_excel = "stayover"in notes_raw_val or "stay over"in notes_raw_val
         # P/U Models can appear in the service column OR the notes column
-        has_pu_models = ("p/u model" in notes_raw_val or "pu model" in notes_raw_val
-                         or "p/u model" in svc_raw_lower or "pu model" in svc_raw_lower)
-        # "verify" rooms: stayover or P/U models — never auto-assign HK/RQS,
+        has_pu_models = ("p/u model"in notes_raw_val or "pu model"in notes_raw_val
+                         or "p/u model"in svc_raw_lower or "pu model"in svc_raw_lower)
+        # "verify"rooms: stayover or P/U models — never auto-assign HK/RQS,
         # pushed to the bottom of the schedule for manual review.
         needs_verify = has_stayover_excel or has_pu_models or is_pu_skip
         row_text = " ".join(str(c).strip().lower() for c in row if c)
-        has_pending_anywhere = "pending" in row_text
+        has_pending_anywhere = "pending"in row_text
         is_uncertain = (
             (guest_raw in ("unallocated","---","room, walk","","deposit, deposit") and
-             ("pending" in status_raw or has_pending_anywhere))
+             ("pending"in status_raw or has_pending_anywhere))
             or has_stayover_excel
         )
         records.append({
@@ -1345,7 +1345,7 @@ def can_add_fc(g, unit):
     new_c120 = g["c120"] + u120
     if new_c140 > 1: return False
     # A group may not hold a 140 together with MORE THAN ONE 120.
-    # 120+140+70 ✓ · 120+120+120 ✓ · 120+120+140 ✗
+    # 120+140+70 · 120+120+120 · 120+120+140 
     if new_c140 >= 1 and new_c120 > 1: return False
     return True
 
@@ -1359,7 +1359,7 @@ def can_add_ds(g, unit, allow_overflow=False):
     return True
 
 def unit_ok_fc(unit):
-    # A same-guest cluster is only "OK to keep as one chart" if it can actually
+    # A same-guest cluster is only "OK to keep as one chart"if it can actually
     # fit one chart under ALL hard rules. If it can't, pack_rooms splits it into
     # individual rooms so they can be spread across housekeepers.
     if sum(r["time"] for r in unit) > MAX_FC:   # over the 380 cap -> must split
@@ -1415,15 +1415,15 @@ def _mix_penalty(g, unit):
         (0,0,5),   # 70 x5
     ]
     # Distance to the closest target = sum of size-count mismatches. A chart
-    # that is "on the way" to a target (fewer rooms than the target, matching
-    # composition so far) is treated as a clean prefix → low penalty.
+    # that is "on the way"to a target (fewer rooms than the target, matching
+    # composition so far) is treated as a clean prefix low penalty.
     best = 99
     for t140,t120,t70 in TARGETS:
         # Over-shooting a size beyond its target is worse than under-shooting.
         over  = max(0,n140-t140)+max(0,n120-t120)+max(0,n70-t70)
         under = max(0,t140-n140)+max(0,t120-n120)+max(0,t70-n70)
         best  = min(best, over*3 + under)   # overshoot weighted heavier
-    return best * 25   # scale into "minutes-equivalent" tie-shaping range
+    return best * 25   # scale into "minutes-equivalent"tie-shaping range
 
 def best_fit_generic(groups, unit, can_add_fn, same_bld_only, same_floor_only):
     ub  = set(r["bld"]         for r in unit)
@@ -2229,7 +2229,7 @@ def assign_hk_building_aware(groups, present_hk, roster):
         # A Full Clean group spanning BOTH B2 and B3 is structurally impossible
         # for one housekeeper (B2<->B3 is blocked) — never assign it.
         if not is_ds and (2 in group_blds and 3 in group_blds):
-            return "⚠️ No HK available"
+            return "No HK available"
         primary = min(group_blds) if group_blds else 1
         # 1) Try a housekeeper whose home building IS the group's primary building.
         for hk in list(available.get(primary,[])):
@@ -2257,7 +2257,7 @@ def assign_hk_building_aware(groups, present_hk, roster):
                 if available.get(b):
                     return available[b].pop(0)
         # 4) Truly exhausted — leave clearly unassigned (do NOT reuse a name).
-        return "⚠️ No HK available"
+        return "No HK available"
     # Priority HKs first
     for g in groups:
         if g.get("verify_group"):       # never assign verify groups
@@ -2271,7 +2271,7 @@ def assign_hk_building_aware(groups, present_hk, roster):
         assignment[g["label"]] = phk; used.add(phk)
     # Everyone else — assign the most CONSTRAINED groups first so they get the
     # scarce building-specific housekeepers. Order: Full Clean (strict building
-    # rule) → Dust n Vac → Daily Service (flexible, can take any HK).
+    # rule) Dust n Vac Daily Service (flexible, can take any HK).
     def _order(g):
         st_ = g.get("service_type","")
         return {SVC_FC:0, SVC_IH:1, SVC_DV:2, SVC_DS:3}.get(st_, 4)
@@ -2285,7 +2285,7 @@ def assign_hk_building_aware(groups, present_hk, roster):
         is_ds = (g.get("service_type") == SVC_DS)
         matched = find_hk(g.get("blds",{1}), is_ds)
         assignment[g["label"]] = matched
-        if matched and not matched.startswith("⚠️"): used.add(matched)
+        if matched and not matched.startswith("No HK available"): used.add(matched)
     return assignment, used
 
 def _primary_bld(g): return min(g["blds"]) if g["blds"] else 0
@@ -2465,7 +2465,7 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
 
     # RQS 1: intentionally left with NO auto-assigned rooms.
 
-    # Any leftover FC still unassigned → extra inspector slots (not RQS 1).
+    # Any leftover FC still unassigned extra inspector slots (not RQS 1).
     while leftover_fc:
         batch = leftover_fc[:per]; leftover_fc = leftover_fc[per:]
         name = f"Inspector {len(inspectors)+1}"
@@ -2527,13 +2527,13 @@ def group_card_html(g, idx):
     ac = c["accent"]; glow = c["glow"]; bar = c["bar"]
 
     hk_raw = g.get("housekeeper","") or ""
-    no_hk  = not hk_raw or hk_raw.startswith("⚠️")
+    no_hk  = not hk_raw or hk_raw.startswith("No HK available")
     if is_verify:
         unassigned_badge = ""   # verify groups intentionally have no HK badge
         hk_raw = ""
     elif no_hk:
-        unassigned_badge = f'<span style="background:rgba(244,63,94,.2);color:#fb7185;border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:700;border:1px solid rgba(244,63,94,.35);letter-spacing:.03em">⚠ NO HK</span>'
-        hk_raw = hk_raw.replace("⚠️ ","") if hk_raw else "Unassigned"
+        unassigned_badge = f'<span style="background:rgba(244,63,94,.2);color:#fb7185;border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:700;border:1px solid rgba(244,63,94,.35);letter-spacing:.03em"> NO HK</span>'
+        hk_raw = hk_raw.replace("No HK available","Unassigned") if hk_raw else "Unassigned"
     else:
         unassigned_badge = ""
 
@@ -2542,36 +2542,36 @@ def group_card_html(g, idx):
     _blds_raw = g.get("blds", set())
     if isinstance(_blds_raw, str):
         _blds_raw = [int(x) for x in re.findall(r'\d+', _blds_raw)]
-    bld_str = " · ".join(f"Bldg {b}" for b in sorted(set(_blds_raw)))
+    bld_str = " · ".join(f"Bldg {b}"for b in sorted(set(_blds_raw)))
 
     def badge(txt, bg, clr, border="transparent"):
         return f'<span style="background:{bg};color:{clr};border:1px solid {border};border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:600;letter-spacing:.02em">{txt}</span>'
 
     if is_verify:
-        svc_badge = badge("⚠ VERIFY & ASSIGN","rgba(244,63,94,.2)","#fda4af","rgba(244,63,94,.4)")
+        svc_badge = badge("VERIFY & ASSIGN","rgba(244,63,94,.2)","#fda4af","rgba(244,63,94,.4)")
     else:
         svc_badge = badge(svc, c["badge_bg"], c["badge_txt"], _rgba_a(c["glow"], ".25"))
-    overflow_badge = badge("⚠ DS Overflow","rgba(245,158,11,.15)","#fcd34d","rgba(245,158,11,.3)") if g.get("ds_overflow") else ""
-    priority_badge = badge("⭐ Priority","rgba(234,179,8,.15)","#fde047","rgba(234,179,8,.3)") if g.get("priority_hk") else ""
+    overflow_badge = badge("DS Overflow","rgba(245,158,11,.15)","#fcd34d","rgba(245,158,11,.3)") if g.get("ds_overflow") else ""
+    priority_badge = badge("Priority","rgba(234,179,8,.15)","#fde047","rgba(234,179,8,.3)") if g.get("priority_hk") else ""
     cross_badge    = badge("Cross-bld","rgba(168,85,247,.15)","#d8b4fe","rgba(168,85,247,.3)") if (g.get("cross_bld") and not is_verify) else ""
 
-    t_col = "#4ade80" if pct<=87 else ("#fbbf24" if pct<=95 else "#f87171")
+    t_col = "#4ade80"if pct<=87 else ("#fbbf24"if pct<=95 else "#f87171")
 
     rows = ""
     for i, r in enumerate(g["rooms"]):
         notes_lower  = r.get("notes","").lower()
-        is_stayover  = "stayover" in notes_lower or "stay over" in notes_lower
-        row_bg = "rgba(34,211,238,.06)" if (r.get("uncertain") and is_stayover) else                  "rgba(245,158,11,.06)" if r.get("uncertain") else "transparent"
-        pet_badge  = '<span style="background:rgba(244,63,94,.15);color:#fb7185;border-radius:4px;padding:1px 6px;font-size:.64rem;font-weight:600">🐾</span>' if r.get("pet") else ""
+        is_stayover  = "stayover"in notes_lower or "stay over"in notes_lower
+        row_bg = "rgba(34,211,238,.06)"if (r.get("uncertain") and is_stayover) else                  "rgba(245,158,11,.06)"if r.get("uncertain") else "transparent"
+        pet_badge = '<span style="background:rgba(244,63,94,.15);color:#fb7185;border-radius:4px;padding:1px 6px;font-size:.64rem;font-weight:600"></span>' if r.get("pet") else ""
         late_co    = e(r.get("late_checkout",""))
-        late_badge2= f'<span style="background:rgba(245,158,11,.15);color:#fcd34d;border-radius:4px;padding:1px 6px;font-size:.64rem;font-weight:600">⏰ {late_co}</span>' if late_co else ""
+        late_badge2= f'<span style="background:rgba(245,158,11,.15);color:#fcd34d;border-radius:4px;padding:1px 6px;font-size:.64rem;font-weight:600"> {late_co}</span>' if late_co else ""
         delay = f"{i*0.04:.2f}s"
         rows += f"""<tr style="background:{row_bg};border-bottom:1px solid {_C["row_br"]};animation:rowIn .3s {delay} both">
           <td style="font-family:'DM Mono',monospace;font-size:.76rem;font-weight:500;color:{ac};padding:8px 10px;white-space:nowrap">{e(r.get("room",""))}</td>
-          <td class="m-hide" style="padding:8px 10px;color:#64748b;font-size:.75rem">B{r.get("bld","")}</td>
+          <td class="m-hide"style="padding:8px 10px;color:#64748b;font-size:.75rem">B{r.get("bld","")}</td>
           <td style="padding:8px 10px;color:{_C["txt"]};font-size:.78rem;font-weight:500;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{e(r.get("guest",""))}</td>
-          <td class="m-hide" style="padding:8px 10px;color:{_C["txt2"]};font-size:.73rem">{e(r.get("service",""))}</td>
-          <td style="padding:8px 10px;font-family:'DM Mono',monospace;font-weight:500;color:{_C["txt"]};font-size:.76rem">{"—" if r.get("time",0)==0 else str(r.get("time",""))+"m"}</td>
+          <td class="m-hide"style="padding:8px 10px;color:{_C["txt2"]};font-size:.73rem">{e(r.get("service",""))}</td>
+          <td style="padding:8px 10px;font-family:'DM Mono',monospace;font-weight:500;color:{_C["txt"]};font-size:.76rem">{"—"if r.get("time",0)==0 else str(r.get("time",""))+"m"}</td>
           <td style="padding:8px 10px">{pet_badge}</td>
           <td style="padding:8px 10px">{late_badge2}</td>
         </tr>"""
@@ -2581,7 +2581,7 @@ def group_card_html(g, idx):
 
     # Verify groups: distinct title, pill text, hidden HK/RQS meta + time meter
     if is_verify:
-        title_text   = "⚠ Unsure — verify &amp; assign"
+        title_text = "Unsure — verify &amp; assign"
         pill_text    = "VERIFY"
         header_bg    = "linear-gradient(90deg,rgba(244,63,94,.1),transparent)"
         meta_line    = (f'<div style="font-size:.71rem;color:{_C["txt2"]};margin-top:3px;'
@@ -2593,8 +2593,8 @@ def group_card_html(g, idx):
         pill_text    = lbl
         header_bg    = "linear-gradient(90deg,rgba(99,102,241,.06),transparent)"
         meta_line    = (f'<div style="font-size:.71rem;color:{_C["txt2"]};margin-top:3px;font-family:\'DM Mono\',monospace">'
-                        f'{bld_str} &nbsp;·&nbsp; <span style="color:{_C["txt3"]}">🧑</span> {hk} &nbsp;·&nbsp; '
-                        f'<span style="color:{_C["txt3"]}">🔍</span> {insp}</div>')
+                        f'{bld_str} &nbsp;·&nbsp; <span style="color:{_C["txt3"]}"></span> {hk} &nbsp;·&nbsp; '
+                        f'<span style="color:{_C["txt3"]}"></span> {insp}</div>')
         time_meter   = (f'<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">'
                         f'<span style="font-family:\'DM Mono\',monospace;font-size:.82rem;font-weight:500;color:{ac};'
                         f'text-shadow:0 0 8px {glow}">{g.get("time","")} <span style="color:#475569;font-size:.7rem">/ {cap}m</span></span>'
@@ -2633,8 +2633,8 @@ def group_card_html(g, idx):
   <!-- Room table -->
   <table>
     <thead><tr>
-      <th style="{th}">Room</th><th class="m-hide" style="{th}">Bld</th><th style="{th}">Guest</th>
-      <th class="m-hide" style="{th}">Service</th><th style="{th}">Time</th>
+      <th style="{th}">Room</th><th class="m-hide"style="{th}">Bld</th><th style="{th}">Guest</th>
+      <th class="m-hide"style="{th}">Service</th><th style="{th}">Time</th>
       <th style="{th}">Pet</th><th style="{th}">Late Out</th>
     </tr></thead>
     <tbody>{rows}</tbody>
@@ -2656,7 +2656,7 @@ def staff_table_html(rows, cols, cell_fns, row_bg_fn):
     for i, row in enumerate(rows):
         bg  = row_bg_fn(row)
         # Map known status backgrounds to theme-appropriate tints
-        if bg == "#f0fdf4": bg = "rgba(20,184,166,.07)" if _IS_LIGHT else "rgba(20,184,166,.08)"
+        if bg == "#f0fdf4": bg = "rgba(20,184,166,.07)"if _IS_LIGHT else "rgba(20,184,166,.08)"
         elif bg == "#fefce8": bg = "rgba(245,158,11,.06)"
         elif bg not in ("transparent","","#fff"): bg = "rgba(99,102,241,.05)"
         elif bg in ("#fff","") : bg = "transparent"
@@ -2702,12 +2702,12 @@ def insp_card_html(insp, fg, color):
                   f'padding:2px 8px;font-family:\'DM Mono\',monospace;font-size:.65rem;font-weight:500;margin-left:6px">{rlbl}</span>')
     heavy_warn = (f'<span style="background:rgba(244,63,94,.15);color:#fb7185;border-radius:5px;'
                   f'padding:2px 8px;font-size:.66rem;font-weight:600;margin-left:5px">'
-                  f'🔴 Heavy {insp.get("complexity",0)}pts</span>') if insp.get("heavy_warning") else ""
+                  f' Heavy {insp.get("complexity",0)}pts</span>') if insp.get("heavy_warning") else ""
     pills = ""; total_t = 0
     for gl in insp["groups"]:
         gobj = next((g for g in fg if g["label"]==gl), None)
         if not gobj: continue
-        ac2  = "#6366f1" if gobj.get("service_type")==SVC_FC else ("#14b8a6" if gobj.get("service_type")==SVC_DS else "#f59e0b")
+        ac2  = "#6366f1"if gobj.get("service_type")==SVC_FC else ("#14b8a6"if gobj.get("service_type")==SVC_DS else "#f59e0b")
         hk   = e(gobj.get("housekeeper","") or f"Grp {gl}")
         total_t += gobj.get("time",0)
         pills += (f'<span style="display:inline-block;background:rgba(99,102,241,.08);'
@@ -2724,7 +2724,7 @@ def insp_card_html(insp, fg, color):
             box-shadow:{_C['card_sh']},0 0 20px {color}18">
   <div style="display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-bottom:8px">
     <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:.9rem;
-                 color:{color}">🔍 {name}</span>
+                 color:{color}"> {name}</span>
     {role_badge}{heavy_warn}
   </div>
   <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:4px">{bld_tags}</div>
@@ -2752,27 +2752,27 @@ with st.sidebar:
     <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#475569;
                 text-transform:uppercase;letter-spacing:.08em">{_cu["role"].title()}</div>
   </div>
-  <span style="font-size:1.3rem;opacity:.8">{"👑" if _cu["role"]=="admin" else "🔍" if _cu["role"]=="rqs" else "🧑‍🔧"}</span>
+  <span style="font-size:1.3rem;opacity:.8">{""if _cu["role"]=="admin"else ""if _cu["role"]=="rqs"else ""}</span>
 </div>""", unsafe_allow_html=True)
     if st.button("Sign Out", key="btn_logout", use_container_width=True):
         auth.logout(); st.rerun()
 
     # ── Role-based navigation ──────────────────────────────────────────────
-    # admin → Schedule + Dashboard + Admin
-    # rqs   → Schedule + Dashboard
-    # hk    → nothing (just name/role/signout above)
+    # admin Schedule + Dashboard + Admin
+    # rqs Schedule + Dashboard
+    # hk nothing (just name/role/signout above)
     _role = _cu["role"]
     if _role in ("admin","rqs"):
         st.markdown("---")
-        st.markdown("### 🧭 Navigate")
-        st.page_link("cleaning_scheduler.py", label="🧹 Cleaning Schedule")
+        st.markdown("### Navigate")
+        st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
         try:
-            st.page_link("pages/1_Dashboard.py", label="📊 Dashboard")
+            st.page_link("pages/1_Dashboard.py", label="Dashboard")
         except Exception:
             pass
         if _role == "admin":
             try:
-                st.page_link("pages/2_Admin.py", label="⚙️ Admin")
+                st.page_link("pages/2_Admin.py", label="Admin")
             except Exception:
                 pass
 
@@ -2787,9 +2787,9 @@ with st.sidebar:
         priority_hks = st.session_state.get("priority_hks",[])
         groups_per_insp = 3
     else:
-        st.markdown("## 📅 Daily Attendance")
+        st.markdown("## Daily Attendance")
         st.markdown("---")
-        with st.expander("➕ Add / 🗑 Remove Housekeeper"):
+        with st.expander("Add / Remove Housekeeper"):
             col_a, col_b = st.columns([2,1])
             with col_a: new_hk_name = st.text_input("Name", key="new_hk_inp")
             with col_b: new_hk_bld  = st.selectbox("Bldg", [1,2,3], key="new_hk_bld")
@@ -2803,8 +2803,8 @@ with st.sidebar:
                 del st.session_state["hk_roster"][rm_hk]
                 _persist_roster(); st.success(f"Removed {rm_hk}")
 
-        st.markdown("### 🧑‍🔧 Housekeepers")
-        st.caption("Check ✅ to mark present. Use ◀▶ buttons to move between buildings.")
+        st.markdown("### Housekeepers")
+        st.caption("Check to mark present. Use ◀▶ buttons to move between buildings.")
         roster = st.session_state["hk_roster"]
         present_hk = []
         import copy as _copy
@@ -2834,7 +2834,7 @@ with st.sidebar:
 
             # ── Bulk replace: paste a list of names (e.g. from Excel) to replace
             #    ALL housekeepers currently in this building ────────────────────
-            with st.expander(f"📋 Bulk set Building {bld} names"):
+            with st.expander(f"Bulk set Building {bld} names"):
                 _bulk = st.text_area(
                     "Paste names (one per line or comma-separated)",
                     key=f"bulk_hk_b{bld}", height=90,
@@ -2859,7 +2859,7 @@ with st.sidebar:
                             roster[_n] = {"building":bld, "present":True}
                         st.session_state["hk_roster"] = roster
                         _persist_roster()
-                        st.toast(f"📋 Building {bld}: set {len(new_names)} housekeepers")
+                        st.toast(f"Building {bld}: set {len(new_names)} housekeepers")
                         st.rerun()
                     else:
                         st.warning("No valid names found to set.")
@@ -2874,7 +2874,7 @@ with st.sidebar:
                     else:
                         roster[name]["present"] = checked
                 with c_name:
-                    col2 = "inherit" if checked else "#94a3b8"
+                    col2 = "inherit"if checked else "#94a3b8"
                     td   = "none"    if checked else "line-through"
                     st.markdown(f'<div style="font-size:.8rem;color:{col2};padding:4px 0;text-decoration:{td}">{e(name)}</div>', unsafe_allow_html=True)
                 with c_left:
@@ -2898,7 +2898,7 @@ with st.sidebar:
                 pass
 
         st.markdown("---")
-        with st.expander("➕ Add / 🗑 Remove Inspector"):
+        with st.expander("Add / Remove Inspector"):
             new_insp = st.text_input("Name", key="new_insp_inp")
             if st.button("Add Inspector", key="btn_add_insp"):
                 n = new_insp.strip()
@@ -2908,10 +2908,10 @@ with st.sidebar:
             if st.button("Remove", key="btn_rm_insp") and rm_insp != "—":
                 del st.session_state["insp_roster"][rm_insp]; _persist_roster(); st.success(f"Removed {rm_insp}")
 
-        st.markdown("### 🔍 Inspectors")
+        st.markdown("### Inspectors")
         insp_roster = st.session_state["insp_roster"]
         # ── Shuffle RQS order so they pair with different housekeepers ───────
-        if st.button("🔀 Shuffle RQS order", key="btn_shuffle_rqs", use_container_width=True,
+        if st.button("Shuffle RQS order", key="btn_shuffle_rqs", use_container_width=True,
                      help="Randomize inspector order so RQS get paired with different housekeepers each run"):
             import random as _rnd
             _items = list(insp_roster.items())
@@ -2928,7 +2928,7 @@ with st.sidebar:
                 db.save_full_schedule(_existing)
             except Exception:
                 pass
-            st.toast("🔀 RQS order shuffled")
+            st.toast("RQS order shuffled")
             st.rerun()
         present_insp = []
         _insp_before = dict(insp_roster)
@@ -2947,21 +2947,21 @@ with st.sidebar:
                 pass
 
         st.markdown("---")
-        st.markdown("### 🎯 RQS Roles Today")
+        st.markdown("### RQS Roles Today")
         rqs_opts = ["— none —"] + present_insp
         rqs1_sel = st.selectbox("RQS 1 (Dust & Vac)", rqs_opts, key="rqs1_sel")
         rqs2_sel = st.selectbox("RQS 2 (Daily Service)", rqs_opts, key="rqs2_sel")
-        rqs1 = "" if rqs1_sel=="— none —" else rqs1_sel
-        rqs2 = "" if rqs2_sel=="— none —" else rqs2_sel
+        rqs1 = ""if rqs1_sel=="— none —"else rqs1_sel
+        rqs2 = ""if rqs2_sel=="— none —"else rqs2_sel
         st.session_state["rqs1"] = rqs1; st.session_state["rqs2"] = rqs2
 
         st.markdown("---")
         groups_per_insp = st.select_slider("Groups / FC inspector", options=[3,4], value=3)
 
         st.markdown("---")
-        st.markdown("### ⭐ Priority HKs")
+        st.markdown("### Priority HKs")
         st.caption("Select HKs who need a full 380-min group (productivity recovery).")
-        if "priority_hks" not in st.session_state: st.session_state["priority_hks"] = []
+        if "priority_hks"not in st.session_state: st.session_state["priority_hks"] = []
         saved_priority = [n for n in st.session_state["priority_hks"] if n in present_hk]
         if saved_priority != st.session_state["priority_hks"]: st.session_state["priority_hks"] = saved_priority
         st.multiselect("Priority HKs", options=present_hk, key="priority_hks",
@@ -2970,10 +2970,10 @@ with st.sidebar:
         if priority_hks:
             st.markdown(f'<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;'
                         f'padding:7px 11px;font-size:.75rem;color:#92400e">'
-                        f'⭐ <b>{len(priority_hks)}</b> HK(s): {", ".join(priority_hks)}</div>',
+                        f' <b>{len(priority_hks)}</b> HK(s): {", ".join(priority_hks)}</div>',
                         unsafe_allow_html=True)
         st.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:9px 11px;font-size:.77rem;color:#475569;margin-top:8px">'
-                    f'✅ <b>{len(present_hk)}</b> HKs &nbsp;·&nbsp; <b>{len(present_insp)}</b> inspectors<br>'
+                    f' <b>{len(present_hk)}</b> HKs &nbsp;·&nbsp; <b>{len(present_insp)}</b> inspectors<br>'
                     f'RQS1: <b>{rqs1 or "—"}</b> &nbsp;·&nbsp; RQS2: <b>{rqs2 or "—"}</b></div>',
                     unsafe_allow_html=True)
 
@@ -2985,23 +2985,23 @@ _disp_name = _cu.get("display_name") or _cu.get("username","")
 _first_name = _disp_name.split()[0].title() if _disp_name else "there"
 _welcome_msg = auth.get_welcome_msg(_cu["role"])
 
-st.markdown(f'<p class="pg-title">Good morning, {_first_name}! 👋</p>', unsafe_allow_html=True)
+st.markdown(f'<p class="pg-title">Good morning, {_first_name}! </p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">{_welcome_msg}</p>', unsafe_allow_html=True)
 
-with st.expander("📋 Rules", expanded=False):
+with st.expander("Rules", expanded=False):
     st.markdown("""<div class="rules-box"><ol>
 <li>Full Clean ≤ <strong>380 min</strong> · Daily Service ≤ <strong>560 min</strong></li>
-<li>Groups: <strong>Full Clean → Daily Service → Dust & Vac</strong></li>
+<li>Groups: <strong>Full Clean Daily Service Dust & Vac</strong></li>
 <li>Building 2 and Building 3 <strong>cannot share a group</strong></li>
 <li>Full Clean: max <strong>one 140-min</strong> room per group</li>
-<li>Same guest → same group · floor-first packing</li>
+<li>Same guest same group · floor-first packing</li>
 <li>B1 HKs can go to B2/B3 · B2 cannot go to B3 · B3 cannot go to B2</li>
 </ol></div>""", unsafe_allow_html=True)
 
 st.markdown("---")
 col_data, col_cfg = st.columns([5,1], gap="medium")
 with col_data:
-    st.markdown('<p class="sec">📋 Room Data + Front-Desk Email</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sec"> Room Data + Front-Desk Email</p>', unsafe_allow_html=True)
     inp_a, inp_b = st.columns([3,2], gap="small")
     with inp_a:
         # ── Upload the Housekeeping Dashboard .xlsx directly (optional) ────────
@@ -3023,8 +3023,8 @@ with col_data:
                         st.session_state["room_input"] = _txt
                         st.session_state["_room_xlsx_sig"] = _sig
                         st.session_state["_room_xlsx_msg"] = (
-                            "ok", f"✅ Read {_n_up} rooms from '{_sheet_up}'. "
-                                  f"Click ⚡ Generate to build the schedule.")
+                            "ok", f"Read {_n_up} rooms from '{_sheet_up}'. "
+                                  f"Click Generate to build the schedule.")
                     except ImportError:
                         st.session_state["_room_xlsx_sig"] = _sig
                         st.session_state["_room_xlsx_msg"] = (
@@ -3038,7 +3038,7 @@ with col_data:
                                    f"You can still copy-paste the data below.")
                 _msg = st.session_state.get("_room_xlsx_msg")
                 if _msg:
-                    (st.success if _msg[0] == "ok" else st.error)(_msg[1])
+                    (st.success if _msg[0] == "ok"else st.error)(_msg[1])
         raw_input = st.text_area("rooms", label_visibility="collapsed", height=230,
             disabled=not auth.can("can_paste_input"),
             placeholder="Room\tService\tTime\tPet\tCurrent Guest or Status\n1020D\tFull Clean\t120\t\tSmith, John",
@@ -3051,20 +3051,20 @@ with col_data:
             key="email_input")
         st.caption("Late checkouts, room moves, notes auto-matched.")
 with col_cfg:
-    st.markdown('<p class="sec">⚙️</p>', unsafe_allow_html=True)
-    _today_bg  = ("rgba(255,255,255,.7)" if _IS_GLASS else "#ffffff") if _IS_LIGHT else ("rgba(40,40,52,.5)" if _IS_GLASS else "rgba(255,255,255,.03)")
+    st.markdown('<p class="sec"></p>', unsafe_allow_html=True)
+    _today_bg  = ("rgba(255,255,255,.7)"if _IS_GLASS else "#ffffff") if _IS_LIGHT else ("rgba(40,40,52,.5)"if _IS_GLASS else "rgba(255,255,255,.03)")
     _today_br  = "rgba(99,102,241,.18)"
-    _today_hd  = "#0f172a" if _IS_LIGHT else "#e2e8f0"
-    _today_tx  = "#475569" if _IS_LIGHT else "#94a3b8"
+    _today_hd  = "#0f172a"if _IS_LIGHT else "#e2e8f0"
+    _today_tx  = "#475569"if _IS_LIGHT else "#94a3b8"
     st.markdown(f'<div style="background:{_today_bg};border:1px solid {_today_br};border-radius:10px;'
                 f'padding:11px 13px;font-size:.78rem;color:{_today_tx};margin-bottom:10px">'
                 f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">Today</div>'
-                f'<div>🧑‍🔧 <b>{len(present_hk)}</b> HKs present</div>'
-                f'<div>🔍 <b>{len(present_insp)}</b> inspectors</div></div>', unsafe_allow_html=True)
+                f'<div> <b>{len(present_hk)}</b> HKs present</div>'
+                f'<div> <b>{len(present_insp)}</b> inspectors</div></div>', unsafe_allow_html=True)
     _can_gen = auth.can("can_generate")
-    run = st.button("⚡ Generate", type="primary", use_container_width=True,
+    run = st.button("Generate", type="primary", use_container_width=True,
                     disabled=not _can_gen,
-                    help="" if _can_gen else "🔒 Housekeeper role — view only")
+                    help=""if _can_gen else "Housekeeper role — view only")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  SNAPSHOT
@@ -3182,11 +3182,15 @@ if run:
                     if email_text.strip():
                         n_late = len(late_co_map)
                         n_notes= sum(len(v) for v in email_notes_map.values())
+                        # Show the email-parse summary quietly in the sidebar rather
+                        # than as a large banner in the middle of the page.
                         if n_late > 0:
-                            late_rooms = ", ".join(f"{rm} ({t.replace('Late Out: ','')})" for rm,t in sorted(late_co_map.items()))
-                            st.success(f"✅ Email parsed: **{n_late}** late checkout(s) · **{n_notes}** note(s)\n\nLate rooms: {late_rooms}")
+                            late_rooms = ", ".join(f"{rm} ({t.replace('Late Out: ','')})"for rm,t in sorted(late_co_map.items()))
+                            st.sidebar.caption(
+                                f"Email parsed — {n_late} late checkout(s), {n_notes} note(s).")
+                            st.sidebar.caption(f"Late rooms: {late_rooms}")
                         else:
-                            st.warning("⚠️ Email parsed but 0 late checkouts found.")
+                            st.sidebar.caption("Email parsed — no late checkouts found.")
                     records_raw = df.to_dict("records")
                     rds = []
                     for r in records_raw:
@@ -3202,13 +3206,13 @@ if run:
                         if rm_upper in email_notes_map: notes_parts += email_notes_map[rm_upper]
                         has_stayover = (
                             r.get("uncertain",False) or
-                            any("stayover" in n.lower() or "stay over" in n.lower() for n in notes_parts)
+                            any("stayover"in n.lower() or "stay over"in n.lower() for n in notes_parts)
                         )
                         # verify rooms (stayover / P-U Models): no auto HK/RQS, sent to bottom
                         needs_verify = (
                             r.get("verify",False) or
-                            any("stayover" in n.lower() or "stay over" in n.lower()
-                                or "p/u model" in n.lower() or "pu model" in n.lower()
+                            any("stayover"in n.lower() or "stay over"in n.lower()
+                                or "p/u model"in n.lower() or "pu model"in n.lower()
                                 for n in notes_parts)
                         )
                         rds.append({
@@ -3279,7 +3283,7 @@ if run:
                         pass
 
                     _loader.empty()
-                    st.success(f"✅ Schedule generated — {len(fg)} groups from {len(df)} rooms.")
+                    st.success(f"Schedule generated — {len(fg)} groups from {len(df)} rooms.")
             except Exception as ex:
                 _loader.empty()
                 st.error(f"Error: {ex}")
@@ -3303,18 +3307,18 @@ ds_g=[g for g in fg if g.get("service_type")==SVC_DS]
 dv_g=[g for g in fg if g.get("service_type")==SVC_DV]
 avg_t=sum(g["time"] for g in fg)//max(len(fg),1)
 n_free_hk=sum(1 for n in present_hk if n not in used_hk_set)
-n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager" and g["time"]<LOW_MIN)
+n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager"and g["time"]<LOW_MIN)
 
 st.markdown(f"""<div class="stat-row">
   <div class="sc hi"><div class="n">{len(fg)}</div><div class="l">Total Groups</div></div>
-  <div class="sc"><div class="n" style="color:#2563EB">{len(fc_g)}</div><div class="l">Full Clean</div></div>
+  <div class="sc"><div class="n"style="color:#2563EB">{len(fc_g)}</div><div class="l">Full Clean</div></div>
   <div class="sc ds"><div class="n">{len(ds_g)}</div><div class="l">Daily Service</div></div>
   <div class="sc dv"><div class="n">{len(dv_g)}</div><div class="l">Dust &amp; Vac</div></div>
   <div class="sc"><div class="n">{total_rooms}</div><div class="l">Rooms</div></div>
   <div class="sc"><div class="n">{avg_t}m</div><div class="l">Avg Time</div></div>
-  <div class="sc"><div class="n" style="color:{'#059669' if n_free_hk==0 else '#d97706'}">{n_free_hk}</div>
+  <div class="sc"><div class="n"style="color:{'#059669' if n_free_hk==0 else '#d97706'}">{n_free_hk}</div>
     <div class="l">Free HKs</div></div>
-  <div class="sc"><div class="n" style="color:{'#059669' if n_low_hk==0 else '#dc2626'}">{n_low_hk}</div>
+  <div class="sc"><div class="n"style="color:{'#059669' if n_low_hk==0 else '#dc2626'}">{n_low_hk}</div>
     <div class="l">Low-Hour HKs</div></div>
 </div>""", unsafe_allow_html=True)
 
@@ -3323,7 +3327,7 @@ _my_name = auth.my_display_name()
 
 if _is_hk:
     # ══════════════════════════════════════════════════════════════════════
-    #  HOUSEKEEPER VIEW — single "My Schedule" tab, own rooms only
+    #  HOUSEKEEPER VIEW — single "My Schedule"tab, own rooms only
     # ══════════════════════════════════════════════════════════════════════
     _NOW = _now_iso   # shared Mountain-time timestamp helper
 
@@ -3333,15 +3337,15 @@ if _is_hk:
         except Exception: pass
 
     STATUS_META_HK = {
-        "pending":          {"icon":"⬜","label":"Pending",       "color":"#475569","bg":"rgba(71,85,105,.2)","border":"rgba(71,85,105,.35)"},
-        "already_clean":    {"icon":"✨","label":"Already Clean", "color":"#34d399","bg":"rgba(52,211,153,.12)","border":"rgba(52,211,153,.35)"},
-        "cleaning_started": {"icon":"🧹","label":"In Progress",   "color":"#fbbf24","bg":"rgba(251,191,36,.15)","border":"rgba(251,191,36,.4)"},
-        "cleaning_done":    {"icon":"✅","label":"Done",          "color":"#60a5fa","bg":"rgba(96,165,250,.12)","border":"rgba(96,165,250,.35)"},
-        "inspected":        {"icon":"🔍","label":"Inspected ✓",  "color":"#a78bfa","bg":"rgba(167,139,250,.15)","border":"rgba(167,139,250,.4)"},
+        "pending": {"icon":"","label":"Pending","color":"#475569","bg":"rgba(71,85,105,.2)","border":"rgba(71,85,105,.35)"},
+        "already_clean": {"icon":"","label":"Already Clean", "color":"#34d399","bg":"rgba(52,211,153,.12)","border":"rgba(52,211,153,.35)"},
+        "cleaning_started": {"icon":"","label":"In Progress","color":"#fbbf24","bg":"rgba(251,191,36,.15)","border":"rgba(251,191,36,.4)"},
+        "cleaning_done": {"icon":"","label":"Done","color":"#60a5fa","bg":"rgba(96,165,250,.12)","border":"rgba(96,165,250,.35)"},
+        "inspected": {"icon":"","label":"Inspected ","color":"#a78bfa","bg":"rgba(167,139,250,.15)","border":"rgba(167,139,250,.4)"},
     }
 
     # Init room statuses
-    if "room_statuses" not in st.session_state:
+    if "room_statuses"not in st.session_state:
         st.session_state["room_statuses"] = {}
     if not st.session_state.get("_live_loaded"):
         st.session_state["_live_loaded"] = True
@@ -3381,7 +3385,7 @@ if _is_hk:
         Your Rooms Today
       </div>
       <div style="font-family:'DM Mono',monospace;font-size:.7rem;color:#475569;margin-top:2px">
-        {n_total} rooms &nbsp;·&nbsp; {len(my_groups)} group{"s" if len(my_groups)!=1 else ""}
+        {n_total} rooms &nbsp;·&nbsp; {len(my_groups)} group{"s"if len(my_groups)!=1 else ""}
       </div>
     </div>
     <div style="display:flex;gap:10px">
@@ -3413,7 +3417,7 @@ if _is_hk:
     if not my_groups:
         st.markdown("""
 <div style="text-align:center;padding:60px 20px;color:#334155;font-family:'DM Mono',monospace">
-  <div style="font-size:2rem;margin-bottom:12px">🕐</div>
+  <div style="font-size:2rem;margin-bottom:12px"></div>
   <div style="font-size:.9rem">No rooms assigned yet for today.</div>
   <div style="font-size:.75rem;margin-top:6px;color:#1e293b">Check back once the schedule is generated.</div>
 </div>""", unsafe_allow_html=True)
@@ -3425,7 +3429,7 @@ if _is_hk:
             g_rooms = g["rooms"]
             g_done = sum(1 for r in g_rooms if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
             g_pct  = int(g_done / max(len(g_rooms),1) * 100)
-            g_color = "#6366f1" if g.get("service_type")==SVC_FC else ("#14b8a6" if g.get("service_type")==SVC_DS else "#f59e0b")
+            g_color = "#6366f1"if g.get("service_type")==SVC_FC else ("#14b8a6"if g.get("service_type")==SVC_DS else "#f59e0b")
 
             # Group header
             st.markdown(f"""
@@ -3478,11 +3482,11 @@ if _is_hk:
 
                 _fmt = _fmt_mtn
 
-                pet_icon  = " 🐾" if r.get("pet") else ""
-                late_icon = " ⏰" if r.get("late_checkout") else ""
+                pet_icon = " "if r.get("pet") else ""
+                late_icon = " "if r.get("late_checkout") else ""
                 late_html = (f'<span style="font-family:\'DM Mono\',monospace;font-size:.62rem;'
                              f'color:#f59e0b;background:rgba(245,158,11,.12);border-radius:4px;'
-                             f'padding:1px 5px;margin-left:4px">⏰ {r.get("late_checkout","")}</span>'
+                             f'padding:1px 5px;margin-left:4px"> {r.get("late_checkout","")}</span>'
                              if r.get("late_checkout") else "")
                 guest_disp = r.get("guest","")[:22]
 
@@ -3516,37 +3520,37 @@ if _is_hk:
                 b1,b2,b3 = st.columns(3)
                 with b1:
                     if cur == "pending":
-                        if st.button("✨ Clean", key=f"hk_ac_{_hrk}", use_container_width=True):
+                        if st.button("Clean", key=f"hk_ac_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"already_clean","marked_clean_at":_NOW()})
-                            st.session_state["_live_toast"] = f"✨ {rm} marked Already Clean"
+                            st.session_state["_live_toast"] = f" {rm} marked Already Clean"
                             st.rerun()
                     elif cur == "already_clean":
-                        if st.button("↩ Undo", key=f"hk_uac_{_hrk}", use_container_width=True):
+                        if st.button("Undo", key=f"hk_uac_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"pending"})
                             st.rerun()
                 with b2:
                     if cur == "pending":
-                        if st.button("🧹 Start", key=f"hk_s_{_hrk}", use_container_width=True):
+                        if st.button("Start", key=f"hk_s_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"cleaning_started","started_at":_NOW()})
-                            st.session_state["_live_toast"] = f"🧹 {rm} — cleaning started"
+                            st.session_state["_live_toast"] = f" {rm} — cleaning started"
                             st.rerun()
                     elif cur == "cleaning_started":
-                        if st.button("✅ Done", key=f"hk_d_{_hrk}", use_container_width=True):
+                        if st.button("Done", key=f"hk_d_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
-                            st.session_state["_live_toast"] = f"✅ {rm} — done, awaiting inspection"
+                            st.session_state["_live_toast"] = f" {rm} — done, awaiting inspection"
                             st.rerun()
                 with b3:
                     if cur not in ("pending",):
-                        if st.button("↩ Reset", key=f"hk_r_{_hrk}", use_container_width=True):
+                        if st.button("Reset", key=f"hk_r_{_hrk}", use_container_width=True):
                             _save_status_hk(rm, {"status":"pending","started_at":None,"cleaned_at":None,"inspected_at":None,"marked_clean_at":None})
                             st.rerun()
 
                 # Timestamp trail
                 ts_parts = []
-                if _fmt(r_state.get("marked_clean_at","")): ts_parts.append(f'✨ {_fmt(r_state.get("marked_clean_at",""))}')
-                if _fmt(r_state.get("started_at","")): ts_parts.append(f'🧹 {_fmt(r_state.get("started_at",""))}')
-                if _fmt(r_state.get("cleaned_at","")): ts_parts.append(f'✅ {_fmt(r_state.get("cleaned_at",""))}')
-                if _fmt(r_state.get("inspected_at","")): ts_parts.append(f'🔍 {_fmt(r_state.get("inspected_at",""))}')
+                if _fmt(r_state.get("marked_clean_at","")): ts_parts.append(f' {_fmt(r_state.get("marked_clean_at",""))}')
+                if _fmt(r_state.get("started_at","")): ts_parts.append(f' {_fmt(r_state.get("started_at",""))}')
+                if _fmt(r_state.get("cleaned_at","")): ts_parts.append(f' {_fmt(r_state.get("cleaned_at",""))}')
+                if _fmt(r_state.get("inspected_at","")): ts_parts.append(f' {_fmt(r_state.get("inspected_at",""))}')
                 if ts_parts:
                     st.markdown(
                         f'<div style="font-family:\'DM Mono\',monospace;font-size:.6rem;color:#1e293b;'
@@ -3555,7 +3559,7 @@ if _is_hk:
             st.markdown("<div style='margin-bottom:12px'></div>", unsafe_allow_html=True)
 
     # Refresh button
-    if st.button("🔄 Refresh Status", key="hk_refresh", use_container_width=False):
+    if st.button("Refresh Status", key="hk_refresh", use_container_width=False):
         try:
             st.session_state["room_statuses"] = db.get_room_statuses()
         except Exception:
@@ -3566,7 +3570,7 @@ else:
     # ══════════════════════════════════════════════════════════════════════
     #  ADMIN / RQS VIEW — full 4-tab interface
     # ══════════════════════════════════════════════════════════════════════
-    tab_hk, tab_insp, tab_grp, tab_live = st.tabs(["🧑‍🔧 Housekeepers","🔍 Inspectors","📋 Groups","⚡ Live"])
+    tab_hk, tab_insp, tab_grp, tab_live = st.tabs(["Housekeepers","Inspectors","Groups","Live"])
 
     with tab_hk:
         hk_time={}; hk_grps={}
@@ -3579,15 +3583,15 @@ else:
         for name in present_hk:
             t=hk_time.get(name,0); gs=hk_grps.get(name,[])
             b=st.session_state["hk_roster"].get(name,{}).get("building","?")
-            stat="free" if not gs else ("low" if t<LOW_MIN else "ok")
+            stat="free"if not gs else ("low"if t<LOW_MIN else "ok")
             rows_hk.append({"name":name,"bld":b,"groups":gs,"time":t,"stat":stat})
         rows_hk.sort(key=lambda r:{"free":0,"low":1,"ok":2}[r["stat"]])
         def hk_bld_tag(r):
             ac2,bg2=BLD_COLORS.get(r["bld"],("#888","#eee"))
             return f'<span style="background:{bg2};color:{ac2};border-radius:5px;padding:1px 7px;font-size:.7rem;font-weight:700">Bldg {r["bld"]}</span>'
         def hk_status_tag(r):
-            if r["stat"]=="free": return '<span style="background:#dcfce7;color:#15803d;border-radius:5px;padding:2px 8px;font-size:.69rem;font-weight:700">✅ Free</span>'
-            if r["stat"]=="low":  return '<span style="background:#fef9c3;color:#a16207;border-radius:5px;padding:2px 8px;font-size:.69rem;font-weight:700">⚠️ Low</span>'
+            if r["stat"]=="free": return '<span style="background:#dcfce7;color:#15803d;border-radius:5px;padding:2px 8px;font-size:.69rem;font-weight:700"> Free</span>'
+            if r["stat"]=="low": return '<span style="background:#fef9c3;color:#a16207;border-radius:5px;padding:2px 8px;font-size:.69rem;font-weight:700"> Low</span>'
             return ""
         def hk_pills(r):
             if not r["groups"]: return '<span style="color:#94a3b8">—</span>'
@@ -3602,7 +3606,7 @@ else:
         def hk_bar(r):
             if not r["time"]: return '<span style="color:#94a3b8">—</span>'
             pct=min(int(r["time"]/380*100),100)
-            col="#10b981" if r["stat"]=="ok" else "#f59e0b"
+            col="#10b981"if r["stat"]=="ok"else "#f59e0b"
             return (f'<div style="display:flex;align-items:center;gap:7px">'
                     f'<span style="font-weight:600;color:#1e293b;min-width:48px">{r["time"]}m</span>'
                     f'<div style="background:#e5e7eb;border-radius:4px;height:7px;width:75px">'
@@ -3649,18 +3653,18 @@ else:
             return out
         def insp_complexity_tag(r):
             c=r.get("complexity","—"); heavy=r.get("heavy_warning",False)
-            col="#9b1c1c" if heavy else "#475569"; bg2="#fde8e8" if heavy else "#f1f5f9"
-            return f'<span style="background:{bg2};color:{col};border-radius:5px;padding:2px 8px;font-size:.72rem;font-weight:700">{c}{"🔴" if heavy else ""}</span>'
+            col="#9b1c1c"if heavy else "#475569"; bg2="#fde8e8"if heavy else "#f1f5f9"
+            return f'<span style="background:{bg2};color:{col};border-radius:5px;padding:2px 8px;font-size:.72rem;font-weight:700">{c}{""if heavy else ""}</span>'
         tbl_i=staff_table_html(rows_insp,
             ["Inspector","Role","Buildings","Groups","Load","Housekeepers"],
             [lambda r:(f'<span style="font-weight:700;color:{_C["txt"]};font-size:.82rem">{e(r["name"])}</span>'
-                       +(f'<br><span style="font-size:.68rem;color:{_C["txt3"]}">✅ Free</span>' if r["stat"]=="free" else "")),
+                       +(f'<br><span style="font-size:.68rem;color:{_C["txt3"]}"> Free</span>' if r["stat"]=="free"else "")),
              insp_role_tag, insp_bld_tags, insp_grp_pills, insp_complexity_tag,
              lambda r:(f'<span style="font-size:.72rem;line-height:1.6">'
                        +"<br>".join(f'<span style="color:{_C["txt3"]}">{e(gl)}</span> <span style="color:{_C["txt"]};font-weight:600">{e(next((g.get("housekeeper","") for g in fg if g["label"]==gl),"—"))}</span>'
                                     for gl in r["groups"] if any(g["label"]==gl for g in fg))
-                       +"</span>" if r["groups"] else f'<span style="color:{_C["txt3"]}">—</span>')],
-            lambda r:"#f0fdf4" if r["stat"]=="free" else "#fff")
+                       +"</span>"if r["groups"] else f'<span style="color:{_C["txt3"]}">—</span>')],
+            lambda r:"#f0fdf4"if r["stat"]=="free"else "#fff")
         components.html(tbl_i, height=max(70+len(rows_insp)*52,120), scrolling=True)
         if inspectors:
             n_cols=min(len(inspectors),3); icols=st.columns(n_cols)
@@ -3673,16 +3677,16 @@ else:
         all_hk_names  = sorted(set(g.get("housekeeper","") for g in fg if g.get("housekeeper","")))
         all_rqs_names = sorted(set(g.get("inspector","")   for g in fg if g.get("inspector","")))
         all_blds      = sorted(set(b for g in fg for b in g["blds"]))
-        with fc1: sel_hk_name  = st.selectbox("🧑‍🔧 Housekeeper",  ["All"]+all_hk_names,  key="grp_hk_filter")
-        with fc2: sel_rqs_name = st.selectbox("🔍 Inspector (RQS)",["All"]+all_rqs_names, key="grp_rqs_filter")
-        with fc3: svc_filter   = st.selectbox("🏷 Service",         ["All",SVC_FC,SVC_DS,SVC_DV], key="grp_svc_filter")
-        with fc4: bld_sel      = st.selectbox("🏢 Building",        ["All"]+[f"Bldg {b}" for b in all_blds], key="grp_bld_filter")
+        with fc1: sel_hk_name = st.selectbox("Housekeeper", ["All"]+all_hk_names, key="grp_hk_filter")
+        with fc2: sel_rqs_name = st.selectbox("Inspector (RQS)",["All"]+all_rqs_names, key="grp_rqs_filter")
+        with fc3: svc_filter = st.selectbox("Service", ["All",SVC_FC,SVC_DS,SVC_DV], key="grp_svc_filter")
+        with fc4: bld_sel = st.selectbox("Building", ["All"]+[f"Bldg {b}"for b in all_blds], key="grp_bld_filter")
         with fc5:
             if "grp_pet_only"  not in st.session_state: st.session_state["grp_pet_only"]  = False
-            pet_only     = st.checkbox("🐾 Pet",      key="grp_pet_only")
+            pet_only = st.checkbox("Pet", key="grp_pet_only")
         with fc6:
-            if "grp_late_only" not in st.session_state: st.session_state["grp_late_only"] = False
-            lateout_only = st.checkbox("⏰ Late Out", key="grp_late_only")
+            if "grp_late_only"not in st.session_state: st.session_state["grp_late_only"] = False
+            lateout_only = st.checkbox("Late Out", key="grp_late_only")
         # HKs only see their own groups
         _is_hk = auth.is_housekeeper()
         _my_name = auth.my_display_name()
@@ -3701,9 +3705,9 @@ else:
             # Housekeepers only see their own groups
             if _is_hk and hk != _my_name:
                 continue
-            if sel_hk_name  != "All" and hk    != sel_hk_name:  continue
-            if sel_rqs_name != "All" and insp2 != sel_rqs_name: continue
-            if svc_filter   != "All" and svc2  != svc_filter and not g.get("verify_group"): continue
+            if sel_hk_name  != "All"and hk    != sel_hk_name:  continue
+            if sel_rqs_name != "All"and insp2 != sel_rqs_name: continue
+            if svc_filter   != "All"and svc2  != svc_filter and not g.get("verify_group"): continue
             if bld_sel      != "All":
                 sel_b=int(bld_sel.split()[1])
                 if sel_b not in g["blds"]: continue
@@ -3728,15 +3732,15 @@ else:
         # ── Status pipeline definition ─────────────────────────────────────────
         STATUS_FLOW = ["pending","already_clean","cleaning_started","cleaning_done","inspected"]
         STATUS_META = {
-            "pending":         {"icon":"⬜","label":"Pending",         "color":"#334155","bg":"rgba(51,65,85,.25)","border":"rgba(71,85,105,.4)"},
-            "already_clean":   {"icon":"✨","label":"Already Clean",   "color":"#34d399","bg":"rgba(52,211,153,.12)","border":"rgba(52,211,153,.35)"},
-            "cleaning_started":{"icon":"🧹","label":"Cleaning...",     "color":"#fbbf24","bg":"rgba(251,191,36,.12)","border":"rgba(251,191,36,.35)"},
-            "cleaning_done":   {"icon":"✅","label":"Cleaned",         "color":"#60a5fa","bg":"rgba(96,165,250,.12)","border":"rgba(96,165,250,.35)"},
-            "inspected":       {"icon":"🔍","label":"Inspected ✓",    "color":"#a78bfa","bg":"rgba(167,139,250,.15)","border":"rgba(167,139,250,.4)"},
+            "pending": {"icon":"","label":"Pending","color":"#334155","bg":"rgba(51,65,85,.25)","border":"rgba(71,85,105,.4)"},
+            "already_clean": {"icon":"","label":"Already Clean","color":"#34d399","bg":"rgba(52,211,153,.12)","border":"rgba(52,211,153,.35)"},
+            "cleaning_started":{"icon":"","label":"Cleaning...","color":"#fbbf24","bg":"rgba(251,191,36,.12)","border":"rgba(251,191,36,.35)"},
+            "cleaning_done": {"icon":"","label":"Cleaned","color":"#60a5fa","bg":"rgba(96,165,250,.12)","border":"rgba(96,165,250,.35)"},
+            "inspected": {"icon":"","label":"Inspected ","color":"#a78bfa","bg":"rgba(167,139,250,.15)","border":"rgba(167,139,250,.4)"},
         }
 
         # ── Load / init room statuses ──────────────────────────────────────────
-        if "room_statuses" not in st.session_state:
+        if "room_statuses"not in st.session_state:
             st.session_state["room_statuses"] = {}
 
         def _load_statuses():
@@ -3847,7 +3851,7 @@ else:
 
         lv1, lv2 = st.columns([1,1])
         with lv1:
-            if st.button("🔄 Refresh", key="live_refresh", use_container_width=True):
+            if st.button("Refresh", key="live_refresh", use_container_width=True):
                 # Pull fresh status records from DB and merge onto schedule
                 try:
                     fresh = db.get_room_statuses()
@@ -3869,7 +3873,7 @@ else:
                 _init_statuses_from_schedule()
                 st.rerun()
         with lv2:
-            if st.button("🔃 Reset All", key="live_reset", use_container_width=True):
+            if st.button("Reset All", key="live_reset", use_container_width=True):
                 for rm in rs:
                     if rs[rm].get("status") != "pending":
                         rs[rm]["status"] = "pending"
@@ -3882,29 +3886,29 @@ else:
         # ── View filter ───────────────────────────────────────────────────────
         lf1, lf2, lf3, lf4 = st.columns([2,2,2,1])
         with lf1:
-            live_view_insp = st.selectbox("🔍 Inspector",
+            live_view_insp = st.selectbox("Inspector",
                 ["All"] + sorted(set(r.get("inspector","") for r in rs.values() if r.get("inspector","")), ),
                 key="live_insp_filter")
         with lf2:
-            live_view_hk = st.selectbox("🧑‍🔧 Housekeeper",
+            live_view_hk = st.selectbox("Housekeeper",
                 ["All"] + sorted(set(r.get("housekeeper","") for r in rs.values() if r.get("housekeeper","")), ),
                 key="live_hk_filter")
         with lf3:
-            live_status_filter = st.selectbox("📊 Status",
+            live_status_filter = st.selectbox("Status",
                 ["All"] + list(STATUS_META.keys()),
                 key="live_status_filter",
-                format_func=lambda s: f"{STATUS_META[s]['icon']} {STATUS_META[s]['label']}" if s != "All" else "All Statuses")
+                format_func=lambda s: f"{STATUS_META[s]['icon']} {STATUS_META[s]['label']}"if s != "All"else "All Statuses")
         with lf4:
             show_dv = st.checkbox("Show DV", value=False, key="live_show_dv")
 
         # ── Group rooms by inspector batch ────────────────────────────────────
-        # Build inspector → groups → rooms mapping
+        # Build inspector groups rooms mapping
         insp_groups: dict = {}
         for g in fg:
-            if g.get("service_type") == "Dust n Vac" and not show_dv:
+            if g.get("service_type") == "Dust n Vac"and not show_dv:
                 continue
             insp_name = g.get("inspector","—")
-            if live_view_insp != "All" and insp_name != live_view_insp: continue
+            if live_view_insp != "All"and insp_name != live_view_insp: continue
             if insp_name not in insp_groups:
                 insp_groups[insp_name] = []
             insp_groups[insp_name].append(g)
@@ -3947,9 +3951,9 @@ else:
 
                     g_done = sum(1 for r in g["rooms"] if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
                     g_pct  = int(g_done / max(len(g["rooms"]),1) * 100)
-                    g_color = "#6366f1" if g.get("service_type")==SVC_FC else ("#14b8a6" if g.get("service_type")==SVC_DS else "#f59e0b")
+                    g_color = "#6366f1"if g.get("service_type")==SVC_FC else ("#14b8a6"if g.get("service_type")==SVC_DS else "#f59e0b")
 
-                    with st.expander(f"{g_label}  ·  🧑‍🔧 {hk_name}  ·  {g_done}/{len(g['rooms'])} done", expanded=(g_pct < 100)):
+                    with st.expander(f"{g_label} · {hk_name} · {g_done}/{len(g['rooms'])} done", expanded=(g_pct < 100)):
 
                         # ── Room swap UI ─────────────────────────────────────
                         swap_col, _ = st.columns([3,1])
@@ -3960,7 +3964,7 @@ else:
                                 if gg.get("inspector","") == insp_name and gg.get("housekeeper","")
                             ))
                             if len(batch_hks) > 1:
-                                st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.62rem;color:#475569;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">↕ Swap rooms to:</div>', unsafe_allow_html=True)
+                                st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.62rem;color:#475569;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px"> Swap rooms to:</div>', unsafe_allow_html=True)
                                 swap_target = st.selectbox(
                                     "Swap to HK", ["— select HK —"] + [h for h in batch_hks if h != hk_name],
                                     key=f"swap_target_{_gk}", label_visibility="collapsed"
@@ -3977,7 +3981,7 @@ else:
                                             label_visibility="collapsed",
                                             placeholder="Select rooms to move..."
                                         )
-                                        if swap_rooms_sel and st.button(f"↕ Move {len(swap_rooms_sel)} room(s) → {swap_target}", key=f"do_swap_{_gk}", type="primary"):
+                                        if swap_rooms_sel and st.button(f"Move {len(swap_rooms_sel)} room(s) {swap_target}", key=f"do_swap_{_gk}", type="primary"):
                                             # Find the target group
                                             tgt_group = next((gg for gg in fg if gg.get("housekeeper","") == swap_target and gg.get("inspector","") == insp_name), None)
                                             if tgt_group:
@@ -3994,7 +3998,7 @@ else:
                                                             "group_label": tgt_group.get("label",""),
                                                             "swapped_from": old_hk,
                                                         })
-                                                st.success(f"✅ Moved {len(swap_rooms_sel)} room(s) to {swap_target}")
+                                                st.success(f"Moved {len(swap_rooms_sel)} room(s) to {swap_target}")
                                                 st.rerun()
 
                         st.markdown("---")
@@ -4024,10 +4028,10 @@ else:
                             ts_insp  = _fmt_ts(r_state.get("inspected_at",""))
                             ts_ac    = _fmt_ts(r_state.get("marked_clean_at",""))
 
-                            pet_icon  = " 🐾" if r.get("pet") else ""
+                            pet_icon = " "if r.get("pet") else ""
                             late_html = (f'<span style="font-family:\'DM Mono\',monospace;font-size:.6rem;'
                                          f'color:#f59e0b;background:rgba(245,158,11,.12);border-radius:4px;'
-                                         f'padding:1px 5px;margin-left:4px">⏰ {r.get("late_checkout","")}</span>'
+                                         f'padding:1px 5px;margin-left:4px"> {r.get("late_checkout","")}</span>'
                                          if r.get("late_checkout") else "")
                             guest_disp = r.get("guest","")
                             if len(guest_disp) > 22: guest_disp = guest_disp[:21]+"…"
@@ -4062,37 +4066,37 @@ else:
                             bc1, bc2, bc3, bc4 = st.columns(4)
                             with bc1:
                                 if cur_status == "pending":
-                                    if st.button("✨ Clean", key=f"ac_{_rk}", use_container_width=True):
+                                    if st.button("Clean", key=f"ac_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"already_clean","marked_clean_at":_NOW()})
-                                        st.session_state["_live_toast"] = f"✨ {rm} marked Already Clean"
+                                        st.session_state["_live_toast"] = f" {rm} marked Already Clean"
                                         st.rerun()
                                 elif cur_status == "already_clean":
-                                    if st.button("↩ Undo", key=f"undo_ac_{_rk}", use_container_width=True):
+                                    if st.button("Undo", key=f"undo_ac_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"pending","marked_clean_at":None})
-                                        st.session_state["_live_toast"] = f"↩ {rm} back to Pending"
+                                        st.session_state["_live_toast"] = f" {rm} back to Pending"
                                         st.rerun()
                             with bc2:
                                 if cur_status == "pending":
-                                    if st.button("🧹 Start", key=f"start_{_rk}", use_container_width=True):
+                                    if st.button("Start", key=f"start_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"cleaning_started","started_at":_NOW()})
-                                        st.session_state["_live_toast"] = f"🧹 {rm} — cleaning started"
+                                        st.session_state["_live_toast"] = f" {rm} — cleaning started"
                                         st.rerun()
                                 elif cur_status == "cleaning_started":
-                                    if st.button("✅ Done", key=f"done_{_rk}", use_container_width=True):
+                                    if st.button("Done", key=f"done_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
-                                        st.session_state["_live_toast"] = f"✅ {rm} — cleaning done, awaiting inspection"
+                                        st.session_state["_live_toast"] = f" {rm} — cleaning done, awaiting inspection"
                                         st.rerun()
                             with bc3:
                                 if cur_status == "cleaning_done":
-                                    if st.button("🔍 Inspect", key=f"insp_{_rk}", use_container_width=True):
+                                    if st.button("Inspect", key=f"insp_{_rk}", use_container_width=True):
                                         _save_status(rm, {"status":"inspected","inspected_at":_NOW()})
-                                        st.session_state["_live_toast"] = f"🔍 {rm} inspected ✓"
+                                        st.session_state["_live_toast"] = f" {rm} inspected "
                                         st.rerun()
                                 elif cur_status == "inspected":
-                                    st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.64rem;color:#a78bfa;padding:8px 0;text-align:center">✓ {ts_insp}</div>', unsafe_allow_html=True)
+                                    st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.64rem;color:#a78bfa;padding:8px 0;text-align:center"> {ts_insp}</div>', unsafe_allow_html=True)
                             with bc4:
                                 if cur_status != "pending":
-                                    if st.button("↩ Reset", key=f"reset_{_rk}", use_container_width=True, help="Reset to Pending"):
+                                    if st.button("Reset", key=f"reset_{_rk}", use_container_width=True, help="Reset to Pending"):
                                         _save_status(rm, {
                                             "status":"pending",
                                             "started_at":None,"cleaned_at":None,
@@ -4102,10 +4106,10 @@ else:
 
                             # Timestamp trail under each room
                             ts_parts = []
-                            if ts_ac:    ts_parts.append(f"✨ {ts_ac}")
-                            if ts_start: ts_parts.append(f"🧹 {ts_start}")
-                            if ts_clean: ts_parts.append(f"✅ {ts_clean}")
-                            if ts_insp:  ts_parts.append(f"🔍 {ts_insp}")
+                            if ts_ac: ts_parts.append(f" {ts_ac}")
+                            if ts_start: ts_parts.append(f" {ts_start}")
+                            if ts_clean: ts_parts.append(f" {ts_clean}")
+                            if ts_insp: ts_parts.append(f" {ts_insp}")
                             if ts_parts:
                                 st.markdown(
                                     f'<div style="font-family:\'DM Mono\',monospace;font-size:.6rem;'
@@ -4128,21 +4132,21 @@ else:
                 "Time (min)":r.get("time",""),"Pet":r.get("pet",""),
                 "Current Guest or Status":r.get("guest",""),
                 # Verify rooms (stayover / P-U Models) get NO housekeeper or RQS
-                "HSKP":"" if is_verify else g.get("housekeeper",""),
-                "RQS":"" if is_verify else g.get("inspector",""),
+                "HSKP":""if is_verify else g.get("housekeeper",""),
+                "RQS":""if is_verify else g.get("inspector",""),
                 # Status is intentionally left BLANK in the downloaded file.
                 "Notes":r.get("notes",""),"Status":"",
                 "Carpet":"","Stripping":"","Arriving Guest":r.get("arriving",""),
                 # kept only for internal sort ordering below (dropped before export)
-                "_Group":("VERIFY — assign manually" if is_verify else g["label"]),
+                "_Group":("VERIFY — assign manually"if is_verify else g["label"]),
                 "_Svc":svc_rank,
-                "_Verify":"Yes" if is_verify else "No",
-                "_Uncertain":"Yes" if r.get("uncertain") else "No",
+                "_Verify":"Yes"if is_verify else "No",
+                "_Uncertain":"Yes"if r.get("uncertain") else "No",
             })
     export_df = pd.DataFrame(export_rows)
-    # Order: by service band (Full Clean → IH → Daily Service → Dust n Vac) with
+    # Order: by service band (Full Clean IH Daily Service Dust n Vac) with
     # confirmed rooms first; then uncertain rooms; then stayover/verify rows last.
-    if not export_df.empty and "_Verify" in export_df.columns:
+    if not export_df.empty and "_Verify"in export_df.columns:
         normal      = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")].sort_values(["_Svc","_Group"])
         unconfirmed = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="Yes")].sort_values(["_Svc","_Group"])
         verify_rows = export_df[export_df["_Verify"]=="Yes"].sort_values("_Group")
@@ -4155,7 +4159,7 @@ else:
         export_df = export_df[[c for c in _EXPORT_COLS if c in export_df.columns]]
 
     # ── Build a formatted Excel workbook: the 12-column schedule up top, a 7-row
-    #    gap, then a pivot summary (RQS → HSKP → rooms, with subtotals and a grand
+    # gap, then a pivot summary (RQS HSKP rooms, with subtotals and a grand
     #    total) matching the reference layout. ──────────────────────────────────
     def _build_excel(main_df, rows_for_pivot):
         from io import BytesIO
@@ -4189,7 +4193,7 @@ else:
             for ci, h in enumerate(cols, 1):
                 val = row[h]
                 if h == "Time (min)":
-                    val = _to_int(val) if str(val) != "" else ""
+                    val = _to_int(val) if str(val) != ""else ""
                 ws.cell(row=r_i, column=ci, value=val).font = reg
             r_i += 1
         main_end = r_i - 1
@@ -4204,7 +4208,7 @@ else:
         # ── 7-row gap, then the pivot ────────────────────────────────────────
         pivot_start = main_end + 7 + 1     # leave exactly 7 blank rows
 
-        # Group by RQS → HSKP in first-seen order (preserves the schedule order)
+        # Group by RQS HSKP in first-seen order (preserves the schedule order)
         piv = OrderedDict()
         for r in rows_for_pivot:
             rqs = (r.get("RQS","") or "").strip() or "(blank)"
@@ -4228,7 +4232,7 @@ else:
                     ws.cell(row=pr, column=4, value=it.get("Service","")).font = reg
                     tv = it.get("Time (min)","")
                     t  = _to_int(tv)
-                    ws.cell(row=pr, column=5, value=(t if str(tv) != "" else "")).font = reg
+                    ws.cell(row=pr, column=5, value=(t if str(tv) != ""else "")).font = reg
                     hk_total += t; first_rqs = False; first_hk = False; pr += 1
                 # Housekeeper subtotal (rooms in col 3, minutes in col 5)
                 ws.cell(row=pr, column=2, value=f"{hk} Total").font = bold
@@ -4288,17 +4292,17 @@ else:
         ws.freeze_panes = "A2"
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
 
-    # Rows for the pivot, in the same confirmed→uncertain→verify order as the table
+    # Rows for the pivot, in the same confirmeduncertainverify order as the table
     _pivot_rows = export_df.to_dict("records") if not export_df.empty else []
     try:
         xlsx_bytes = _build_excel(export_df, _pivot_rows)
-        st.download_button("⬇️ Download Excel", data=xlsx_bytes,
+        st.download_button("Download Excel", data=xlsx_bytes,
                            file_name="cleaning_schedule.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     except Exception as _xl_ex:
         # Fall back to CSV if Excel generation ever fails, so the download button
         # is never dead.
         csv = export_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("⬇️ Download CSV", data=csv,
+        st.download_button("Download CSV", data=csv,
                            file_name="cleaning_schedule.csv", mime="text/csv")
         st.caption(f"(Excel export unavailable: {_xl_ex})")
