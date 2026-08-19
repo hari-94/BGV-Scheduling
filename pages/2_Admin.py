@@ -7,7 +7,7 @@ import html as _html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import db, auth
 
-st.set_page_config(page_title="Admin · Cleaning Schedule", page_icon="👑", layout="wide")
+st.set_page_config(page_title="Admin · Cleaning Schedule", page_icon="GC8", layout="wide")
 
 st.markdown("""<style>
 [data-testid="stSidebarNav"]{display:none !important;}
@@ -21,14 +21,14 @@ auth.init_auth()
 if not st.session_state.get("logged_in"):
     st.markdown("""
 <div style="text-align:center;padding:60px 20px;font-family:Inter,sans-serif">
-  <div style="font-size:3rem;margin-bottom:16px">🔒</div>
+  <div style="font-size:3rem;margin-bottom:16px"></div>
   <div style="font-size:1.2rem;font-weight:700;color:#1e293b;margin-bottom:8px">Not signed in</div>
   <div style="color:#64748b;margin-bottom:20px">Please sign in from the main page.</div>
 </div>""", unsafe_allow_html=True)
     # (navigation via sidebar)
     st.stop()
 if not auth.can("can_manage_users"):
-    st.error("⛔ Admin access required.")
+    st.error("Admin access required.")
     # (navigation via sidebar)
     st.stop()
 
@@ -174,22 +174,22 @@ cu = auth.current_user()
 
 # ── Manual sidebar navigation (replaces hidden auto-nav) ─────────────────────
 with st.sidebar:
-    st.markdown("### 🧭 Navigate")
-    st.page_link("cleaning_scheduler.py", label="🧹 Cleaning Schedule")
-    st.page_link("pages/1_Dashboard.py", label="📊 Dashboard")
-    st.page_link("pages/2_Admin.py", label="⚙️ Admin")
+    st.markdown("### Navigate")
+    st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
+    st.page_link("pages/1_Dashboard.py", label="Dashboard")
+    st.page_link("pages/2_Admin.py", label="Admin")
     st.markdown("---")
     _cu = st.session_state.get("display_name","") or st.session_state.get("username","")
     _role = st.session_state.get("role","")
     if _cu:
         st.caption(f"Signed in as **{_cu}** · {_role.title()}")
 
-st.markdown('<p class="pg-title">👑 Admin Panel</p>', unsafe_allow_html=True)
+st.markdown('<p class="pg-title"> Admin Panel</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">Logged in as <strong>{cu["username"]}</strong> · User management & system settings</p>',
             unsafe_allow_html=True)
 
 tab_users, tab_create, tab_pw, tab_activity = st.tabs(
-    ["👥 All Users", "➕ Create User", "🔑 Reset Password", "📊 Activity"])
+    ["All Users", "Create User", "Reset Password", "Activity"])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ALL USERS
@@ -221,7 +221,7 @@ with tab_users:
             badge= (f'<span style="background:{bg};color:{ac};border-radius:6px;'
                     f'padding:2px 10px;font-size:.71rem;font-weight:700">{role.title()}</span>')
             ll   = u.get("last_login","—") or "Never"
-            if ll != "—" and ll != "Never":
+            if ll != "—"and ll != "Never":
                 ll = ll[:16].replace("T"," ")
             rows_html += f"""<tr>
               <td style="padding:10px 14px;font-weight:600;color:{_t_txt};border-bottom:1px solid {_t_row_br}">{_html.escape(u.get("username",""))}</td>
@@ -247,7 +247,7 @@ with tab_users:
         components.html(tbl, height=max(80+len(users)*46,120), scrolling=False)
 
     # Edit role + delete
-    st.markdown('<p class="sec" style="margin-top:1.2rem">Edit User</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sec"style="margin-top:1.2rem">Edit User</p>', unsafe_allow_html=True)
     usernames = [u["username"] for u in users if u["username"] != cu["username"]]
     if usernames:
         col_u, col_r = st.columns([2,2])
@@ -261,9 +261,9 @@ with tab_users:
 
         btn_col1, btn_col2, _ = st.columns([1,1,3])
         with btn_col1:
-            save_clicked = st.button("💾 Save Role", key="btn_save_role", use_container_width=True)
+            save_clicked = st.button("Save Role", key="btn_save_role", use_container_width=True)
         with btn_col2:
-            del_clicked  = st.button("🗑 Delete User", key="btn_del_user", use_container_width=True)
+            del_clicked = st.button("Delete User", key="btn_del_user", use_container_width=True)
 
         if save_clicked:
             ok, msg = db.update_role(edit_user, new_role)
@@ -294,7 +294,7 @@ with tab_create:
         with c2:
             new_pw    = st.text_input("Password", type="password")
             new_pw2   = st.text_input("Confirm Password", type="password")
-        submitted = st.form_submit_button("➕ Create User", type="primary")
+        submitted = st.form_submit_button("Create User", type="primary")
         if submitted:
             if new_pw != new_pw2:
                 st.error("Passwords don't match.")
@@ -308,9 +308,9 @@ with tab_create:
 <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;
             padding:12px 16px;font-size:.8rem;color:#92400e;margin-top:12px">
   <strong>Role permissions:</strong><br>
-  👑 <strong>Admin</strong> — Full access: generate schedules, manage users, edit everything<br>
-  🔍 <strong>RQS</strong> — Paste room data, generate schedules, view all tabs and dashboard<br>
-  🧑‍🔧 <strong>Housekeeper</strong> — View-only: see their groups and the schedule
+   <strong>Admin</strong> — Full access: generate schedules, manage users, edit everything<br>
+   <strong>RQS</strong> — Paste room data, generate schedules, view all tabs and dashboard<br>
+   <strong>Housekeeper</strong> — View-only: see their groups and the schedule
 </div>
 """, unsafe_allow_html=True)
 
@@ -326,7 +326,7 @@ with tab_pw:
             target_user = st.selectbox("User to reset", unames_all)
             new_pw_r    = st.text_input("New Password", type="password")
             new_pw_r2   = st.text_input("Confirm New Password", type="password")
-            if st.form_submit_button("🔑 Reset Password", type="primary"):
+            if st.form_submit_button("Reset Password", type="primary"):
                 if new_pw_r != new_pw_r2:
                     st.error("Passwords don't match.")
                 elif len(new_pw_r) < 6:
@@ -336,7 +336,7 @@ with tab_pw:
                     st.success(msg) if ok else st.error(msg)
 
     # Change own password
-    st.markdown('<p class="sec" style="margin-top:1.2rem">Change My Password</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sec"style="margin-top:1.2rem">Change My Password</p>', unsafe_allow_html=True)
     with st.form("change_own_pw"):
         old_pw  = st.text_input("Current Password", type="password")
         new_pw_own = st.text_input("New Password", type="password")
@@ -400,7 +400,7 @@ with tab_activity:
         ROLE_LBL = {"admin":"Admin","rqs":"RQS","housekeeper":"Housekeeper"}
 
         # Per-user rollup
-        st.markdown('<p class="sec" style="margin-top:1.2rem">By Person</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sec"style="margin-top:1.2rem">By Person</p>', unsafe_allow_html=True)
         for r in summary:
             role_lbl = ROLE_LBL.get(r["role"], r["role"] or "—")
             st.markdown(
@@ -416,7 +416,7 @@ with tab_activity:
                 unsafe_allow_html=True)
 
         # Recent sign-in feed
-        st.markdown('<p class="sec" style="margin-top:1.2rem">Recent Sign-ins</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sec"style="margin-top:1.2rem">Recent Sign-ins</p>', unsafe_allow_html=True)
         feed = ""
         for e in events[:40]:
             nm = _html.escape(e.get("display_name") or e.get("username","?"))
