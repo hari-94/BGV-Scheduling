@@ -3588,9 +3588,9 @@ else:
         with f2: _frqs = st.selectbox("Inspector (RQS)", ["All"]+_all_rqs, key="sch_rqs_filter")
         with f3: _fsvc = st.selectbox("Service", ["All",SVC_FC,SVC_IH,SVC_DS,SVC_DV], key="sch_svc_filter")
 
-        # ── Build one row per housekeeper, grouping all their rooms together ──
-        # Verify/blank-housekeeper groups are collected under an "Unassigned" row.
-        by_hk = {}   # hk_name -> {"insp":set, "bld":set, "rooms":[room dicts + svc], "time":int}
+        # ── Build one row per housekeeper, grouped under their RQS (like the
+        #    pivot). Verify/blank-housekeeper groups collect under "Unassigned". ─
+        by_hk = {}   # hk_name -> {"insp":str, "bld":set, "rooms":[...], "time":int}
         for g in fg:
             hk   = g.get("housekeeper","") or ("Unassigned" if g.get("verify_group") else "")
             insp = g.get("inspector","")
@@ -3603,27 +3603,34 @@ else:
                 rec["rooms"].append({**r, "_svc":svc})
             rec["time"] += g["time"]
 
-        # Apply filters
         def _keep(hk, rec):
             if _fhk  != "All" and hk != _fhk: return False
             if _frqs != "All" and _frqs not in rec["insp"]: return False
             if _fsvc != "All" and not any(x["_svc"]==_fsvc for x in rec["rooms"]): return False
             return True
 
-        # Order: assigned housekeepers first (by building then name), Unassigned last
-        ordered = sorted(
-            [(hk,rec) for hk,rec in by_hk.items() if _keep(hk,rec)],
-            key=lambda kv:(kv[0]=="Unassigned", min(kv[1]["bld"]) if kv[1]["bld"] else 9, kv[0].lower())
-        )
-
         SVC_SHORT = {SVC_FC:"FC", SVC_IH:"IH", SVC_DS:"DS", SVC_DV:"DV"}
         SVC_COL   = {SVC_FC:"#2563a8", SVC_IH:"#7c3aed", SVC_DS:"#0f766e", SVC_DV:"#b45309"}
 
+        def _primary_rqs(rec):
+            return sorted(rec["insp"])[0] if rec["insp"] else "Unassigned"
+
+        # Group housekeepers under their (primary) RQS, then sort HKs by building.
+        from collections import OrderedDict as _OD
+        rqs_groups = {}
+        for hk, rec in by_hk.items():
+            if not _keep(hk, rec): continue
+            rqs_groups.setdefault(_primary_rqs(rec), []).append((hk, rec))
+        # RQS order: named RQS alphabetically, "Unassigned" last.
+        ordered_rqs = sorted(rqs_groups.keys(), key=lambda r:(r=="Unassigned", r.lower()))
+        for r in rqs_groups:
+            rqs_groups[r].sort(key=lambda kv:(kv[0]=="Unassigned",
+                                              min(kv[1]["bld"]) if kv[1]["bld"] else 9,
+                                              kv[0].lower()))
+
         def _rooms_cell(rec):
-            # filter this row's rooms by the service filter too, for a clean view
             rooms = rec["rooms"]
             if _fsvc != "All": rooms = [x for x in rooms if x["_svc"]==_fsvc]
-            # sort rooms by building, floor, number
             rooms = sorted(rooms, key=lambda x:(x.get("bld",0), x.get("floor",0), x.get("num",0)))
             out = []
             for x in rooms:
@@ -3649,8 +3656,7 @@ else:
             return "".join(svcs) or '<span style="color:#9aa4b2">—</span>'
 
         def _notes_cell(rec):
-            parts = []
-            seen = set()
+            parts = []; seen = set()
             for x in rec["rooms"]:
                 n = (x.get("notes","") or "").strip()
                 if n and n not in seen:
@@ -3669,11 +3675,6 @@ else:
                                  f'line-height:1.5">{e(x.get("room",""))} · {e(t)}</div>')
             return "".join(parts) or '<span style="color:#9aa4b2">—</span>'
 
-        def _insp_cell(rec):
-            if not rec["insp"]: return '<span style="color:#9aa4b2">—</span>'
-            return " · ".join(f'<span style="color:#16202e;font-weight:600">{e(i)}</span>'
-                              for i in sorted(rec["insp"]))
-
         def _hk_cell(hk, rec):
             blds = "".join(
                 f'<span style="background:{BLD_COLORS.get(b,("#888","#eee"))[1]};'
@@ -3689,26 +3690,33 @@ else:
                     f'{blds}{low}'
                     f'<div style="font-size:.66rem;color:#8a93a1;margin-top:2px">{rec["time"]}m</div>')
 
-        # Render the comprehensive table
+        def _rqs_cell(rqs, span_first):
+            if not span_first: return ""   # blank on repeat rows within the RQS group
+            col = "#9aa4b2" if rqs=="Unassigned" else "#16202e"
+            return f'<span style="font-weight:700;color:{col};font-size:.85rem">{e(rqs)}</span>'
+
+        # ── Render: columns lead with RQS, then Housekeeper, Rooms, Service,
+        #    Notes, Late Out (same order as the pivot). ─────────────────────────
         th = ("padding:10px 12px;text-align:left;font-family:'DM Mono',monospace;"
               "font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.09em;"
               f"color:{_C['txt3']};background:{_C['th_bg']};border-bottom:1px solid {_C['row_br']};"
               "position:sticky;top:0;z-index:2")
-        cols = ["Housekeeper","Service","Rooms","Inspector","Notes","Late Out"]
-        widths = ["15%","9%","34%","12%","20%","10%"]
+        cols   = ["RQS","Housekeeper","Rooms","Service","Notes","Late Out"]
+        widths = ["11%","15%","33%","8%","23%","10%"]
         head = "".join(f'<th style="{th};width:{w}">{c}</th>' for c,w in zip(cols,widths))
-        body = ""
-        for i,(hk,rec) in enumerate(ordered):
-            delay=f"{min(i*0.025,0.6):.2f}s"
-            cells = [_hk_cell(hk,rec), _svc_cell(rec), _rooms_cell(rec),
-                     _insp_cell(rec), _notes_cell(rec), _late_cell(rec)]
-            tds = "".join(
-                f'<td style="padding:9px 12px;border-bottom:1px solid {_C["row_br"]};'
-                f'vertical-align:top">{c}</td>' for c in cells)
-            body += (f'<tr style="animation:rowIn .3s {delay} both" '
-                     f'onmouseover="this.style.background=\'{_C["th_bg"]}\'" '
-                     f'onmouseout="this.style.background=\'transparent\'" '
-                     f'style="transition:background .15s">{tds}</tr>')
+        body = ""; ri = 0
+        for rqs in ordered_rqs:
+            members = rqs_groups[rqs]
+            for j,(hk,rec) in enumerate(members):
+                delay=f"{min(ri*0.02,0.6):.2f}s"; ri += 1
+                # top border between RQS groups for visual separation
+                grp_top = (f"border-top:2px solid {_C['row_br']};" if j==0 and body else "")
+                cells = [_rqs_cell(rqs, j==0), _hk_cell(hk,rec), _rooms_cell(rec),
+                         _svc_cell(rec), _notes_cell(rec), _late_cell(rec)]
+                tds = "".join(
+                    f'<td style="padding:9px 12px;border-bottom:1px solid {_C["row_br"]};{grp_top}'
+                    f'vertical-align:top">{c}</td>' for c in cells)
+                body += f'<tr style="animation:rowIn .3s {delay} both">{tds}</tr>'
         table_html = f"""<!DOCTYPE html><html><head>{SHARED_CSS}
 <style>
 tr{{transition:background .15s ease}}
@@ -3721,16 +3729,62 @@ td{{transition:background .15s ease}}
   <thead><tr>{head}</tr></thead><tbody>{body}</tbody>
 </table></div></body></html>"""
         _row_h = 0
-        for hk,rec in ordered:
-            nrooms = len(rec["rooms"]) if _fsvc=="All" else len([x for x in rec["rooms"] if x["_svc"]==_fsvc])
-            _row_h += max(52, 30 + ((nrooms+5)//6)*30)
+        for rqs in ordered_rqs:
+            for hk,rec in rqs_groups[rqs]:
+                nrooms = len(rec["rooms"]) if _fsvc=="All" else len([x for x in rec["rooms"] if x["_svc"]==_fsvc])
+                _row_h += max(52, 30 + ((nrooms+5)//6)*30)
         components.html(table_html, height=min(max(_row_h+70, 160), 4000), scrolling=True)
 
-        if n_free_hk or n_low_hk:
-            parts=[]
-            if n_free_hk: parts.append(f"**{n_free_hk}** HK(s) unassigned")
-            if n_low_hk:  parts.append(f"**{n_low_hk}** HK(s) low hours")
-            st.caption(" · ".join(p.replace("**","") for p in parts))
+        # ── Free / low-hour housekeeper summary at the END of the table ────────
+        _low_rows = []
+        for hk, rec in by_hk.items():
+            if hk == "Unassigned": continue
+            if rec["time"] and rec["time"] < LOW_MIN:
+                _low_rows.append((hk, rec["time"],
+                                  len([x for x in rec["rooms"]]),
+                                  sorted(rec["insp"])))
+        _free = [n for n in present_hk if n not in used_hk_set]
+        _low_rows.sort(key=lambda t:t[1])   # lightest first
+
+        if _free or _low_rows:
+            srows = ""
+            for hk, t, nrm, insp in _low_rows:
+                srows += (f'<tr><td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                          f'font-weight:600;color:#16202e">{e(hk)}</td>'
+                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                          f'color:#b45309;font-weight:700">{t}m</td>'
+                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                          f'color:#5b6675">{nrm} room{"s" if nrm!=1 else ""}</td>'
+                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                          f'color:#5b6675">{e(" · ".join(insp)) or "—"}</td></tr>')
+            for hk in sorted(_free):
+                srows += (f'<tr><td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                          f'font-weight:600;color:#16202e">{e(hk)}</td>'
+                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                          f'color:#059669;font-weight:700">Free</td>'
+                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                          f'color:#5b6675">0 rooms</td>'
+                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                          f'color:#9aa4b2">—</td></tr>')
+            sth = ("padding:8px 12px;text-align:left;font-family:'DM Mono',monospace;"
+                   "font-size:.58rem;font-weight:600;text-transform:uppercase;letter-spacing:.09em;"
+                   f"color:{_C['txt3']};background:{_C['th_bg']};border-bottom:1px solid {_C['row_br']}")
+            summary_html = f"""<!DOCTYPE html><html><head>{SHARED_CSS}</head><body>
+<div style="margin-top:6px;font-family:'DM Mono',monospace;font-size:.62rem;font-weight:600;
+            letter-spacing:.09em;text-transform:uppercase;color:{_C['txt3']};margin-bottom:6px">
+  Free &amp; Low-Hour Housekeepers (under {LOW_MIN} min)</div>
+<div style="border-radius:10px;overflow:hidden;border:1px solid {_C['card_br']};
+            background:{_C['tbl_bg']};box-shadow:{_C['card_sh']}">
+<table style="width:100%;border-collapse:collapse;font-size:.78rem">
+  <thead><tr><th style="{sth};width:30%">Housekeeper</th>
+    <th style="{sth};width:18%">Load</th>
+    <th style="{sth};width:22%">Rooms</th>
+    <th style="{sth};width:30%">RQS</th></tr></thead>
+  <tbody>{srows}</tbody>
+</table></div></body></html>"""
+            components.html(summary_html, height=min(90 + (len(_low_rows)+len(_free))*40, 900), scrolling=True)
+        else:
+            st.caption("All housekeepers are assigned and at or above the hour threshold.")
 
     # ══════════════════════════════════════════════════════════════════════════════
     # LIVE TAB — Real-time cleaning & inspection tracking
