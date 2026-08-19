@@ -2055,20 +2055,30 @@ def _fc_greedy_finish(charts):
             gap = MAX_FC - cur
             if gap <= 0: break
             cur_flrs = set((_bld(x), _flr(x)) for x in chart)
+            # Only step onto a NEW floor if this chart is still under the 330 floor
+            # (i.e. it genuinely needs more work to avoid being light). Once at/above
+            # 330 we stop reaching to other floors — keeping travel minimal.
+            allow_new_floor = cur < LOW_MIN
             best_j = None; best_key = None
             for j, u in enumerate(avail):
                 if j in used: continue
                 ut = _unit_time_sum([u])
                 if ut > gap or not _chart_feasible(chart + [u]): continue
-                same_floor = 1 if (_bld(u), _flr(u)) in cur_flrs else 0
-                # Below the 330 floor, prioritise filling (get out of "light")
-                # first, then same-floor. Once at/above 330 we're in the target
-                # band, so prefer same-floor tidiness, then more fill.
-                if cur < LOW_MIN:
-                    key = (ut, same_floor)
+                same_floor = (_bld(u), _flr(u)) in cur_flrs
+                if not same_floor and not allow_new_floor:
+                    continue                      # don't wander off-floor once full enough
+                # Primary: stay on the current floor. Secondary: for off-floor
+                # options, pick the physically nearest floor (small vertical gap).
+                # Tertiary: bigger fill. This keeps each housekeeper on as few
+                # floors as possible while still reaching the target band.
+                if same_floor:
+                    floor_pen = 0
                 else:
-                    key = (same_floor, ut)
-                if best_key is None or key > best_key:
+                    # distance to the nearest floor already in the chart
+                    floor_pen = min(abs(_flr(u)-_flr(x)) + (0 if _bld(u)==_bld(x) else 9)
+                                    for x in chart)
+                key = (0 if same_floor else 1, floor_pen, -ut)   # lower is better
+                if best_key is None or key < best_key:
                     best_key = key; best_j = j
             if best_j is None: break
             used.add(best_j); chart.append(avail[best_j])
@@ -2076,18 +2086,19 @@ def _fc_greedy_finish(charts):
 
     result = []
     while pool and len(result) < n_target:
-        # Try a few seeds; keep the packing that best lands in the 330-380 target
-        # band. A chart at/above 330 beats a lighter one; among those, fuller is
-        # better (closer to 380).
+        # Try a few seeds; keep the packing that best (1) clears the 330 floor,
+        # (2) uses the FEWEST distinct floors (minimal travel), then (3) fills most.
         best = None
         n_try = min(len(pool), 6)
         for i in range(n_try):
             used, total = _fill_from(i, pool)
-            # rank: first whether it clears the 330 floor, then how full it is
-            rank = (1 if total >= LOW_MIN else 0, total)
+            u_chart = [pool[k] for k in used]
+            nflr = len(set((_bld(x), _flr(x)) for x in u_chart))
+            # higher is better: clears 330, then fewer floors (negated), then fuller
+            rank = (1 if total >= LOW_MIN else 0, -nflr, total)
             if best is None or rank > best[0]:
                 best = (rank, used, total)
-                if total >= MAX_FC: break
+                if total >= MAX_FC and nflr == 1: break
         used = best[1]
         chart = [pool[i] for i in sorted(used)]
         pool = [u for i, u in enumerate(pool) if i not in used]
