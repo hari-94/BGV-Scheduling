@@ -3615,16 +3615,33 @@ else:
         def _primary_rqs(rec):
             return sorted(rec["insp"])[0] if rec["insp"] else "Unassigned"
 
-        # Group housekeepers under their (primary) RQS, then sort HKs by building.
+        # Service ranking used to order both the RQS groups and rooms: Full Clean
+        # first, then IH, Daily Service, Dust n Vac.
+        _SVC_RANK = {SVC_FC:0, SVC_IH:1, SVC_DS:2, SVC_DV:3}
+        def _rec_primary_svc_rank(rec):
+            # an RQS/HK's "primary" service = the lowest-ranked (most senior)
+            # service among the rooms they carry.
+            ranks = [_SVC_RANK.get(x["_svc"], 4) for x in rec["rooms"]]
+            return min(ranks) if ranks else 4
+
+        # Group housekeepers under their (primary) RQS.
         from collections import OrderedDict as _OD
         rqs_groups = {}
         for hk, rec in by_hk.items():
             if not _keep(hk, rec): continue
             rqs_groups.setdefault(_primary_rqs(rec), []).append((hk, rec))
-        # RQS order: named RQS alphabetically, "Unassigned" last.
-        ordered_rqs = sorted(rqs_groups.keys(), key=lambda r:(r=="Unassigned", r.lower()))
+        # Each RQS group's service rank = the best (lowest) rank among its HKs, so
+        # RQS groups that lead Full Clean sort to the top and Daily Service to the
+        # bottom. "Unassigned" always sorts last.
+        def _rqs_svc_rank(rqs):
+            return min((_rec_primary_svc_rank(rec) for _,rec in rqs_groups[rqs]), default=4)
+        ordered_rqs = sorted(rqs_groups.keys(),
+                             key=lambda r:(r=="Unassigned", _rqs_svc_rank(r), r.lower()))
+        # Within each RQS, sort housekeepers by their service (FC first), then
+        # building, then name.
         for r in rqs_groups:
             rqs_groups[r].sort(key=lambda kv:(kv[0]=="Unassigned",
+                                              _rec_primary_svc_rank(kv[1]),
                                               min(kv[1]["bld"]) if kv[1]["bld"] else 9,
                                               kv[0].lower()))
 
@@ -3735,56 +3752,100 @@ td{{transition:background .15s ease}}
                 _row_h += max(52, 30 + ((nrooms+5)//6)*30)
         components.html(table_html, height=min(max(_row_h+70, 160), 4000), scrolling=True)
 
-        # ── Free / low-hour housekeeper summary at the END of the table ────────
-        _low_rows = []
+        # ── Free / low summary at the END of the table ────────────────────────
+        # Housekeepers: low = under LOW_MIN minutes. RQS/inspectors: low = fewer
+        # than 8 rooms. Free (present but assigned nothing) shown for both. Each
+        # row also shows the service type(s) that person is handling today.
+        SVC_SHORT = {SVC_FC:"FC", SVC_IH:"IH", SVC_DS:"DS", SVC_DV:"DV"}
+        RQS_LOW_ROOMS = 8
+
+        def _svc_summary(recs_rooms):
+            svs = []
+            for s in [SVC_FC,SVC_IH,SVC_DS,SVC_DV]:
+                if any(x["_svc"]==s for x in recs_rooms):
+                    c = SVC_COL[s]
+                    svs.append(f'<span style="background:{c}14;color:{c};border-radius:5px;'
+                               f'padding:1px 7px;font-size:.66rem;font-weight:700;margin-right:3px">'
+                               f'{SVC_SHORT[s]}</span>')
+            return "".join(svs) or '<span style="color:#9aa4b2">—</span>'
+
+        # Housekeeper rows
+        _hk_low = []   # (name, load_str, load_col, nrooms, svc_html, rqs_str, kind)
         for hk, rec in by_hk.items():
             if hk == "Unassigned": continue
             if rec["time"] and rec["time"] < LOW_MIN:
-                _low_rows.append((hk, rec["time"],
-                                  len([x for x in rec["rooms"]]),
-                                  sorted(rec["insp"])))
-        _free = [n for n in present_hk if n not in used_hk_set]
-        _low_rows.sort(key=lambda t:t[1])   # lightest first
+                _hk_low.append((hk, f'{rec["time"]}m', "#b45309", len(rec["rooms"]),
+                                _svc_summary(rec["rooms"]), " · ".join(sorted(rec["insp"])), rec["time"]))
+        _hk_low.sort(key=lambda t:t[-1])   # lightest first
+        _hk_free = sorted(n for n in present_hk if n not in used_hk_set)
 
-        if _free or _low_rows:
+        # RQS/inspector rows — build room counts per inspector from the schedule.
+        rqs_rooms = {}   # rqs -> {"n":int, "rooms":[...]}
+        for g in fg:
+            insp = g.get("inspector","")
+            if not insp: continue
+            r = rqs_rooms.setdefault(insp, {"n":0, "rooms":[]})
+            for rm in g["rooms"]:
+                r["n"] += 1
+                r["rooms"].append({**rm, "_svc":g.get("service_type","")})
+        _rqs_low = []
+        for insp, info in rqs_rooms.items():
+            if info["n"] < RQS_LOW_ROOMS:
+                _rqs_low.append((insp, f'{info["n"]} rm', "#b45309", info["n"],
+                                 _svc_summary(info["rooms"]), "", info["n"]))
+        _rqs_low.sort(key=lambda t:t[-1])
+        _rqs_free = sorted(n for n in present_insp if n not in rqs_rooms)
+
+        _any = _hk_low or _hk_free or _rqs_low or _rqs_free
+        if _any:
+            def _row(name, load, load_col, rooms_txt, svc_html, who, role_tag):
+                return (f'<tr>'
+                        f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                        f'font-weight:600;color:#16202e">{e(name)}'
+                        f'<span style="background:#eef0f3;color:#5b6675;border-radius:4px;'
+                        f'padding:0 6px;font-size:.58rem;font-weight:700;margin-left:6px;'
+                        f'text-transform:uppercase">{role_tag}</span></td>'
+                        f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                        f'color:{load_col};font-weight:700">{load}</td>'
+                        f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                        f'color:#5b6675">{rooms_txt}</td>'
+                        f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]}">{svc_html}</td>'
+                        f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
+                        f'color:#5b6675">{who}</td></tr>')
             srows = ""
-            for hk, t, nrm, insp in _low_rows:
-                srows += (f'<tr><td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
-                          f'font-weight:600;color:#16202e">{e(hk)}</td>'
-                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
-                          f'color:#b45309;font-weight:700">{t}m</td>'
-                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
-                          f'color:#5b6675">{nrm} room{"s" if nrm!=1 else ""}</td>'
-                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
-                          f'color:#5b6675">{e(" · ".join(insp)) or "—"}</td></tr>')
-            for hk in sorted(_free):
-                srows += (f'<tr><td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
-                          f'font-weight:600;color:#16202e">{e(hk)}</td>'
-                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
-                          f'color:#059669;font-weight:700">Free</td>'
-                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
-                          f'color:#5b6675">0 rooms</td>'
-                          f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
-                          f'color:#9aa4b2">—</td></tr>')
+            for hk, load, col, nrm, svc, insp, _ in _hk_low:
+                srows += _row(hk, load, col, f'{nrm} room{"s" if nrm!=1 else ""}', svc,
+                              e(insp) or "—", "HK")
+            for hk in _hk_free:
+                srows += _row(hk, "Free", "#059669", "0 rooms",
+                              '<span style="color:#9aa4b2">—</span>', "—", "HK")
+            for insp, load, col, nrm, svc, _, _n in _rqs_low:
+                srows += _row(insp, load, col, f'{nrm} room{"s" if nrm!=1 else ""}', svc,
+                              "—", "RQS")
+            for insp in _rqs_free:
+                srows += _row(insp, "Free", "#059669", "0 rooms",
+                              '<span style="color:#9aa4b2">—</span>', "—", "RQS")
             sth = ("padding:8px 12px;text-align:left;font-family:'DM Mono',monospace;"
                    "font-size:.58rem;font-weight:600;text-transform:uppercase;letter-spacing:.09em;"
                    f"color:{_C['txt3']};background:{_C['th_bg']};border-bottom:1px solid {_C['row_br']}")
             summary_html = f"""<!DOCTYPE html><html><head>{SHARED_CSS}</head><body>
 <div style="margin-top:6px;font-family:'DM Mono',monospace;font-size:.62rem;font-weight:600;
             letter-spacing:.09em;text-transform:uppercase;color:{_C['txt3']};margin-bottom:6px">
-  Free &amp; Low-Hour Housekeepers (under {LOW_MIN} min)</div>
+  Free &amp; Low-Load Staff &nbsp;(HK under {LOW_MIN} min · RQS under {RQS_LOW_ROOMS} rooms)</div>
 <div style="border-radius:10px;overflow:hidden;border:1px solid {_C['card_br']};
             background:{_C['tbl_bg']};box-shadow:{_C['card_sh']}">
 <table style="width:100%;border-collapse:collapse;font-size:.78rem">
-  <thead><tr><th style="{sth};width:30%">Housekeeper</th>
-    <th style="{sth};width:18%">Load</th>
-    <th style="{sth};width:22%">Rooms</th>
-    <th style="{sth};width:30%">RQS</th></tr></thead>
+  <thead><tr><th style="{sth};width:26%">Staff</th>
+    <th style="{sth};width:14%">Load</th>
+    <th style="{sth};width:16%">Rooms</th>
+    <th style="{sth};width:22%">Service</th>
+    <th style="{sth};width:22%">RQS</th></tr></thead>
   <tbody>{srows}</tbody>
 </table></div></body></html>"""
-            components.html(summary_html, height=min(90 + (len(_low_rows)+len(_free))*40, 900), scrolling=True)
+            _nrows = len(_hk_low)+len(_hk_free)+len(_rqs_low)+len(_rqs_free)
+            components.html(summary_html, height=min(100 + _nrows*40, 1100), scrolling=True)
         else:
-            st.caption("All housekeepers are assigned and at or above the hour threshold.")
+            st.caption("All staff are assigned and at or above their thresholds.")
 
     # ══════════════════════════════════════════════════════════════════════════════
     # LIVE TAB — Real-time cleaning & inspection tracking
@@ -4195,10 +4256,14 @@ td{{transition:background .15s ease}}
         is_verify = g.get("verify_group", False)
         svc_rank = _SVC_ORDER.get(g.get("service_type",""), 4)
         for r in g["rooms"]:
+            _guest = r.get("guest","")
+            # "Unallocated" (and blank) rooms may already be clean — flag them so
+            # they drop to the bottom of the download for manual review/assignment.
+            _is_unalloc = str(_guest).strip().lower() in ("unallocated","---","")
             export_rows.append({
                 "Room":r.get("room",""),"Service":r.get("service",""),
                 "Time (min)":r.get("time",""),"Pet":r.get("pet",""),
-                "Current Guest or Status":r.get("guest",""),
+                "Current Guest or Status":_guest,
                 # Verify rooms (stayover / P-U Models) get NO housekeeper or RQS
                 "HSKP":"" if is_verify else g.get("housekeeper",""),
                 "RQS":"" if is_verify else g.get("inspector",""),
@@ -4208,17 +4273,27 @@ td{{transition:background .15s ease}}
                 # kept only for internal sort ordering below (dropped before export)
                 "_Group":("VERIFY — assign manually" if is_verify else g["label"]),
                 "_Svc":svc_rank,
+                "_RQS":("" if is_verify else (g.get("inspector","") or "")).lower(),
+                "_HSKP":("" if is_verify else (g.get("housekeeper","") or "")).lower(),
+                "_Unalloc":"Yes" if (_is_unalloc and not is_verify) else "No",
                 "_Verify":"Yes" if is_verify else "No",
                 "_Uncertain":"Yes" if r.get("uncertain") else "No",
             })
     export_df = pd.DataFrame(export_rows)
-    # Order: by service band (Full Clean IH Daily Service Dust n Vac) with
-    # confirmed rooms first; then uncertain rooms; then stayover/verify rows last.
+    # Order, top to bottom:
+    #   1) confirmed rooms with a real guest — by service (FC→IH→DS→DV), RQS, HK
+    #   2) "Unallocated" rooms (may already be clean) — dropped to the bottom for
+    #      manual review, still grouped by service/RQS/HK
+    #   3) uncertain rooms
+    #   4) stayover / verify rooms (assign manually) — dead last
     if not export_df.empty and "_Verify" in export_df.columns:
-        normal = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")].sort_values(["_Svc","_Group"])
-        unconfirmed = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="Yes")].sort_values(["_Svc","_Group"])
+        _sk = ["_Svc","_RQS","_HSKP","_Group"]
+        base = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")]
+        normal      = base[base["_Unalloc"]=="No"].sort_values(_sk)
+        unallocated = base[base["_Unalloc"]=="Yes"].sort_values(_sk)
+        unconfirmed = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="Yes")].sort_values(_sk)
         verify_rows = export_df[export_df["_Verify"]=="Yes"].sort_values("_Group")
-        export_df = pd.concat([normal,unconfirmed,verify_rows],ignore_index=True)
+        export_df   = pd.concat([normal,unallocated,unconfirmed,verify_rows],ignore_index=True)
     # Drop the internal sort-only helper columns so the file has exactly the
     # requested columns, in order.
     _EXPORT_COLS = ["Room","Service","Time (min)","Pet","Current Guest or Status",
