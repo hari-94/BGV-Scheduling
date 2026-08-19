@@ -4260,21 +4260,28 @@ td{{transition:background .15s ease}}
             # "Unallocated" (and blank) rooms may already be clean — flag them so
             # they drop to the bottom of the download for manual review/assignment.
             _is_unalloc = str(_guest).strip().lower() in ("unallocated","---","")
+            _svc_type = g.get("service_type","")
+            # For Unallocated FULL CLEAN / IH rooms we don't pre-assign anyone —
+            # leave HSKP and RQS blank so they can be assigned manually later.
+            # Dust n Vac keeps its RQS 2, and Daily Service keeps the app's
+            # assignment, as usual.
+            _blank_assign = _is_unalloc and _svc_type in (SVC_FC, SVC_IH)
+            _hskp = "" if (is_verify or _blank_assign) else g.get("housekeeper","")
+            _rqs  = "" if (is_verify or _blank_assign) else g.get("inspector","")
             export_rows.append({
                 "Room":r.get("room",""),"Service":r.get("service",""),
                 "Time (min)":r.get("time",""),"Pet":r.get("pet",""),
                 "Current Guest or Status":_guest,
-                # Verify rooms (stayover / P-U Models) get NO housekeeper or RQS
-                "HSKP":"" if is_verify else g.get("housekeeper",""),
-                "RQS":"" if is_verify else g.get("inspector",""),
+                "HSKP":_hskp,
+                "RQS":_rqs,
                 # Status is intentionally left BLANK in the downloaded file.
                 "Notes":r.get("notes",""),"Status":"",
                 "Carpet":"","Stripping":"","Arriving Guest":r.get("arriving",""),
                 # kept only for internal sort ordering below (dropped before export)
                 "_Group":("VERIFY — assign manually" if is_verify else g["label"]),
                 "_Svc":svc_rank,
-                "_RQS":("" if is_verify else (g.get("inspector","") or "")).lower(),
-                "_HSKP":("" if is_verify else (g.get("housekeeper","") or "")).lower(),
+                "_RQS":(_rqs or "").lower(),
+                "_HSKP":(_hskp or "").lower(),
                 "_Unalloc":"Yes" if (_is_unalloc and not is_verify) else "No",
                 "_Verify":"Yes" if is_verify else "No",
                 "_Uncertain":"Yes" if r.get("uncertain") else "No",
