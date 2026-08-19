@@ -2023,11 +2023,94 @@ def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
             key = (nb, _charts_xb(r), _charts_spread(r))
             if key < best[0]: best = (key, r); nb0 = nb
     charts = [c[:] for c in best[1] if c]
-    # Tidy within the locked count: consolidate onto single floors / tight halls.
-    charts = _fc_ls_tidy(charts, 12000, rng)
-    charts = _fc_floor_consolidate(charts) # dedicated floor-reduction pass
-    charts = _fc_ls_tidy(charts, 4000, rng) # final hall-tightening polish
+    # Tidy placement first (single floors, tight halls) within the locked count,
+    # then finish each chart LAST so the fill is authoritative: every chart is
+    # filled to at least LOW_MIN (330) and up toward the 380 cap, so nobody is left
+    # under 330 except the unavoidable final remainder.
+    charts = _fc_ls_tidy(charts, 6000, rng)
+    charts = _fc_floor_consolidate(charts)
+    charts = _fc_greedy_finish(charts)
     return _unpack_units(charts)
+
+def _fc_greedy_finish(charts):
+    """Re-pack units so each chart is FILLED before the next is opened, keeping the
+    same units (same-guest bundles intact), never breaking a rule, never adding a
+    housekeeper.
+
+    Filling to the cap depends on which unit seeds each chart, so for each chart we
+    try a handful of promising seeds, fill the rest best-fit, and keep the seed
+    that fills the chart most. This reaches the cap when a full combination exists
+    (e.g. 190+120+70=380) instead of stalling on a big seed."""
+    units = [u for c in charts for u in c]
+    n_target = len([c for c in charts if c])
+    # Process in building/floor/room order so consecutive charts follow the floors
+    # (keeps a housekeeper's chart on one floor when the fill allows it).
+    BLD = {3:0, 1:1, 2:2}
+    pool = sorted(units, key=lambda u: (BLD.get(_bld(u),1), _flr(u), _rnum(u)))
+
+    def _fill_from(seed_i, avail):
+        chart = [avail[seed_i]]; used = {seed_i}
+        while True:
+            cur = _unit_time_sum(chart)
+            gap = MAX_FC - cur
+            if gap <= 0: break
+            cur_flrs = set((_bld(x), _flr(x)) for x in chart)
+            best_j = None; best_key = None
+            for j, u in enumerate(avail):
+                if j in used: continue
+                ut = _unit_time_sum([u])
+                if ut > gap or not _chart_feasible(chart + [u]): continue
+                same_floor = 1 if (_bld(u), _flr(u)) in cur_flrs else 0
+                # Below the 330 floor, prioritise filling (get out of "light")
+                # first, then same-floor. Once at/above 330 we're in the target
+                # band, so prefer same-floor tidiness, then more fill.
+                if cur < LOW_MIN:
+                    key = (ut, same_floor)
+                else:
+                    key = (same_floor, ut)
+                if best_key is None or key > best_key:
+                    best_key = key; best_j = j
+            if best_j is None: break
+            used.add(best_j); chart.append(avail[best_j])
+        return used, _unit_time_sum(chart)
+
+    result = []
+    while pool and len(result) < n_target:
+        # Try a few seeds; keep the packing that best lands in the 330-380 target
+        # band. A chart at/above 330 beats a lighter one; among those, fuller is
+        # better (closer to 380).
+        best = None
+        n_try = min(len(pool), 6)
+        for i in range(n_try):
+            used, total = _fill_from(i, pool)
+            # rank: first whether it clears the 330 floor, then how full it is
+            rank = (1 if total >= LOW_MIN else 0, total)
+            if best is None or rank > best[0]:
+                best = (rank, used, total)
+                if total >= MAX_FC: break
+        used = best[1]
+        chart = [pool[i] for i in sorted(used)]
+        pool = [u for i, u in enumerate(pool) if i not in used]
+        result.append(chart)
+
+    # Leftover units → the lightest chart that can LEGALLY take them (feasibility
+    # enforced, so the cap is never exceeded). If none can, open nothing new —
+    # append to the lightest chart only if it stays within the cap; otherwise keep
+    # the unit as its own chart (should not happen given n_target math).
+    for u in pool:
+        placed = False
+        for c in sorted(result, key=_unit_time_sum):
+            if _chart_feasible(c + [u]): c.append(u); placed = True; break
+        if not placed:
+            result.append([u])
+    return [c for c in result if c]
+
+def _unit_time_sum(chart):
+    total = 0
+    for u in chart:
+        m = u.get("_members")
+        total += sum(x["time"] for x in m) if m else u["time"]
+    return total
 
 def solve_ih(ih_rooms, seed=20240601):
     """Pack IH rooms into SINGLE-building charts <=380, keeping a guest's rooms
@@ -2063,22 +2146,66 @@ def solve_ih(ih_rooms, seed=20240601):
     return keep, leftover
 
 def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP):
-    """Split Daily Service rooms into charts with a HARD cap of `cap` minutes each
-    (fill up to cap, never exceed), by building and contiguity. Any extra_rooms
-    (leftover IH) are appended. Leftover rooms that don't fit an existing chart
-    open a new one; if there aren't enough housekeepers to cover every chart, the
-    later charts simply get a blank housekeeper (assigned manually later)."""
+    """Split Daily Service rooms into charts, packing each housekeeper as FULL as
+    possible (up to the hard cap) before opening a new one, so we use the fewest
+    housekeepers. Rooms are kept physically close (building/floor/room order) and
+    no chart ever exceeds the cap.
+
+    Approach:
+      1. Sort rooms by building/floor/room so each chart stays contiguous.
+      2. Greedily fill the current chart to the cap; only open a new chart when the
+         next room genuinely won't fit.
+      3. Run a tightening pass that pulls early rooms forward to top up
+         under-filled charts, so the last chart carries the small remainder rather
+         than leaving several half-full charts."""
+    import math
     rooms = list(ds_rooms) + list(extra_rooms or [])
     if not rooms: return []
     BLD = {3:0, 1:1, 2:2}
     rooms = sorted(rooms, key=lambda r: (BLD.get(_bld(r),1), _flr(r), _rnum(r)))
-    charts = []; cur = []
+    total = sum(r["time"] for r in rooms)
+    # Fewest housekeepers this could possibly need at the hard cap.
+    n_min = max(1, math.ceil(total / cap))
+
+    # Greedy fill-to-cap: keep loading the current chart until the next room won't
+    # fit, then start a new one. This packs each housekeeper tight.
+    charts = []; cur = []; cur_t = 0
     for r in rooms:
-        if cur and sum(x["time"] for x in cur) + r["time"] > cap:
-            charts.append(cur); cur = []
-        cur.append(r)
+        if cur and cur_t + r["time"] > cap:
+            charts.append(cur); cur = []; cur_t = 0
+        cur.append(r); cur_t += r["time"]
     if cur: charts.append(cur)
+
+    # Tightening pass: if we ended up with more charts than the theoretical
+    # minimum, try to top up earlier charts by pulling the first room of a later
+    # chart forward whenever it fits under the cap. This concentrates the load and
+    # can drop the trailing (nearly empty) chart entirely, cutting a housekeeper.
+    _ds_pack_tight(charts, cap, n_min)
     return charts
+
+def _ds_pack_tight(charts, cap, n_min, rounds=400):
+    """Move boundary rooms EARLIER to fill charts to the cap, so the fewest
+    housekeepers are used. Only the first room of a later chart moves to the end of
+    an earlier one (keeps contiguity), and only when it fits under the cap."""
+    def t(c): return sum(x["time"] for x in c)
+    for _ in range(rounds):
+        moved = False
+        # try to top up each chart from the one after it
+        for i in range(len(charts)-1):
+            a = charts[i]
+            if not a: continue
+            ta = t(a)
+            # pull rooms from later charts forward while they fit
+            for j in range(i+1, len(charts)):
+                b = charts[j]
+                while b and ta + b[0]["time"] <= cap:
+                    r = b.pop(0); a.append(r); ta += r["time"]; moved = True
+                if ta >= cap: break
+        # drop any charts we emptied
+        before = len(charts)
+        charts[:] = [c for c in charts if c]
+        if len(charts) != before: moved = True
+        if not moved: break
 
 def build_all_groups(rooms, priority_hks=None):
     verify_rooms = [r for r in rooms if r.get("verify")]
