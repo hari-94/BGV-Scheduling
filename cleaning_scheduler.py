@@ -1,5 +1,5 @@
 """
-Cleaning Schedule Grouper  v10
+Cleaning Schedule Grouper v10
 """
 import re, html as _html
 import pandas as pd
@@ -33,12 +33,12 @@ st.markdown("""<style>
 
 # ── Theme: locked to a single formal "light"theme for office use ─────────────
 st.session_state["theme"] = "light"
-_THEME    = "light"
+_THEME = "light"
 _IS_GLASS = False
 _IS_LIGHT = True
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  CONSTANTS
+# CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
 def e(s): return _html.escape(str(s) if s else "")
 
@@ -72,27 +72,27 @@ def make_labels(prefix: str, n: int) -> list:
             if len(out) >= n: return out
     return out
 
-LOW_MIN  = 330
-MAX_FC   = 380
-MAX_DS   = 560
-DS_OVER  = 700
+LOW_MIN = 330
+MAX_FC = 380
+MAX_DS = 560
+DS_OVER = 700
 LOW_FILL = 350
 
 # Daily Service: HARD cap per housekeeper. Fill up to DS_CAP, never exceed;
 # leftover rooms form new charts (blank housekeeper if none available, filled in
 # manually later based on how the day goes).
-DS_CAP   = 460
+DS_CAP = 460
 # IH charts below this total are treated as scraps and spill to Daily Service
 # (kept charts at/above this are inspected by RQS 2).
 IH_KEEP_MIN = 310
 
-SVC_FC   = "Full Clean"
-SVC_IH   = "Full Clean (IH)"
-SVC_DS   = "Daily Service"
-SVC_DV   = "Dust n Vac"
+SVC_FC = "Full Clean"
+SVC_IH = "Full Clean (IH)"
+SVC_DS = "Daily Service"
+SVC_DV = "Dust n Vac"
 
 # RQS assigned to inspect all IH charts.
-IH_RQS   = "RQS 2"
+IH_RQS = "RQS 2"
 
 DEFAULT_TIMES = {
     SVC_FC: {"A":120,"B":70,"C":70,"D":120,"E":140,"F":70,"G":70,"H":70,"I":70},
@@ -142,7 +142,7 @@ DEFAULT_INSPECTORS = [
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  CSS
+# CSS
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
@@ -707,58 +707,58 @@ hr{background:rgba(255,255,255,.1)!important;}
 # translucent fills + hairline highlights that read as glass.)
 if _THEME == "glass-light":
     _C = {
-        "card_bg":   "linear-gradient(135deg,rgba(255,255,255,.94),rgba(247,249,255,.9))",
-        "card_br":   "rgba(255,255,255,.95)",
-        "card_sh":   "0 8px 28px rgba(31,38,135,.10), inset 0 1px 0 rgba(255,255,255,.98)",
-        "txt":       "#1c1c1e",
-        "txt2":      "#5b5b60",
-        "txt3":      "#9a9aa2",
-        "row_br":    "rgba(94,92,230,.10)",
-        "th_bg":     "rgba(94,92,230,.05)",
-        "tbl_bg":    "rgba(255,255,255,.92)",
-        "foot_bg":   "rgba(94,92,230,.04)",
+        "card_bg": "linear-gradient(135deg,rgba(255,255,255,.94),rgba(247,249,255,.9))",
+        "card_br": "rgba(255,255,255,.95)",
+        "card_sh": "0 8px 28px rgba(31,38,135,.10), inset 0 1px 0 rgba(255,255,255,.98)",
+        "txt": "#1c1c1e",
+        "txt2": "#5b5b60",
+        "txt3": "#9a9aa2",
+        "row_br": "rgba(94,92,230,.10)",
+        "th_bg": "rgba(94,92,230,.05)",
+        "tbl_bg": "rgba(255,255,255,.92)",
+        "foot_bg": "rgba(94,92,230,.04)",
     }
     _BODY_TXT = "#1c1c1e"
 elif _THEME == "glass-dark":
     _C = {
-        "card_bg":   "linear-gradient(135deg,rgba(40,40,52,.92),rgba(30,30,40,.94))",
-        "card_br":   "rgba(255,255,255,.16)",
-        "card_sh":   "0 8px 28px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.12)",
-        "txt":       "#f2f2f7",
-        "txt2":      "#aeaeb6",
-        "txt3":      "#6c6c75",
-        "row_br":    "rgba(255,255,255,.08)",
-        "th_bg":     "rgba(255,255,255,.04)",
-        "tbl_bg":    "rgba(32,32,42,.92)",
-        "foot_bg":   "rgba(255,255,255,.03)",
+        "card_bg": "linear-gradient(135deg,rgba(40,40,52,.92),rgba(30,30,40,.94))",
+        "card_br": "rgba(255,255,255,.16)",
+        "card_sh": "0 8px 28px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.12)",
+        "txt": "#f2f2f7",
+        "txt2": "#aeaeb6",
+        "txt3": "#6c6c75",
+        "row_br": "rgba(255,255,255,.08)",
+        "th_bg": "rgba(255,255,255,.04)",
+        "tbl_bg": "rgba(32,32,42,.92)",
+        "foot_bg": "rgba(255,255,255,.03)",
     }
     _BODY_TXT = "#f2f2f7"
 elif _THEME == "light":
     _C = {
-        "card_bg":   "#ffffff",
-        "card_br":   "#e2e5ea",
-        "card_sh":   "0 1px 2px rgba(20,32,54,.06),0 0 0 1px rgba(20,32,54,.02)",
-        "txt":       "#16202e",
-        "txt2":      "#5b6675",
-        "txt3":      "#8a93a1",
-        "row_br":    "#eef0f3",
-        "th_bg":     "#f4f5f7",
-        "tbl_bg":    "#ffffff",
-        "foot_bg":   "#f7f8fa",
+        "card_bg": "#ffffff",
+        "card_br": "#e2e5ea",
+        "card_sh": "0 1px 2px rgba(20,32,54,.06),0 0 0 1px rgba(20,32,54,.02)",
+        "txt": "#16202e",
+        "txt2": "#5b6675",
+        "txt3": "#8a93a1",
+        "row_br": "#eef0f3",
+        "th_bg": "#f4f5f7",
+        "tbl_bg": "#ffffff",
+        "foot_bg": "#f7f8fa",
     }
     _BODY_TXT = "#16202e"
 else:
     _C = {
-        "card_bg":   "linear-gradient(135deg,rgba(14,14,26,.95),rgba(19,19,31,.98))",
-        "card_br":   "rgba(99,102,241,.25)",
-        "card_sh":   "0 0 0 1px rgba(255,255,255,.04),0 8px 32px rgba(0,0,0,.4)",
-        "txt":       "#e2e8f0",
-        "txt2":      "#94a3b8",
-        "txt3":      "#475569",
-        "row_br":    "rgba(99,102,241,.07)",
-        "th_bg":     "rgba(255,255,255,.02)",
-        "tbl_bg":    "rgba(13,13,26,.9)",
-        "foot_bg":   "rgba(255,255,255,.015)",
+        "card_bg": "linear-gradient(135deg,rgba(14,14,26,.95),rgba(19,19,31,.98))",
+        "card_br": "rgba(99,102,241,.25)",
+        "card_sh": "0 0 0 1px rgba(255,255,255,.04),0 8px 32px rgba(0,0,0,.4)",
+        "txt": "#e2e8f0",
+        "txt2": "#94a3b8",
+        "txt3": "#475569",
+        "row_br": "rgba(99,102,241,.07)",
+        "th_bg": "rgba(255,255,255,.02)",
+        "tbl_bg": "rgba(13,13,26,.9)",
+        "foot_bg": "rgba(255,255,255,.015)",
     }
     _BODY_TXT = "#e2e8f0"
 
@@ -814,7 +814,7 @@ table{min-width:0;width:100%;border-collapse:collapse;}
 </style>"""
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  SESSION STATE
+# SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
 def _persist_roster():
     """Save the current housekeeper + inspector rosters to the database so all
@@ -827,7 +827,7 @@ def _persist_roster():
         print(f"[app] _persist_roster failed: {_ex}")
 
 def _init_state():
-    if "hk_roster"not in st.session_state:
+    if "hk_roster" not in st.session_state:
         # Load the standing roster from the database first — this is what people
         # actually see, so add/remove of staff must persist. Only if nothing has
         # ever been saved do we seed from the hard-coded DEFAULT_HK.
@@ -837,7 +837,7 @@ def _init_state():
         except Exception:
             saved_roster = None
         if saved_roster and saved_roster.get("hk_roster"):
-            st.session_state["hk_roster"]   = saved_roster["hk_roster"]
+            st.session_state["hk_roster"] = saved_roster["hk_roster"]
             st.session_state["insp_roster"] = saved_roster.get("insp_roster") \
                 or {n: True for n in DEFAULT_INSPECTORS}
         else:
@@ -847,7 +847,7 @@ def _init_state():
                     roster[n] = {"building": bld, "present": True}
             st.session_state["hk_roster"] = roster
             st.session_state["insp_roster"] = {n: True for n in DEFAULT_INSPECTORS}
-    if "insp_roster"not in st.session_state:
+    if "insp_roster" not in st.session_state:
         st.session_state["insp_roster"] = {n: True for n in DEFAULT_INSPECTORS}
     for k, default in [("groups_data",None),("total_rooms",None),
                         ("inspectors_data",None),("used_hk_set",None),
@@ -860,7 +860,7 @@ _init_state()
 auth.init_auth()
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LOGIN GATE
+# LOGIN GATE
 # ══════════════════════════════════════════════════════════════════════════════
 if not st.session_state.get("logged_in"):
     st.markdown("""<style>
@@ -961,8 +961,8 @@ footer{visibility:hidden!important;}
         st.stop()
     with st.form("login_form"):
         _uname = st.text_input("Username")
-        _pw    = st.text_input("Password", type="password")
-        _sub   = st.form_submit_button("Sign In", type="primary", use_container_width=True)
+        _pw = st.text_input("Password", type="password")
+        _sub = st.form_submit_button("Sign In", type="primary", use_container_width=True)
     if _sub:
         if not _uname or not _pw:
             st.error("Please enter both username and password.")
@@ -1016,10 +1016,10 @@ if not st.session_state.get("_did_initial_restore", False):
                 if isinstance(_f, str):
                     _f = [int(x) for x in re.findall(r'\d+', _f)]
                 _g["floors"] = set(_f) if not isinstance(_f, set) else _f
-            st.session_state["groups_data"]     = _loaded_groups
-            st.session_state["total_rooms"]     = saved.get("total_rooms", 0)
+            st.session_state["groups_data"] = _loaded_groups
+            st.session_state["total_rooms"] = saved.get("total_rooms", 0)
             st.session_state["inspectors_data"] = saved.get("inspectors_data", [])
-            st.session_state["used_hk_set"]     = set(saved.get("used_hk_set", []))
+            st.session_state["used_hk_set"] = set(saved.get("used_hk_set", []))
     except Exception:
         pass
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1027,22 +1027,22 @@ SKIP_SERVICES = {"p/u models","pu models","p/u model","showcase","model unit","p
 
 def normalize_service(raw: str) -> str:
     s = re.sub(r'\s+', ' ', str(raw).strip().lower())
-    if s in SKIP_SERVICES or "p/u"in s or (s.startswith("p") and "model"in s):
+    if s in SKIP_SERVICES or "p/u" in s or (s.startswith("p") and "model" in s):
         return "__SKIP__"
-    if "daily"in s: return SVC_DS
+    if "daily" in s: return SVC_DS
     # "Full Clean (IH)" / "Full Clean( IH)" / "... IH" -> separate IH stream,
     # packed apart from regular Full Clean and inspected by RQS 2.
-    if ("full clean"in s or s.startswith("fc")) and "ih"in s:
+    if ("full clean" in s or s.startswith("fc")) and "ih" in s:
         return SVC_IH
     if s.startswith("full clean") or s.startswith("fc"): return SVC_FC
-    if "dust"in s or "d&v"in s or "dnv"in s: return SVC_DV
-    if "vac"in s: return SVC_DV
+    if "dust" in s or "d&v" in s or "dnv" in s: return SVC_DV
+    if "vac" in s: return SVC_DV
     return SVC_FC
 
 def parse_room_code(room: str) -> dict:
     s = str(room).strip()
     try:
-        bld   = int(s[0])
+        bld = int(s[0])
         floor = int(s[1]) if len(s)>1 and s[1].isdigit() else 0
         digits = "".join(c for c in s[2:] if c.isdigit())
         num = int(digits) if digits else 0
@@ -1065,15 +1065,15 @@ def expand_rooms(raw_list: list) -> list:
 
 def parse_email_notes(text: str) -> dict:
     late_co: dict = {}
-    notes:   dict = {}
+    notes: dict = {}
     if not text or not text.strip():
         return {"late_checkout": late_co, "notes": notes}
-    ROOM_RE    = re.compile(r'\b([1-9]\d{3}[A-Z]{1,4})\b')
-    TIME_RE    = re.compile(r'\b(\d{1,2}:\d{2}\s*(?:am|pm))\b', re.IGNORECASE)
+    ROOM_RE = re.compile(r'\b([1-9]\d{3}[A-Z]{1,4})\b')
+    TIME_RE = re.compile(r'\b(\d{1,2}:\d{2}\s*(?:am|pm))\b', re.IGNORECASE)
     SECTION_RE = re.compile(r'^([A-Za-z][A-Za-z &\'/]+):\s*$')
-    MOVE_RE    = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*[-\u2013]\s*([1-9]\d{3}[A-Z]{1,4})')
-    CELEB_RE   = re.compile(r'^(Birthday|Anniversary|Misc\.?)$', re.IGNORECASE)
-    DEBULLET   = re.compile(r'^[\s\t]*[*\u2022\u25e6\u2023\u2043\-]?\s*')
+    MOVE_RE = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*[-\u2013]\s*([1-9]\d{3}[A-Z]{1,4})')
+    CELEB_RE = re.compile(r'^(Birthday|Anniversary|Misc\.?)$', re.IGNORECASE)
+    DEBULLET = re.compile(r'^[\s\t]*[*\u2022\u25e6\u2023\u2043\-]?\s*')
     NOTE_LABELS = {
         "vip inspections":"VIP","room moves":"Room Move","stayovers":"Stayover",
         "robes":"Robes","pack n play":"Pack n Play","highchairs":"Highchair",
@@ -1095,7 +1095,7 @@ def parse_email_notes(text: str) -> dict:
         if not content or content.lower() == "n/a": continue
         if section == LATE_KEY:
             time_m = TIME_RE.search(content)
-            rooms  = expand_rooms(ROOM_RE.findall(content.upper()))
+            rooms = expand_rooms(ROOM_RE.findall(content.upper()))
             if time_m:
                 late_time = re.sub(r'\s+', ' ', time_m.group(1).strip())
                 for rm in rooms: late_co[rm] = f"Late Out: {late_time}"
@@ -1120,7 +1120,7 @@ def parse_email_notes(text: str) -> dict:
         rooms = expand_rooms(ROOM_RE.findall(content.upper()))
         if not rooms: continue
         qty = re.search(r'x(\d+)', content, re.IGNORECASE)
-        qty_s = f"x{qty.group(1)}"if qty else ""
+        qty_s = f"x{qty.group(1)}" if qty else ""
         if section == "special requests":
             # Capture the actual request detail (e.g. "2135A - Humidifier" ->
             # "Special Request: Humidifier"). Skip "n/a". Strip the room codes and
@@ -1147,17 +1147,17 @@ def excel_to_room_text(file_obj):
     xls = pd.ExcelFile(file_obj)
     sheet = None
     for cand in xls.sheet_names:
-        if "housekeeping dashboard"in str(cand).strip().lower():
+        if "housekeeping dashboard" in str(cand).strip().lower():
             sheet = cand; break
     if sheet is None:
         sheet = xls.sheet_names[1] if len(xls.sheet_names) > 1 else xls.sheet_names[0]
     df = pd.read_excel(xls, sheet_name=sheet, header=None)
 
-    # Find the header row (contains both "Room"and "Service").
+    # Find the header row (contains both "Room" and "Service").
     hdr = None
     for i in range(min(30, len(df))):
         vals = [str(v).strip().lower() for v in df.iloc[i] if pd.notna(v)]
-        if "room"in vals and "service"in vals:
+        if "room" in vals and "service" in vals:
             hdr = i; break
     if hdr is None:
         raise ValueError("Couldn't find a 'Room'/'Service' header row in the sheet.")
@@ -1173,15 +1173,15 @@ def excel_to_room_text(file_obj):
             for j, name in header_cells.items():
                 if n in name: return j
         return None
-    c_room  = find_col("room")
-    c_svc   = find_col("service")
-    c_time  = find_col("time")
-    c_pet   = find_col("pet")
+    c_room = find_col("room")
+    c_svc = find_col("service")
+    c_time = find_col("time")
+    c_pet = find_col("pet")
     c_guest = find_col("current guest or status", "current guest", "guest")
-    c_late  = find_col("late checkout", "late check")
-    c_status= find_col("status")            # exact -> real Status col, not "guest or status"
+    c_late = find_col("late checkout", "late check")
+    c_status= find_col("status") # exact -> real Status col, not "guest or status"
     c_notes = find_col("notes")
-    c_arr   = find_col("arriving guest", "arriving")
+    c_arr = find_col("arriving guest", "arriving")
     c_rtype = find_col("res type")
 
     _ROOM_RE = re.compile(r'^[1-9]\d{2,3}[A-Z]{1,4}$')
@@ -1199,8 +1199,8 @@ def excel_to_room_text(file_obj):
             low = room.lower()
             if any(k in low for k in ("non-clean", "range totals", "daily labor",
                                        "daily housekeeper", "housekeeping hold", "room type")):
-                break            # reached the footer — stop reading rooms
-            continue             # stray non-room line — skip
+                break # reached the footer — stop reading rooms
+            continue # stray non-room line — skip
         def cell(idx):
             if idx is None: return ""
             v = df.iloc[i, idx]
@@ -1235,7 +1235,7 @@ def parse_rooms(text: str) -> pd.DataFrame:
     if has_header:
         data_rows = rows[1:]
         i_room = col("room"); i_svc = col("service"); i_time = col("time")
-        i_pet  = col("pet");  i_guest = col("current guest","guest")
+        i_pet = col("pet"); i_guest = col("current guest","guest")
         i_late = col("late checkout","late check")
         i_status = col("status"); i_notes = col("notes")
         i_arriving = col("arriving guest","arriving"); i_restype = col("res type")
@@ -1251,8 +1251,8 @@ def parse_rooms(text: str) -> pd.DataFrame:
     records = []
     for row in data_rows:
         room = get(row, i_room); svc = get(row, i_svc)
-        ts   = get(row, i_time)
-        try:    ti = int(float(ts))
+        ts = get(row, i_time)
+        try: ti = int(float(ts))
         except: ti = 0
         if not room: continue
         norm_svc = normalize_service(svc)
@@ -1260,7 +1260,7 @@ def parse_rooms(text: str) -> pd.DataFrame:
         # "verify"room (no HK/RQS, pushed to the bottom for manual review).
         is_pu_skip = (norm_svc == "__SKIP__")
         if is_pu_skip:
-            norm_svc = SVC_FC   # give it a real service type so it can render
+            norm_svc = SVC_FC # give it a real service type so it can render
         if ti <= 0:
             if norm_svc == SVC_DV:
                 ti = DV_DEFAULT_TIME
@@ -1268,28 +1268,28 @@ def parse_rooms(text: str) -> pd.DataFrame:
                 ti = default_time_for(room, norm_svc)
                 if ti <= 0:
                     suffix = room[-1].upper() if room else ""
-                    if suffix == "E":        ti = 140
+                    if suffix == "E": ti = 140
                     elif suffix in ("D","A"):ti = 120
-                    else:                    ti = 70
+                    else: ti = 70
         import re as _re
-        raw_guest  = get(row, i_guest)
+        raw_guest = get(row, i_guest)
         norm_guest = _re.sub(r'\s+', ' ', raw_guest.strip())
-        status_raw     = get(row, i_status).strip().lower()
-        guest_raw      = norm_guest.lower().strip()
-        notes_raw_val  = get(row, i_notes).strip().lower()
-        svc_raw_lower  = str(svc).strip().lower()
-        has_stayover_excel = "stayover"in notes_raw_val or "stay over"in notes_raw_val
+        status_raw = get(row, i_status).strip().lower()
+        guest_raw = norm_guest.lower().strip()
+        notes_raw_val = get(row, i_notes).strip().lower()
+        svc_raw_lower = str(svc).strip().lower()
+        has_stayover_excel = "stayover" in notes_raw_val or "stay over" in notes_raw_val
         # P/U Models can appear in the service column OR the notes column
-        has_pu_models = ("p/u model"in notes_raw_val or "pu model"in notes_raw_val
-                         or "p/u model"in svc_raw_lower or "pu model"in svc_raw_lower)
+        has_pu_models = ("p/u model" in notes_raw_val or "pu model" in notes_raw_val
+                         or "p/u model" in svc_raw_lower or "pu model" in svc_raw_lower)
         # "verify"rooms: stayover or P/U models — never auto-assign HK/RQS,
         # pushed to the bottom of the schedule for manual review.
         needs_verify = has_stayover_excel or has_pu_models or is_pu_skip
         row_text = " ".join(str(c).strip().lower() for c in row if c)
-        has_pending_anywhere = "pending"in row_text
+        has_pending_anywhere = "pending" in row_text
         is_uncertain = (
             (guest_raw in ("unallocated","---","room, walk","","deposit, deposit") and
-             ("pending"in status_raw or has_pending_anywhere))
+             ("pending" in status_raw or has_pending_anywhere))
             or has_stayover_excel
         )
         records.append({
@@ -1303,13 +1303,13 @@ def parse_rooms(text: str) -> pd.DataFrame:
     if not records: return pd.DataFrame()
     df = pd.DataFrame(records)
     pc = df["Room"].apply(parse_room_code)
-    df["bld"]   = pc.apply(lambda x: x["bld"])
+    df["bld"] = pc.apply(lambda x: x["bld"])
     df["floor"] = pc.apply(lambda x: x["floor"])
-    df["num"]   = pc.apply(lambda x: x["num"])
+    df["num"] = pc.apply(lambda x: x["num"])
     return df
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  GROUPING LOGIC
+# GROUPING LOGIC
 # ══════════════════════════════════════════════════════════════════════════════
 def bld_ok(blds, b):
     for x in blds:
@@ -1325,9 +1325,9 @@ def proximity_score(group_rooms, unit_rooms):
         for ur in unit_rooms:
             gb, ub = gr.get("bld",0), ur.get("bld",0)
             gf, uf = gr.get("floor",0), ur.get("floor",0)
-            if gb != ub:   total += 300
+            if gb != ub: total += 300
             elif gf != uf: total += 30
-            else:          total += min(abs(gr.get("num",0)-ur.get("num",0))//10, 9)
+            else: total += min(abs(gr.get("num",0)-ur.get("num",0))//10, 9)
             count += 1
     return total // max(count,1)
 
@@ -1359,10 +1359,10 @@ def can_add_ds(g, unit, allow_overflow=False):
     return True
 
 def unit_ok_fc(unit):
-    # A same-guest cluster is only "OK to keep as one chart"if it can actually
+    # A same-guest cluster is only "OK to keep as one chart" if it can actually
     # fit one chart under ALL hard rules. If it can't, pack_rooms splits it into
     # individual rooms so they can be spread across housekeepers.
-    if sum(r["time"] for r in unit) > MAX_FC:   # over the 380 cap -> must split
+    if sum(r["time"] for r in unit) > MAX_FC: # over the 380 cap -> must split
         return False
     blds = set(r["bld"] for r in unit)
     ba = list(blds)
@@ -1386,16 +1386,16 @@ def mk(unit, svc):
 def absorb(g, unit):
     for r in unit:
         g["rooms"].append(r); g["blds"].add(r["bld"]); g["floors"].add(r.get("floor",0))
-    g["time"]  += sum(r["time"] for r in unit)
-    g["c140"]  += sum(1 for r in unit if r["time"]==140)
-    g["c120"]  += sum(1 for r in unit if r["time"]==120)
+    g["time"] += sum(r["time"] for r in unit)
+    g["c140"] += sum(1 for r in unit if r["time"]==140)
+    g["c120"] += sum(1 for r in unit if r["time"]==120)
 
 def _mix_penalty(g, unit):
     """Steer Full-Clean charts toward the preferred shapes:
-        120+120+120  (360)
-        140+120+70   (330)
+        120+120+120 (360)
+        140+120+70 (330)
         120+120+70+70(380)
-        70x5         (350)
+        70x5 (350)
     A chart that already matches (or is a clean prefix of) one of these gets no
     penalty; the further its room-count of each size is from the nearest target
     shape, the higher the penalty. This is a soft preference used to break ties
@@ -1405,14 +1405,14 @@ def _mix_penalty(g, unit):
     if not times: return 0
     n140 = sum(1 for t in times if t == 140)
     n120 = sum(1 for t in times if t == 120)
-    n70  = sum(1 for t in times if t <= 70)   # 70s and anything smaller
+    n70 = sum(1 for t in times if t <= 70) # 70s and anything smaller
 
     # (n140, n120, n70) signatures of the four preferred end-states
     TARGETS = [
-        (0,3,0),   # 120+120+120
-        (1,1,1),   # 140+120+70
-        (0,2,2),   # 120+120+70+70
-        (0,0,5),   # 70 x5
+        (0,3,0), # 120+120+120
+        (1,1,1), # 140+120+70
+        (0,2,2), # 120+120+70+70
+        (0,0,5), # 70 x5
     ]
     # Distance to the closest target = sum of size-count mismatches. A chart
     # that is "on the way"to a target (fewer rooms than the target, matching
@@ -1420,21 +1420,21 @@ def _mix_penalty(g, unit):
     best = 99
     for t140,t120,t70 in TARGETS:
         # Over-shooting a size beyond its target is worse than under-shooting.
-        over  = max(0,n140-t140)+max(0,n120-t120)+max(0,n70-t70)
+        over = max(0,n140-t140)+max(0,n120-t120)+max(0,n70-t70)
         under = max(0,t140-n140)+max(0,t120-n120)+max(0,t70-n70)
-        best  = min(best, over*3 + under)   # overshoot weighted heavier
-    return best * 25   # scale into "minutes-equivalent"tie-shaping range
+        best = min(best, over*3 + under) # overshoot weighted heavier
+    return best * 25 # scale into "minutes-equivalent"tie-shaping range
 
 def best_fit_generic(groups, unit, can_add_fn, same_bld_only, same_floor_only):
-    ub  = set(r["bld"]         for r in unit)
-    uf  = set(r.get("floor",0) for r in unit)
-    u_t = sum(r["time"]        for r in unit)
+    ub = set(r["bld"] for r in unit)
+    uf = set(r.get("floor",0) for r in unit)
+    u_t = sum(r["time"] for r in unit)
     cap = MAX_DS if (unit and unit[0].get("service")==SVC_DS) else MAX_FC
     bi, best_score = -1, float("inf")
     for i, g in enumerate(groups):
         if not can_add_fn(g, unit): continue
-        if same_bld_only   and not same_bld(g["blds"], ub):   continue
-        if same_floor_only and not (g["floors"] & uf):         continue
+        if same_bld_only and not same_bld(g["blds"], ub): continue
+        if same_floor_only and not (g["floors"] & uf): continue
         prx = proximity_score(g["rooms"], unit)
         rem = cap - (g["time"] + u_t)
         # mix penalty only matters for Full Clean (DS rooms are all light)
@@ -1469,7 +1469,7 @@ def _fc_spread(units_list):
             b = r.get("bld", 0)
             floors_by_bld.setdefault(b, set()).add(r.get("floor", 0))
     fspread = sum(max(fs) - min(fs) for fs in floors_by_bld.values())
-    nstops  = sum(len(fs) for fs in floors_by_bld.values())
+    nstops = sum(len(fs) for fs in floors_by_bld.values())
     return (len(blds) - 1) * 100 + fspread * 10 + nstops * 3
 
 def _fc_travel(charts):
@@ -1597,7 +1597,7 @@ def _fc_optimize(units, seed=20240601, restarts=14):
                                     if not (_fc_feasible(na) and _fc_feasible(nb) and _fc_feasible(nc)):
                                         continue
                                     before = _nblds(a)+_nblds(b)+_nblds(c)
-                                    after  = _nblds(na)+_nblds(nb)+_nblds(nc)
+                                    after = _nblds(na)+_nblds(nb)+_nblds(nc)
                                     if after < before:
                                         a.remove(fu); a.append(cu)
                                         b.remove(bu); b.append(fu)
@@ -1635,7 +1635,7 @@ def _fc_optimize(units, seed=20240601, restarts=14):
                 a.remove(u); a.append(v); b.remove(v); b.append(u)
         return [c for c in charts if c]
 
-    charts = _decross(charts)        # remove gratuitous building-crossings
+    charts = _decross(charts) # remove gratuitous building-crossings
     charts = ls_travel(charts, 15000)
     return [c for c in charts if c]
 
@@ -1681,7 +1681,7 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
         # Sort rooms so heavy rooms seed sub-clusters and same building/floor
         # rooms stay adjacent, then greedily fill sub-clusters under the rules.
         rooms_sorted = sorted(unit, key=lambda r: (r.get("bld",0), r.get("floor",0), -r["time"]))
-        subs = []   # each: {"rooms":[...],"time","blds","n140","n120"}
+        subs = [] # each: {"rooms":[...],"time","blds","n140","n120"}
         for r in rooms_sorted:
             placed = False
             for s in subs:
@@ -1701,7 +1701,7 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
                              "n120":1 if r["time"]==120 else 0})
         return [s["rooms"] for s in subs]
 
-    placeable = []   # each is a list-of-rooms (a locked cluster OR a legal sub-cluster)
+    placeable = [] # each is a list-of-rooms (a locked cluster OR a legal sub-cluster)
     for unit in unit_lists:
         if unit_ok_fn(unit):
             placeable.append(unit)
@@ -1713,10 +1713,10 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
     for rooms in placeable:
         units.append({
             "rooms": rooms,
-            "time":  sum(r["time"] for r in rooms),
-            "blds":  set(r["bld"] for r in rooms),
-            "n140":  sum(1 for r in rooms if r["time"]==140),
-            "n120":  sum(1 for r in rooms if r["time"]==120),
+            "time": sum(r["time"] for r in rooms),
+            "blds": set(r["bld"] for r in rooms),
+            "n140": sum(1 for r in rooms if r["time"]==140),
+            "n120": sum(1 for r in rooms if r["time"]==120),
         })
 
     charts = _fc_optimize(units)
@@ -1728,9 +1728,9 @@ def pack_rooms(room_list, svc, can_add_fn, unit_ok_fn):
         if chart_rooms: groups.append(mk(chart_rooms, svc))
     return groups
 
-def _bld(r):   return r.get("bld", 0)
-def _flr(r):   return r.get("floor", 0)
-def _rnum(r):  return r.get("num", 0)
+def _bld(r): return r.get("bld", 0)
+def _flr(r): return r.get("floor", 0)
+def _rnum(r): return r.get("num", 0)
 
 def _norm_guest(r):
     g = re.sub(r'\s+', ' ', str(r.get("guest","")).strip())
@@ -1792,10 +1792,10 @@ def _chart_feasible(chart, single_building=False):
     """Hard rules for a Full Clean / IH chart (list of room dicts or bundle units)."""
     times = _unit_times(chart)
     if sum(times) > MAX_FC: return False
-    if times.count(140) > 1: return False                 # never two 140s
+    if times.count(140) > 1: return False # never two 140s
     if times.count(140) >= 1 and times.count(120) > 1: return False
     blds = set(_bld(r) for r in chart)
-    if 2 in blds and 3 in blds: return False              # B2 and B3 never share
+    if 2 in blds and 3 in blds: return False # B2 and B3 never share
     if single_building and len(blds) > 1: return False
     return True
 
@@ -1817,12 +1817,12 @@ def _chart_spread(chart):
     if not chart: return 0
     fl = [_flr(r) for r in chart]; nm = [_rnum(r) for r in chart]
     # Travel cost, in priority order:
-    #  • crossing buildings is worst,
-    #  • then how many DISTINCT floors the housekeeper must visit,
-    #  • then — critically — how FAR APART those floors are: a chart that must
-    #    span two floors should use ADJACENT floors (3+4), never distant ones
-    #    (0+3). The gap term grows fast so the solver pairs neighbouring floors.
-    #  • then room-number distance along the hall.
+    # • crossing buildings is worst,
+    # • then how many DISTINCT floors the housekeeper must visit,
+    # • then — critically — how FAR APART those floors are: a chart that must
+    # span two floors should use ADJACENT floors (3+4), never distant ones
+    # (0+3). The gap term grows fast so the solver pairs neighbouring floors.
+    # • then room-number distance along the hall.
     n_floors = _chart_nflr(chart)
     gap = _chart_floor_gap(chart)
     return ((_chart_nbld(chart)-1)*400
@@ -1830,7 +1830,7 @@ def _chart_spread(chart):
             + (gap*gap)*40
             + (max(fl)-min(fl))*10
             + (max(nm)-min(nm))*2)
-def _charts_xb(charts):     return sum(1 for c in charts if _chart_nbld(c) > 1)
+def _charts_xb(charts): return sum(1 for c in charts if _chart_nbld(c) > 1)
 def _charts_spread(charts): return sum(_chart_spread(c) for c in charts if c)
 
 def _fc_bestfit(order):
@@ -1955,11 +1955,11 @@ def _bundle_to_unit(bundle):
     if len(bundle) == 1:
         u = dict(bundle[0]); u["_members"] = bundle; return u
     return {
-        "room":  bundle[0]["room"],
-        "time":  sum(r["time"] for r in bundle),
-        "bld":   bundle[0].get("bld", 0),
+        "room": bundle[0]["room"],
+        "time": sum(r["time"] for r in bundle),
+        "bld": bundle[0].get("bld", 0),
         "floor": bundle[0].get("floor", 0),
-        "num":   bundle[0].get("num", 0),
+        "num": bundle[0].get("num", 0),
         "guest": bundle[0].get("guest", ""),
         "_members": bundle,
     }
@@ -2018,8 +2018,8 @@ def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
     charts = [c[:] for c in best[1] if c]
     # Tidy within the locked count: consolidate onto single floors / tight halls.
     charts = _fc_ls_tidy(charts, 12000, rng)
-    charts = _fc_floor_consolidate(charts)      # dedicated floor-reduction pass
-    charts = _fc_ls_tidy(charts, 4000, rng)     # final hall-tightening polish
+    charts = _fc_floor_consolidate(charts) # dedicated floor-reduction pass
+    charts = _fc_ls_tidy(charts, 4000, rng) # final hall-tightening polish
     return _unpack_units(charts)
 
 def solve_ih(ih_rooms, seed=20240601):
@@ -2075,7 +2075,7 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP):
 
 def build_all_groups(rooms, priority_hks=None):
     verify_rooms = [r for r in rooms if r.get("verify")]
-    rooms        = [r for r in rooms if not r.get("verify")]
+    rooms = [r for r in rooms if not r.get("verify")]
 
     fc_rooms = [r for r in rooms if r.get("service")==SVC_FC]
     ih_rooms = [r for r in rooms if r.get("service")==SVC_IH]
@@ -2086,10 +2086,10 @@ def build_all_groups(rooms, priority_hks=None):
     # (priority_hks preserved: any rooms pre-claimed by a named housekeeper are
     # packed first via the legacy path, the rest go through the new solver.)
     priority_groups = []
-    remaining_fc    = list(fc_rooms)
-    priority_hks    = priority_hks or []
+    remaining_fc = list(fc_rooms)
+    priority_hks = priority_hks or []
     if priority_hks:
-        try:    roster = st.session_state.get("hk_roster", {})
+        try: roster = st.session_state.get("hk_roster", {})
         except: roster = {}
         for hk_name in priority_hks:
             home_bld = roster.get(hk_name, {}).get("building", 0)
@@ -2102,8 +2102,8 @@ def build_all_groups(rooms, priority_hks=None):
                 t = sum(r["time"] for r in rooms_to_add)
                 if s["time"]+t > MAX_FC: return False
                 has140 = any(r["time"]==140 for r in rooms_to_add)
-                nc140  = s["c140"]+(1 if has140 else 0)
-                nc120  = s["c120"]+sum(1 for r in rooms_to_add if r["time"]==120)
+                nc140 = s["c140"]+(1 if has140 else 0)
+                nc120 = s["c120"]+sum(1 for r in rooms_to_add if r["time"]==120)
                 if nc140 > 1: return False
                 if nc140>=1 and nc120>=1 and any(r["time"]>70 for r in rooms_to_add): return False
                 cur_blds = set(r.get("bld",0) for r in s["rooms"])
@@ -2169,7 +2169,7 @@ def build_all_groups(rooms, priority_hks=None):
         for c in ih_charts:
             g = mk(c, SVC_IH)
             g["ih_group"] = True
-            g["rqs"] = IH_RQS          # RQS 2 inspects all IH charts
+            g["rqs"] = IH_RQS # RQS 2 inspects all IH charts
             ih_groups.append(g)
 
     # ── Stage 3: Daily Service — HARD 460-min cap per chart, +leftover IH ──────
@@ -2177,7 +2177,7 @@ def build_all_groups(rooms, priority_hks=None):
         ds_charts = split_daily_service(ds_rooms, extra_rooms=ih_leftover)
         ds_groups = [mk(c, SVC_DS) for c in ds_charts]
         for g in ds_groups:
-            g["ds_overflow"] = g["time"] > DS_CAP   # shouldn't happen with hard cap
+            g["ds_overflow"] = g["time"] > DS_CAP # shouldn't happen with hard cap
     else:
         ds_groups = []
 
@@ -2205,7 +2205,7 @@ def build_all_groups(rooms, priority_hks=None):
     return fc_groups + ih_groups + ds_groups + dv_groups + verify_groups
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  STAFF ASSIGNMENT
+# STAFF ASSIGNMENT
 # ══════════════════════════════════════════════════════════════════════════════
 def assign_hk_building_aware(groups, present_hk, roster):
     pool = {1:[], 2:[], 3:[]}
@@ -2247,10 +2247,10 @@ def assign_hk_building_aware(groups, present_hk, roster):
                 if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
                     available[b].remove(hk); return hk
         # 3.5) SHORTAGE fallback. When home/adjacent housekeepers are exhausted,
-        #      a housekeeper may be moved cross-building to cover a group, as long
-        #      as the GROUP itself spans only an allowed combination — B1&2 or B1&3
-        #      (or a single building), NEVER B2&3. This relaxes the per-housekeeper
-        #      home-building rule on busy days while keeping the hard B2<->B3 block.
+        # a housekeeper may be moved cross-building to cover a group, as long
+        # as the GROUP itself spans only an allowed combination — B1&2 or B1&3
+        # (or a single building), NEVER B2&3. This relaxes the per-housekeeper
+        # home-building rule on busy days while keeping the hard B2<->B3 block.
         group_spans_b2b3 = (2 in group_blds and 3 in group_blds)
         if not group_spans_b2b3:
             for b in [1,2,3]:
@@ -2260,11 +2260,11 @@ def assign_hk_building_aware(groups, present_hk, roster):
         return "No HK available"
     # Priority HKs first
     for g in groups:
-        if g.get("verify_group"):       # never assign verify groups
+        if g.get("verify_group"): # never assign verify groups
             assignment[g["label"]] = ""; continue
         phk = g.get("priority_hk","")
         if not phk: continue
-        if g.get("dv_rqs2"): assignment[g["label"]]=""; continue  # DV -> RQS2 inspector
+        if g.get("dv_rqs2"): assignment[g["label"]]=""; continue # DV -> RQS2 inspector
         for b in [1,2,3]:
             if phk in available.get(b,[]):
                 available[b].remove(phk); break
@@ -2297,7 +2297,7 @@ def _insp_travel_score(batch):
     # rooms are). Keeping an inspector on one floor — or a tight floor band —
     # scores lowest.
     blds=set(); cross=0
-    floor_keys=set()      # distinct (building, floor) stops
+    floor_keys=set() # distinct (building, floor) stops
     floors_by_bld={}
     for g in batch:
         blds |= g["blds"]
@@ -2345,9 +2345,9 @@ def _insp_combined_score(batches):
     tt = sum(_insp_travel_score(b) for b in batches)
     nonempty = [b for b in batches if b]
     if len(nonempty) < 2: return tt
-    cx = [_batch_complexity(b)     for b in nonempty]
-    hv = [_batch_heavy(b)          for b in nonempty]
-    hc = [_batch_heavy_charts(b)   for b in nonempty]
+    cx = [_batch_complexity(b) for b in nonempty]
+    hv = [_batch_heavy(b) for b in nonempty]
+    hc = [_batch_heavy_charts(b) for b in nonempty]
     # Count inspectors forced across all 3 buildings — this is the worst case
     # for an inspector and must be avoided even at the cost of heavy-work
     # balance. Each such batch adds an overriding penalty that dwarfs the
@@ -2364,10 +2364,10 @@ def _insp_combined_score(batches):
                        if {2,3}.issubset(set().union(*[g["blds"] for g in b])))
     B2B3 = b2b3_batches * 10000
     # Balance terms, in priority order (below the building overrides):
-    #  1) heavy-CHART spread — no inspector gets all the 120+120+120 charts.
-    #  2) heavy-ROOM spread — even count of individual 120/140 rooms.
-    #  3) travel (building + floor aware).
-    #  4) overall complexity spread — tie-breaker.
+    # 1) heavy-CHART spread — no inspector gets all the 120+120+120 charts.
+    # 2) heavy-ROOM spread — even count of individual 120/140 rooms.
+    # 3) travel (building + floor aware).
+    # 4) overall complexity spread — tie-breaker.
     return (THREE_BLD + B2B3
             + (max(hc)-min(hc))*14
             + (max(hv)-min(hv))*8
@@ -2389,7 +2389,7 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     for g in ih_groups:
         g["inspector"] = rqs2 or IH_RQS
 
-    def units(grp_list):  # total rooms across a list of groups
+    def units(grp_list): # total rooms across a list of groups
         return sum(len(g["rooms"]) for g in grp_list)
 
     # ── Dedicated FC inspectors = present inspectors who are NOT rqs1/rqs2 ────
@@ -2405,9 +2405,9 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     ))
     # How many FC batches can the dedicated inspectors cover?
     n_dedicated = len(fc_inspectors)
-    coverable   = n_dedicated * per   # FC groups the dedicated inspectors can take
+    coverable = n_dedicated * per # FC groups the dedicated inspectors can take
     dedicated_fc = fc_sorted[:coverable]
-    leftover_fc  = fc_sorted[coverable:]   # only these need RQS1/RQS2 help
+    leftover_fc = fc_sorted[coverable:] # only these need RQS1/RQS2 help
 
     batches=[dedicated_fc[i:i+per] for i in range(0,len(dedicated_fc),per)]
     # Balance batches to reduce cross-building travel
@@ -2437,11 +2437,11 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
         inspectors.append(entry); assigned_names.add(name)
 
     # ── RQS role assignment (per operations policy) ──────────────────────────
-    #   • RQS 2 carries Daily Service + ALL Dust n Vac, and inspects IH.
-    #   • RQS 1 is NOT auto-assigned any rooms — left free for manual assignment
-    #     later based on how the day goes.
-    #   • Leftover Full Clean that dedicated inspectors can't cover opens extra
-    #     inspector slots (never dumped on RQS 1).
+    # • RQS 2 carries Daily Service + ALL Dust n Vac, and inspects IH.
+    # • RQS 1 is NOT auto-assigned any rooms — left free for manual assignment
+    # later based on how the day goes.
+    # • Leftover Full Clean that dedicated inspectors can't cover opens extra
+    # inspector slots (never dumped on RQS 1).
     fc_shortage = len(leftover_fc) > 0
 
     # RQS 2 shares leftover FC only if there genuinely aren't enough inspectors,
@@ -2484,7 +2484,7 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     return inspectors
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  HTML BUILDERS
+# HTML BUILDERS
 # ══════════════════════════════════════════════════════════════════════════════
 def _rgba_a(rgba: str, a) -> str:
     """Return the same rgba color with a different alpha. Safe on any input."""
@@ -2527,9 +2527,9 @@ def group_card_html(g, idx):
     ac = c["accent"]; glow = c["glow"]; bar = c["bar"]
 
     hk_raw = g.get("housekeeper","") or ""
-    no_hk  = not hk_raw or hk_raw.startswith("No HK available")
+    no_hk = not hk_raw or hk_raw.startswith("No HK available")
     if is_verify:
-        unassigned_badge = ""   # verify groups intentionally have no HK badge
+        unassigned_badge = "" # verify groups intentionally have no HK badge
         hk_raw = ""
     elif no_hk:
         unassigned_badge = f'<span style="background:rgba(244,63,94,.2);color:#fb7185;border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:700;border:1px solid rgba(244,63,94,.35);letter-spacing:.03em"> NO HK</span>'
@@ -2537,12 +2537,12 @@ def group_card_html(g, idx):
     else:
         unassigned_badge = ""
 
-    hk      = e(hk_raw or "—")
-    insp    = e(g.get("inspector","") or "—")
+    hk = e(hk_raw or "—")
+    insp = e(g.get("inspector","") or "—")
     _blds_raw = g.get("blds", set())
     if isinstance(_blds_raw, str):
         _blds_raw = [int(x) for x in re.findall(r'\d+', _blds_raw)]
-    bld_str = " · ".join(f"Bldg {b}"for b in sorted(set(_blds_raw)))
+    bld_str = " · ".join(f"Bldg {b}" for b in sorted(set(_blds_raw)))
 
     def badge(txt, bg, clr, border="transparent"):
         return f'<span style="background:{bg};color:{clr};border:1px solid {border};border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:600;letter-spacing:.02em">{txt}</span>'
@@ -2553,17 +2553,17 @@ def group_card_html(g, idx):
         svc_badge = badge(svc, c["badge_bg"], c["badge_txt"], _rgba_a(c["glow"], ".25"))
     overflow_badge = badge("DS Overflow","rgba(245,158,11,.15)","#fcd34d","rgba(245,158,11,.3)") if g.get("ds_overflow") else ""
     priority_badge = badge("Priority","rgba(234,179,8,.15)","#fde047","rgba(234,179,8,.3)") if g.get("priority_hk") else ""
-    cross_badge    = badge("Cross-bld","rgba(168,85,247,.15)","#d8b4fe","rgba(168,85,247,.3)") if (g.get("cross_bld") and not is_verify) else ""
+    cross_badge = badge("Cross-bld","rgba(168,85,247,.15)","#d8b4fe","rgba(168,85,247,.3)") if (g.get("cross_bld") and not is_verify) else ""
 
-    t_col = "#4ade80"if pct<=87 else ("#fbbf24"if pct<=95 else "#f87171")
+    t_col = "#4ade80" if pct<=87 else ("#fbbf24" if pct<=95 else "#f87171")
 
     rows = ""
     for i, r in enumerate(g["rooms"]):
-        notes_lower  = r.get("notes","").lower()
-        is_stayover  = "stayover"in notes_lower or "stay over"in notes_lower
-        row_bg = "rgba(34,211,238,.06)"if (r.get("uncertain") and is_stayover) else                  "rgba(245,158,11,.06)"if r.get("uncertain") else "transparent"
+        notes_lower = r.get("notes","").lower()
+        is_stayover = "stayover" in notes_lower or "stay over" in notes_lower
+        row_bg = "rgba(34,211,238,.06)" if (r.get("uncertain") and is_stayover) else "rgba(245,158,11,.06)" if r.get("uncertain") else "transparent"
         pet_badge = '<span style="background:rgba(244,63,94,.15);color:#fb7185;border-radius:4px;padding:1px 6px;font-size:.64rem;font-weight:600"></span>' if r.get("pet") else ""
-        late_co    = e(r.get("late_checkout",""))
+        late_co = e(r.get("late_checkout",""))
         late_badge2= f'<span style="background:rgba(245,158,11,.15);color:#fcd34d;border-radius:4px;padding:1px 6px;font-size:.64rem;font-weight:600"> {late_co}</span>' if late_co else ""
         delay = f"{i*0.04:.2f}s"
         rows += f"""<tr style="background:{row_bg};border-bottom:1px solid {_C["row_br"]};animation:rowIn .3s {delay} both">
@@ -2571,31 +2571,31 @@ def group_card_html(g, idx):
           <td class="m-hide"style="padding:8px 10px;color:#64748b;font-size:.75rem">B{r.get("bld","")}</td>
           <td style="padding:8px 10px;color:{_C["txt"]};font-size:.78rem;font-weight:500;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{e(r.get("guest",""))}</td>
           <td class="m-hide"style="padding:8px 10px;color:{_C["txt2"]};font-size:.73rem">{e(r.get("service",""))}</td>
-          <td style="padding:8px 10px;font-family:'DM Mono',monospace;font-weight:500;color:{_C["txt"]};font-size:.76rem">{"—"if r.get("time",0)==0 else str(r.get("time",""))+"m"}</td>
+          <td style="padding:8px 10px;font-family:'DM Mono',monospace;font-weight:500;color:{_C["txt"]};font-size:.76rem">{"—" if r.get("time",0)==0 else str(r.get("time",""))+"m"}</td>
           <td style="padding:8px 10px">{pet_badge}</td>
           <td style="padding:8px 10px">{late_badge2}</td>
         </tr>"""
 
     lbl = e(g.get("label",""))
-    th  = f"padding:6px 10px;text-align:left;font-family:'DM Mono',monospace;font-size:.6rem;font-weight:500;text-transform:uppercase;letter-spacing:.1em;color:{_C["txt3"]};background:{_C["th_bg"]};border-bottom:1px solid {_C["row_br"]}"
+    th = f"padding:6px 10px;text-align:left;font-family:'DM Mono',monospace;font-size:.6rem;font-weight:500;text-transform:uppercase;letter-spacing:.1em;color:{_C["txt3"]};background:{_C["th_bg"]};border-bottom:1px solid {_C["row_br"]}"
 
     # Verify groups: distinct title, pill text, hidden HK/RQS meta + time meter
     if is_verify:
         title_text = "Unsure — verify &amp; assign"
-        pill_text    = "VERIFY"
-        header_bg    = "linear-gradient(90deg,rgba(244,63,94,.1),transparent)"
-        meta_line    = (f'<div style="font-size:.71rem;color:{_C["txt2"]};margin-top:3px;'
+        pill_text = "VERIFY"
+        header_bg = "linear-gradient(90deg,rgba(244,63,94,.1),transparent)"
+        meta_line = (f'<div style="font-size:.71rem;color:{_C["txt2"]};margin-top:3px;'
                         f'font-family:\'DM Mono\',monospace">{bld_str} &nbsp;·&nbsp; '
                         f'<span style="color:#fda4af">no housekeeper / RQS — assign manually</span></div>')
-        time_meter   = ""
+        time_meter = ""
     else:
-        title_text   = f"Group {lbl}"
-        pill_text    = lbl
-        header_bg    = "linear-gradient(90deg,rgba(99,102,241,.06),transparent)"
-        meta_line    = (f'<div style="font-size:.71rem;color:{_C["txt2"]};margin-top:3px;font-family:\'DM Mono\',monospace">'
+        title_text = f"Group {lbl}"
+        pill_text = lbl
+        header_bg = "linear-gradient(90deg,rgba(99,102,241,.06),transparent)"
+        meta_line = (f'<div style="font-size:.71rem;color:{_C["txt2"]};margin-top:3px;font-family:\'DM Mono\',monospace">'
                         f'{bld_str} &nbsp;·&nbsp; <span style="color:{_C["txt3"]}"></span> {hk} &nbsp;·&nbsp; '
                         f'<span style="color:{_C["txt3"]}"></span> {insp}</div>')
-        time_meter   = (f'<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">'
+        time_meter = (f'<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">'
                         f'<span style="font-family:\'DM Mono\',monospace;font-size:.82rem;font-weight:500;color:{ac};'
                         f'text-shadow:0 0 8px {glow}">{g.get("time","")} <span style="color:#475569;font-size:.7rem">/ {cap}m</span></span>'
                         f'<div style="background:rgba(255,255,255,.06);border-radius:99px;height:5px;width:72px;overflow:hidden;border:1px solid rgba(255,255,255,.06)">'
@@ -2651,12 +2651,12 @@ def staff_table_html(rows, cols, cell_fns, row_bg_fn):
     th_s = ("padding:8px 12px;text-align:left;font-family:'DM Mono',monospace;"
             "font-size:.6rem;font-weight:500;text-transform:uppercase;letter-spacing:.1em;"
             f"color:{_C['txt3']};background:{_C['th_bg']};border-bottom:1px solid {_C['row_br']}")
-    ths  = "".join(f'<th style="{th_s}">{e(c)}</th>' for c in cols)
+    ths = "".join(f'<th style="{th_s}">{e(c)}</th>' for c in cols)
     body = ""
     for i, row in enumerate(rows):
-        bg  = row_bg_fn(row)
+        bg = row_bg_fn(row)
         # Map known status backgrounds to theme-appropriate tints
-        if bg == "#f0fdf4": bg = "rgba(20,184,166,.07)"if _IS_LIGHT else "rgba(20,184,166,.08)"
+        if bg == "#f0fdf4": bg = "rgba(20,184,166,.07)" if _IS_LIGHT else "rgba(20,184,166,.08)"
         elif bg == "#fefce8": bg = "rgba(245,158,11,.06)"
         elif bg not in ("transparent","","#fff"): bg = "rgba(99,102,241,.05)"
         elif bg in ("#fff","") : bg = "transparent"
@@ -2675,9 +2675,9 @@ def staff_table_html(rows, cols, cell_fns, row_bg_fn):
 </table></div></body></html>"""
 
 def insp_card_html(insp, fg, color):
-    name  = e(insp.get("name",""))
-    role  = insp.get("role","FC")
-    blds  = insp.get("buildings",[])
+    name = e(insp.get("name",""))
+    role = insp.get("role","FC")
+    blds = insp.get("buildings",[])
     BLD_NEON = {
         1: ("rgba(99,102,241,.2)","#a5b4fc","rgba(99,102,241,.4)"),
         2: ("rgba(20,184,166,.18)","#5eead4","rgba(20,184,166,.35)"),
@@ -2695,7 +2695,7 @@ def insp_card_html(insp, fg, color):
     role_map = {
         "RQS1":("rgba(245,158,11,.18)","#fcd34d","RQS1 · DV"),
         "RQS2":("rgba(20,184,166,.18)","#5eead4","RQS2 · DS"),
-        "FC":  ("rgba(99,102,241,.18)","#a5b4fc","Full Clean"),
+        "FC": ("rgba(99,102,241,.18)","#a5b4fc","Full Clean"),
     }
     rbg,rtxt,rlbl = role_map.get(role,("rgba(99,99,99,.1)","#94a3b8",role))
     role_badge = (f'<span style="background:{rbg};color:{rtxt};border-radius:5px;'
@@ -2707,8 +2707,8 @@ def insp_card_html(insp, fg, color):
     for gl in insp["groups"]:
         gobj = next((g for g in fg if g["label"]==gl), None)
         if not gobj: continue
-        ac2  = "#6366f1"if gobj.get("service_type")==SVC_FC else ("#14b8a6"if gobj.get("service_type")==SVC_DS else "#f59e0b")
-        hk   = e(gobj.get("housekeeper","") or f"Grp {gl}")
+        ac2 = "#6366f1" if gobj.get("service_type")==SVC_FC else ("#14b8a6" if gobj.get("service_type")==SVC_DS else "#f59e0b")
+        hk = e(gobj.get("housekeeper","") or f"Grp {gl}")
         total_t += gobj.get("time",0)
         pills += (f'<span style="display:inline-block;background:rgba(99,102,241,.08);'
                   f'border:1px solid rgba(99,102,241,.25);border-radius:20px;'
@@ -2736,7 +2736,7 @@ def insp_card_html(insp, fg, color):
 </div></body></html>"""
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  SIDEBAR
+# SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     _cu = auth.current_user()
@@ -2752,7 +2752,7 @@ with st.sidebar:
     <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#475569;
                 text-transform:uppercase;letter-spacing:.08em">{_cu["role"].title()}</div>
   </div>
-  <span style="font-size:1.3rem;opacity:.8">{""if _cu["role"]=="admin"else ""if _cu["role"]=="rqs"else ""}</span>
+  <span style="font-size:1.3rem;opacity:.8">{"" if _cu["role"]=="admin" else "" if _cu["role"]=="rqs" else ""}</span>
 </div>""", unsafe_allow_html=True)
     if st.button("Sign Out", key="btn_logout", use_container_width=True):
         auth.logout(); st.rerun()
@@ -2780,7 +2780,7 @@ with st.sidebar:
     # They only see their name, role, and sign-out above. Everything below
     # (attendance, roster, RQS roles, priority HKs) is admin/rqs only.
     if auth.is_housekeeper():
-        present_hk   = [n for n,v in st.session_state["hk_roster"].items() if v["present"]]
+        present_hk = [n for n,v in st.session_state["hk_roster"].items() if v["present"]]
         present_insp = [n for n,v in st.session_state["insp_roster"].items() if v]
         rqs1 = st.session_state.get("rqs1","")
         rqs2 = st.session_state.get("rqs2","")
@@ -2792,7 +2792,7 @@ with st.sidebar:
         with st.expander("Add / Remove Housekeeper"):
             col_a, col_b = st.columns([2,1])
             with col_a: new_hk_name = st.text_input("Name", key="new_hk_inp")
-            with col_b: new_hk_bld  = st.selectbox("Bldg", [1,2,3], key="new_hk_bld")
+            with col_b: new_hk_bld = st.selectbox("Bldg", [1,2,3], key="new_hk_bld")
             if st.button("Add HK", key="btn_add_hk"):
                 n = new_hk_name.strip()
                 if n and n not in st.session_state["hk_roster"]:
@@ -2804,7 +2804,7 @@ with st.sidebar:
                 _persist_roster(); st.success(f"Removed {rm_hk}")
 
         st.markdown("### Housekeepers")
-        st.caption("Check to mark present. Use ◀▶ buttons to move between buildings.")
+        st.caption("Check to mark present. Use the arrow buttons to move between buildings.")
         roster = st.session_state["hk_roster"]
         present_hk = []
         import copy as _copy
@@ -2813,27 +2813,30 @@ with st.sidebar:
             bld_hks = [n for n,v in roster.items() if v["building"]==bld]
             # Note: we no longer skip empty buildings — the bulk-paste field
             # below lets you populate an empty building from scratch.
-            BLD_NEON_SB = {
-                1: ("rgba(99,102,241,.15)","#a5b4fc","rgba(99,102,241,.3)"),
-                2: ("rgba(20,184,166,.12)","#5eead4","rgba(20,184,166,.3)"),
-                3: ("rgba(245,158,11,.12)","#fcd34d","rgba(245,158,11,.3)"),
+            # Solid, high-contrast building colors that read clearly on the white
+            # sidebar (formal theme): each building a distinct professional tone,
+            # white text, and a readable count badge.
+            BLD_SB = {
+                1: ("#2563a8", "#1c4e86"),   # blue   (bar bg, badge bg)
+                2: ("#0f766e", "#0c5d56"),   # teal
+                3: ("#b45309", "#8f420a"),   # amber
             }
-            bg_b, txt_b, bdr_b = BLD_NEON_SB.get(bld, ("rgba(99,99,99,.1)","#94a3b8","rgba(99,99,99,.2)"))
+            bar_bg, badge_bg = BLD_SB.get(bld, ("#475569", "#334155"))
             n_present = sum(1 for n in bld_hks if roster[n]["present"])
             st.markdown(
-                f'<div style="background:{bg_b};color:{txt_b};border-radius:8px;'
-                f'padding:6px 12px;font-family:\'DM Mono\',monospace;font-size:.68rem;font-weight:500;'
+                f'<div style="background:{bar_bg};color:#ffffff;border-radius:8px;'
+                f'padding:7px 12px;font-family:\'DM Mono\',monospace;font-size:.7rem;font-weight:600;'
                 f'display:flex;justify-content:space-between;align-items:center;'
-                f'margin:8px 0 4px;border:1px solid {bdr_b};'
-                f'letter-spacing:.04em;text-transform:uppercase">'
+                f'margin:10px 0 4px;'
+                f'letter-spacing:.05em;text-transform:uppercase">'
                 f'<span>Building {bld}</span>'
-                f'<span style="background:{bdr_b};color:{txt_b};border-radius:20px;padding:1px 8px;'
-                f'font-size:.62rem">{n_present}/{len(bld_hks)}</span>'
+                f'<span style="background:{badge_bg};color:#ffffff;border-radius:20px;padding:2px 10px;'
+                f'font-size:.66rem;font-weight:700">{n_present}/{len(bld_hks)}</span>'
                 f'</div>',
                 unsafe_allow_html=True)
 
             # ── Bulk replace: paste a list of names (e.g. from Excel) to replace
-            #    ALL housekeepers currently in this building ────────────────────
+            # ALL housekeepers currently in this building ────────────────────
             with st.expander(f"Bulk set Building {bld} names"):
                 _bulk = st.text_area(
                     "Paste names (one per line or comma-separated)",
@@ -2874,8 +2877,8 @@ with st.sidebar:
                     else:
                         roster[name]["present"] = checked
                 with c_name:
-                    col2 = "inherit"if checked else "#94a3b8"
-                    td   = "none"    if checked else "line-through"
+                    col2 = "inherit" if checked else "#94a3b8"
+                    td = "none" if checked else "line-through"
                     st.markdown(f'<div style="font-size:.8rem;color:{col2};padding:4px 0;text-decoration:{td}">{e(name)}</div>', unsafe_allow_html=True)
                 with c_left:
                     if bld > 1:
@@ -2891,7 +2894,7 @@ with st.sidebar:
         if roster != _hk_before:
             try:
                 _existing = db.load_full_schedule() or {}
-                _existing["hk_roster"]   = dict(roster)
+                _existing["hk_roster"] = dict(roster)
                 _existing["insp_roster"] = dict(st.session_state.get("insp_roster",{}))
                 db.save_full_schedule(_existing)
             except Exception:
@@ -2924,7 +2927,7 @@ with st.sidebar:
             try:
                 _existing = db.load_full_schedule() or {}
                 _existing["insp_roster"] = dict(insp_roster)
-                _existing["hk_roster"]   = dict(st.session_state.get("hk_roster",{}))
+                _existing["hk_roster"] = dict(st.session_state.get("hk_roster",{}))
                 db.save_full_schedule(_existing)
             except Exception:
                 pass
@@ -2941,7 +2944,7 @@ with st.sidebar:
             try:
                 _existing = db.load_full_schedule() or {}
                 _existing["insp_roster"] = dict(insp_roster)
-                _existing["hk_roster"]   = dict(st.session_state.get("hk_roster",{}))
+                _existing["hk_roster"] = dict(st.session_state.get("hk_roster",{}))
                 db.save_full_schedule(_existing)
             except Exception:
                 pass
@@ -2951,8 +2954,8 @@ with st.sidebar:
         rqs_opts = ["— none —"] + present_insp
         rqs1_sel = st.selectbox("RQS 1 (Dust & Vac)", rqs_opts, key="rqs1_sel")
         rqs2_sel = st.selectbox("RQS 2 (Daily Service)", rqs_opts, key="rqs2_sel")
-        rqs1 = ""if rqs1_sel=="— none —"else rqs1_sel
-        rqs2 = ""if rqs2_sel=="— none —"else rqs2_sel
+        rqs1 = "" if rqs1_sel=="— none —" else rqs1_sel
+        rqs2 = "" if rqs2_sel=="— none —" else rqs2_sel
         st.session_state["rqs1"] = rqs1; st.session_state["rqs2"] = rqs2
 
         st.markdown("---")
@@ -2961,7 +2964,7 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("### Priority HKs")
         st.caption("Select HKs who need a full 380-min group (productivity recovery).")
-        if "priority_hks"not in st.session_state: st.session_state["priority_hks"] = []
+        if "priority_hks" not in st.session_state: st.session_state["priority_hks"] = []
         saved_priority = [n for n in st.session_state["priority_hks"] if n in present_hk]
         if saved_priority != st.session_state["priority_hks"]: st.session_state["priority_hks"] = saved_priority
         st.multiselect("Priority HKs", options=present_hk, key="priority_hks",
@@ -2978,7 +2981,7 @@ with st.sidebar:
                     unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  MAIN INPUT
+# MAIN INPUT
 # ══════════════════════════════════════════════════════════════════════════════
 _cu = auth.current_user()
 _disp_name = _cu.get("display_name") or _cu.get("username","")
@@ -2987,16 +2990,6 @@ _welcome_msg = auth.get_welcome_msg(_cu["role"])
 
 st.markdown(f'<p class="pg-title">Good morning, {_first_name}! </p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">{_welcome_msg}</p>', unsafe_allow_html=True)
-
-with st.expander("Rules", expanded=False):
-    st.markdown("""<div class="rules-box"><ol>
-<li>Full Clean ≤ <strong>380 min</strong> · Daily Service ≤ <strong>560 min</strong></li>
-<li>Groups: <strong>Full Clean Daily Service Dust & Vac</strong></li>
-<li>Building 2 and Building 3 <strong>cannot share a group</strong></li>
-<li>Full Clean: max <strong>one 140-min</strong> room per group</li>
-<li>Same guest same group · floor-first packing</li>
-<li>B1 HKs can go to B2/B3 · B2 cannot go to B3 · B3 cannot go to B2</li>
-</ol></div>""", unsafe_allow_html=True)
 
 st.markdown("---")
 col_data, col_cfg = st.columns([5,1], gap="medium")
@@ -3038,7 +3031,10 @@ with col_data:
                                    f"You can still copy-paste the data below.")
                 _msg = st.session_state.get("_room_xlsx_msg")
                 if _msg:
-                    (st.success if _msg[0] == "ok"else st.error)(_msg[1])
+                    if _msg[0] == "ok":
+                        st.caption(_msg[1])
+                    else:
+                        st.error(_msg[1])
         raw_input = st.text_area("rooms", label_visibility="collapsed", height=230,
             disabled=not auth.can("can_paste_input"),
             placeholder="Room\tService\tTime\tPet\tCurrent Guest or Status\n1020D\tFull Clean\t120\t\tSmith, John",
@@ -3047,15 +3043,15 @@ with col_data:
     with inp_b:
         email_text = st.text_area("email", label_visibility="collapsed", height=230,
             disabled=not auth.can("can_paste_input"),
-            placeholder="Paste today's front-desk email...\n\nLate Checkouts:\n* 10:30 am\n   * 1234A",
+            placeholder="Paste today's front-desk email...\n\nLate Checkouts:\n* 10:30 am\n * 1234A",
             key="email_input")
         st.caption("Late checkouts, room moves, notes auto-matched.")
 with col_cfg:
     st.markdown('<p class="sec"></p>', unsafe_allow_html=True)
-    _today_bg  = ("rgba(255,255,255,.7)"if _IS_GLASS else "#ffffff") if _IS_LIGHT else ("rgba(40,40,52,.5)"if _IS_GLASS else "rgba(255,255,255,.03)")
-    _today_br  = "rgba(99,102,241,.18)"
-    _today_hd  = "#0f172a"if _IS_LIGHT else "#e2e8f0"
-    _today_tx  = "#475569"if _IS_LIGHT else "#94a3b8"
+    _today_bg = ("rgba(255,255,255,.7)" if _IS_GLASS else "#ffffff") if _IS_LIGHT else ("rgba(40,40,52,.5)" if _IS_GLASS else "rgba(255,255,255,.03)")
+    _today_br = "rgba(99,102,241,.18)"
+    _today_hd = "#0f172a" if _IS_LIGHT else "#e2e8f0"
+    _today_tx = "#475569" if _IS_LIGHT else "#94a3b8"
     st.markdown(f'<div style="background:{_today_bg};border:1px solid {_today_br};border-radius:10px;'
                 f'padding:11px 13px;font-size:.78rem;color:{_today_tx};margin-bottom:10px">'
                 f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">Today</div>'
@@ -3064,10 +3060,10 @@ with col_cfg:
     _can_gen = auth.can("can_generate")
     run = st.button("Generate", type="primary", use_container_width=True,
                     disabled=not _can_gen,
-                    help=""if _can_gen else "Housekeeper role — view only")
+                    help="" if _can_gen else "Housekeeper role — view only")
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  SNAPSHOT
+# SNAPSHOT
 # ══════════════════════════════════════════════════════════════════════════════
 def _build_snapshot(fg, total_rooms, inspectors):
     from datetime import date
@@ -3078,10 +3074,10 @@ def _build_snapshot(fg, total_rooms, inspectors):
             if hk not in hk_snap:
                 hk_snap[hk] = {"time":0,"rooms":0,"rooms_fc":0,"rooms_ds":0,"rooms_dv":0}
             n = len(g.get("rooms",[]))
-            hk_snap[hk]["time"]  += g.get("time",0)
+            hk_snap[hk]["time"] += g.get("time",0)
             hk_snap[hk]["rooms"] += n
             svc = g.get("service_type","")
-            if svc==SVC_FC:  hk_snap[hk]["rooms_fc"] += n
+            if svc==SVC_FC: hk_snap[hk]["rooms_fc"] += n
             elif svc==SVC_DS:hk_snap[hk]["rooms_ds"] += n
             elif svc==SVC_DV:hk_snap[hk]["rooms_dv"] += n
     insp_snap = {}
@@ -3096,7 +3092,7 @@ def _build_snapshot(fg, total_rooms, inspectors):
             "saved_by":st.session_state.get("username","unknown"),"schema_v":2}
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  GENERATE
+# GENERATE
 # ══════════════════════════════════════════════════════════════════════════════
 if run:
     st.session_state["last_email"] = email_text
@@ -3176,8 +3172,8 @@ if run:
                     _loader.empty()
                     st.error("No valid rows — check tab-separated data with a header row.")
                 else:
-                    email_data      = parse_email_notes(email_text)
-                    late_co_map     = email_data["late_checkout"]
+                    email_data = parse_email_notes(email_text)
+                    late_co_map = email_data["late_checkout"]
                     email_notes_map = email_data["notes"]
                     if email_text.strip():
                         n_late = len(late_co_map)
@@ -3185,7 +3181,7 @@ if run:
                         # Show the email-parse summary quietly in the sidebar rather
                         # than as a large banner in the middle of the page.
                         if n_late > 0:
-                            late_rooms = ", ".join(f"{rm} ({t.replace('Late Out: ','')})"for rm,t in sorted(late_co_map.items()))
+                            late_rooms = ", ".join(f"{rm} ({t.replace('Late Out: ','')})" for rm,t in sorted(late_co_map.items()))
                             st.sidebar.caption(
                                 f"Email parsed — {n_late} late checkout(s), {n_notes} note(s).")
                             st.sidebar.caption(f"Late rooms: {late_rooms}")
@@ -3194,7 +3190,7 @@ if run:
                     records_raw = df.to_dict("records")
                     rds = []
                     for r in records_raw:
-                        rm_upper   = str(r["Room"]).strip().upper()
+                        rm_upper = str(r["Room"]).strip().upper()
                         excel_late = r.get("LateCheckout","").strip()
                         email_late = late_co_map.get(rm_upper,"")
                         if email_late: late_co = email_late
@@ -3206,13 +3202,13 @@ if run:
                         if rm_upper in email_notes_map: notes_parts += email_notes_map[rm_upper]
                         has_stayover = (
                             r.get("uncertain",False) or
-                            any("stayover"in n.lower() or "stay over"in n.lower() for n in notes_parts)
+                            any("stayover" in n.lower() or "stay over" in n.lower() for n in notes_parts)
                         )
                         # verify rooms (stayover / P-U Models): no auto HK/RQS, sent to bottom
                         needs_verify = (
                             r.get("verify",False) or
-                            any("stayover"in n.lower() or "stay over"in n.lower()
-                                or "p/u model"in n.lower() or "pu model"in n.lower()
+                            any("stayover" in n.lower() or "stay over" in n.lower()
+                                or "p/u model" in n.lower() or "pu model" in n.lower()
                                 for n in notes_parts)
                         )
                         rds.append({
@@ -3260,10 +3256,10 @@ if run:
                     inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
 
                     # Store fresh result in session state
-                    st.session_state["groups_data"]     = fg
-                    st.session_state["total_rooms"]     = len(df)
+                    st.session_state["groups_data"] = fg
+                    st.session_state["total_rooms"] = len(df)
                     st.session_state["inspectors_data"] = inspectors
-                    st.session_state["used_hk_set"]     = used_hk_set
+                    st.session_state["used_hk_set"] = used_hk_set
 
                     # Save to DB for sharing + dashboard (non-blocking)
                     try:
@@ -3290,15 +3286,15 @@ if run:
                 import traceback; st.code(traceback.format_exc())
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  RESULTS
+# RESULTS
 # ══════════════════════════════════════════════════════════════════════════════
 if not st.session_state.get("groups_data"): st.stop()
 
-fg          = st.session_state["groups_data"]
+fg = st.session_state["groups_data"]
 total_rooms = st.session_state["total_rooms"]
-inspectors  = st.session_state["inspectors_data"]
+inspectors = st.session_state["inspectors_data"]
 used_hk_set = st.session_state.get("used_hk_set") or set()
-present_hk  = [n for n,v in st.session_state["hk_roster"].items() if v["present"]]
+present_hk = [n for n,v in st.session_state["hk_roster"].items() if v["present"]]
 present_insp= [n for n,v in st.session_state["insp_roster"].items() if v]
 
 st.markdown("---")
@@ -3307,7 +3303,7 @@ ds_g=[g for g in fg if g.get("service_type")==SVC_DS]
 dv_g=[g for g in fg if g.get("service_type")==SVC_DV]
 avg_t=sum(g["time"] for g in fg)//max(len(fg),1)
 n_free_hk=sum(1 for n in present_hk if n not in used_hk_set)
-n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager"and g["time"]<LOW_MIN)
+n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager" and g["time"]<LOW_MIN)
 
 st.markdown(f"""<div class="stat-row">
   <div class="sc hi"><div class="n">{len(fg)}</div><div class="l">Total Groups</div></div>
@@ -3322,14 +3318,14 @@ st.markdown(f"""<div class="stat-row">
     <div class="l">Low-Hour HKs</div></div>
 </div>""", unsafe_allow_html=True)
 
-_is_hk   = auth.is_housekeeper()
+_is_hk = auth.is_housekeeper()
 _my_name = auth.my_display_name()
 
 if _is_hk:
     # ══════════════════════════════════════════════════════════════════════
-    #  HOUSEKEEPER VIEW — single "My Schedule"tab, own rooms only
+    # HOUSEKEEPER VIEW — single "My Schedule"tab, own rooms only
     # ══════════════════════════════════════════════════════════════════════
-    _NOW = _now_iso   # shared Mountain-time timestamp helper
+    _NOW = _now_iso # shared Mountain-time timestamp helper
 
     _tmsg_hk = st.session_state.pop("_live_toast", None)
     if _tmsg_hk:
@@ -3345,7 +3341,7 @@ if _is_hk:
     }
 
     # Init room statuses
-    if "room_statuses"not in st.session_state:
+    if "room_statuses" not in st.session_state:
         st.session_state["room_statuses"] = {}
     if not st.session_state.get("_live_loaded"):
         st.session_state["_live_loaded"] = True
@@ -3369,11 +3365,11 @@ if _is_hk:
 
     # Stats
     my_rooms_all = [r for g in my_groups for r in g["rooms"]]
-    n_total  = len(my_rooms_all)
-    n_done   = sum(1 for r in my_rooms_all if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
+    n_total = len(my_rooms_all)
+    n_done = sum(1 for r in my_rooms_all if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
     n_active = sum(1 for r in my_rooms_all if rs.get(r["room"],{}).get("status") == "cleaning_started")
-    n_insp   = sum(1 for r in my_rooms_all if rs.get(r["room"],{}).get("status") == "inspected")
-    pct      = int(n_done / max(n_total,1) * 100)
+    n_insp = sum(1 for r in my_rooms_all if rs.get(r["room"],{}).get("status") == "inspected")
+    pct = int(n_done / max(n_total,1) * 100)
 
     # Progress header
     st.markdown(f"""
@@ -3385,7 +3381,7 @@ if _is_hk:
         Your Rooms Today
       </div>
       <div style="font-family:'DM Mono',monospace;font-size:.7rem;color:#475569;margin-top:2px">
-        {n_total} rooms &nbsp;·&nbsp; {len(my_groups)} group{"s"if len(my_groups)!=1 else ""}
+        {n_total} rooms &nbsp;·&nbsp; {len(my_groups)} group{"s" if len(my_groups)!=1 else ""}
       </div>
     </div>
     <div style="display:flex;gap:10px">
@@ -3428,8 +3424,8 @@ if _is_hk:
             insp_name = g.get("inspector","—")
             g_rooms = g["rooms"]
             g_done = sum(1 for r in g_rooms if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
-            g_pct  = int(g_done / max(len(g_rooms),1) * 100)
-            g_color = "#6366f1"if g.get("service_type")==SVC_FC else ("#14b8a6"if g.get("service_type")==SVC_DS else "#f59e0b")
+            g_pct = int(g_done / max(len(g_rooms),1) * 100)
+            g_color = "#6366f1" if g.get("service_type")==SVC_FC else ("#14b8a6" if g.get("service_type")==SVC_DS else "#f59e0b")
 
             # Group header
             st.markdown(f"""
@@ -3471,19 +3467,19 @@ if _is_hk:
                 _seen_hr.add(_rc); _dedup_g_rooms.append(r)
             for _hridx, r in enumerate(_dedup_g_rooms):
                 rm = r["room"]
-                _hrk = f"{_hgidx}_{_hridx}_{rm}"   # fully unique row key
+                _hrk = f"{_hgidx}_{_hridx}_{rm}" # fully unique row key
                 # Ensure room is initialised in rs with this HK's info
                 if rm not in rs:
                     rs[rm] = {"room":rm,"status":"pending","housekeeper":_my_name,
                               "group_label":g_label,"inspector":insp_name}
                 r_state = rs.get(rm, {"status":"pending"})
                 cur = r_state.get("status","pending")
-                sm  = STATUS_META_HK.get(cur, STATUS_META_HK["pending"])
+                sm = STATUS_META_HK.get(cur, STATUS_META_HK["pending"])
 
                 _fmt = _fmt_mtn
 
-                pet_icon = " "if r.get("pet") else ""
-                late_icon = " "if r.get("late_checkout") else ""
+                pet_icon = " " if r.get("pet") else ""
+                late_icon = " " if r.get("late_checkout") else ""
                 late_html = (f'<span style="font-family:\'DM Mono\',monospace;font-size:.62rem;'
                              f'color:#f59e0b;background:rgba(245,158,11,.12);border-radius:4px;'
                              f'padding:1px 5px;margin-left:4px"> {r.get("late_checkout","")}</span>'
@@ -3503,14 +3499,14 @@ if _is_hk:
                     f'<div style="display:flex;align-items:center;justify-content:space-between;'
                     f'gap:8px;flex-wrap:wrap;padding:8px 10px;background:rgba(255,255,255,.02);'
                     f'border:1px solid rgba(99,102,241,.1);border-radius:8px;margin-bottom:4px">'
-                    f'  <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">'
-                    f'    <span style="font-family:\'DM Mono\',monospace;font-size:.85rem;'
+                    f' <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">'
+                    f' <span style="font-family:\'DM Mono\',monospace;font-size:.85rem;'
                     f'font-weight:600;color:#6366f1;white-space:nowrap">{rm}</span>'
-                    f'    <span style="font-size:.78rem;color:#94a3b8;overflow:hidden;'
+                    f' <span style="font-size:.78rem;color:#94a3b8;overflow:hidden;'
                     f'text-overflow:ellipsis;white-space:nowrap">{guest_disp}{pet_icon}</span>'
-                    f'    {late_html}'
-                    f'  </div>'
-                    f'  <div style="background:{sm["bg"]};border:1px solid {sm["border"]};'
+                    f' {late_html}'
+                    f' </div>'
+                    f' <div style="background:{sm["bg"]};border:1px solid {sm["border"]};'
                     f'border-radius:6px;padding:3px 9px;font-size:.7rem;font-weight:600;'
                     f'color:{sm["color"]};white-space:nowrap;flex-shrink:0;{_hk_ring}">'
                     f'{_hk_dot}{sm["icon"]} {sm["label"]}</div>'
@@ -3554,7 +3550,7 @@ if _is_hk:
                 if ts_parts:
                     st.markdown(
                         f'<div style="font-family:\'DM Mono\',monospace;font-size:.6rem;color:#1e293b;'
-                        f'padding:0 0 6px 4px">{"  ·  ".join(ts_parts)}</div>', unsafe_allow_html=True)
+                        f'padding:0 0 6px 4px">{" · ".join(ts_parts)}</div>', unsafe_allow_html=True)
 
             st.markdown("<div style='margin-bottom:12px'></div>", unsafe_allow_html=True)
 
@@ -3568,7 +3564,7 @@ if _is_hk:
 
 else:
     # ══════════════════════════════════════════════════════════════════════
-    #  ADMIN / RQS VIEW — full 4-tab interface
+    # ADMIN / RQS VIEW — full 4-tab interface
     # ══════════════════════════════════════════════════════════════════════
     tab_hk, tab_insp, tab_grp, tab_live = st.tabs(["Housekeepers","Inspectors","Groups","Live"])
 
@@ -3583,7 +3579,7 @@ else:
         for name in present_hk:
             t=hk_time.get(name,0); gs=hk_grps.get(name,[])
             b=st.session_state["hk_roster"].get(name,{}).get("building","?")
-            stat="free"if not gs else ("low"if t<LOW_MIN else "ok")
+            stat="free" if not gs else ("low" if t<LOW_MIN else "ok")
             rows_hk.append({"name":name,"bld":b,"groups":gs,"time":t,"stat":stat})
         rows_hk.sort(key=lambda r:{"free":0,"low":1,"ok":2}[r["stat"]])
         def hk_bld_tag(r):
@@ -3606,7 +3602,7 @@ else:
         def hk_bar(r):
             if not r["time"]: return '<span style="color:#94a3b8">—</span>'
             pct=min(int(r["time"]/380*100),100)
-            col="#10b981"if r["stat"]=="ok"else "#f59e0b"
+            col="#10b981" if r["stat"]=="ok" else "#f59e0b"
             return (f'<div style="display:flex;align-items:center;gap:7px">'
                     f'<span style="font-weight:600;color:#1e293b;min-width:48px">{r["time"]}m</span>'
                     f'<div style="background:#e5e7eb;border-radius:4px;height:7px;width:75px">'
@@ -3619,8 +3615,8 @@ else:
         if n_free_hk or n_low_hk:
             parts=[]
             if n_free_hk: parts.append(f"**{n_free_hk}** HK(s) unassigned")
-            if n_low_hk:  parts.append(f"**{n_low_hk}** HK(s) low hours")
-            st.warning("  ·  ".join(parts))
+            if n_low_hk: parts.append(f"**{n_low_hk}** HK(s) low hours")
+            st.warning(" · ".join(parts))
 
     with tab_insp:
         used_insp={insp.get("name","") for insp in inspectors}
@@ -3653,18 +3649,18 @@ else:
             return out
         def insp_complexity_tag(r):
             c=r.get("complexity","—"); heavy=r.get("heavy_warning",False)
-            col="#9b1c1c"if heavy else "#475569"; bg2="#fde8e8"if heavy else "#f1f5f9"
-            return f'<span style="background:{bg2};color:{col};border-radius:5px;padding:2px 8px;font-size:.72rem;font-weight:700">{c}{""if heavy else ""}</span>'
+            col="#9b1c1c" if heavy else "#475569"; bg2="#fde8e8" if heavy else "#f1f5f9"
+            return f'<span style="background:{bg2};color:{col};border-radius:5px;padding:2px 8px;font-size:.72rem;font-weight:700">{c}{"" if heavy else ""}</span>'
         tbl_i=staff_table_html(rows_insp,
             ["Inspector","Role","Buildings","Groups","Load","Housekeepers"],
             [lambda r:(f'<span style="font-weight:700;color:{_C["txt"]};font-size:.82rem">{e(r["name"])}</span>'
-                       +(f'<br><span style="font-size:.68rem;color:{_C["txt3"]}"> Free</span>' if r["stat"]=="free"else "")),
+                       +(f'<br><span style="font-size:.68rem;color:{_C["txt3"]}"> Free</span>' if r["stat"]=="free" else "")),
              insp_role_tag, insp_bld_tags, insp_grp_pills, insp_complexity_tag,
              lambda r:(f'<span style="font-size:.72rem;line-height:1.6">'
                        +"<br>".join(f'<span style="color:{_C["txt3"]}">{e(gl)}</span> <span style="color:{_C["txt"]};font-weight:600">{e(next((g.get("housekeeper","") for g in fg if g["label"]==gl),"—"))}</span>'
                                     for gl in r["groups"] if any(g["label"]==gl for g in fg))
-                       +"</span>"if r["groups"] else f'<span style="color:{_C["txt3"]}">—</span>')],
-            lambda r:"#f0fdf4"if r["stat"]=="free"else "#fff")
+                       +"</span>" if r["groups"] else f'<span style="color:{_C["txt3"]}">—</span>')],
+            lambda r:"#f0fdf4" if r["stat"]=="free" else "#fff")
         components.html(tbl_i, height=max(70+len(rows_insp)*52,120), scrolling=True)
         if inspectors:
             n_cols=min(len(inspectors),3); icols=st.columns(n_cols)
@@ -3674,18 +3670,18 @@ else:
 
     with tab_grp:
         fc1,fc2,fc3,fc4,fc5,fc6 = st.columns([2,2,2,2,1,1])
-        all_hk_names  = sorted(set(g.get("housekeeper","") for g in fg if g.get("housekeeper","")))
-        all_rqs_names = sorted(set(g.get("inspector","")   for g in fg if g.get("inspector","")))
-        all_blds      = sorted(set(b for g in fg for b in g["blds"]))
+        all_hk_names = sorted(set(g.get("housekeeper","") for g in fg if g.get("housekeeper","")))
+        all_rqs_names = sorted(set(g.get("inspector","") for g in fg if g.get("inspector","")))
+        all_blds = sorted(set(b for g in fg for b in g["blds"]))
         with fc1: sel_hk_name = st.selectbox("Housekeeper", ["All"]+all_hk_names, key="grp_hk_filter")
         with fc2: sel_rqs_name = st.selectbox("Inspector (RQS)",["All"]+all_rqs_names, key="grp_rqs_filter")
         with fc3: svc_filter = st.selectbox("Service", ["All",SVC_FC,SVC_DS,SVC_DV], key="grp_svc_filter")
-        with fc4: bld_sel = st.selectbox("Building", ["All"]+[f"Bldg {b}"for b in all_blds], key="grp_bld_filter")
+        with fc4: bld_sel = st.selectbox("Building", ["All"]+[f"Bldg {b}" for b in all_blds], key="grp_bld_filter")
         with fc5:
-            if "grp_pet_only"  not in st.session_state: st.session_state["grp_pet_only"]  = False
+            if "grp_pet_only" not in st.session_state: st.session_state["grp_pet_only"] = False
             pet_only = st.checkbox("Pet", key="grp_pet_only")
         with fc6:
-            if "grp_late_only"not in st.session_state: st.session_state["grp_late_only"] = False
+            if "grp_late_only" not in st.session_state: st.session_state["grp_late_only"] = False
             lateout_only = st.checkbox("Late Out", key="grp_late_only")
         # HKs only see their own groups
         _is_hk = auth.is_housekeeper()
@@ -3696,7 +3692,7 @@ else:
                       [g for g in fg if g.get("verify_group")])
 
         for idx, g in enumerate(ordered_fg):
-            hk   = g.get("housekeeper","")
+            hk = g.get("housekeeper","")
             insp2= g.get("inspector","")
             svc2 = g.get("service_type","")
 
@@ -3705,21 +3701,21 @@ else:
             # Housekeepers only see their own groups
             if _is_hk and hk != _my_name:
                 continue
-            if sel_hk_name  != "All"and hk    != sel_hk_name:  continue
-            if sel_rqs_name != "All"and insp2 != sel_rqs_name: continue
-            if svc_filter   != "All"and svc2  != svc_filter and not g.get("verify_group"): continue
-            if bld_sel      != "All":
+            if sel_hk_name != "All" and hk != sel_hk_name: continue
+            if sel_rqs_name != "All" and insp2 != sel_rqs_name: continue
+            if svc_filter != "All" and svc2 != svc_filter and not g.get("verify_group"): continue
+            if bld_sel != "All":
                 sel_b=int(bld_sel.split()[1])
                 if sel_b not in g["blds"]: continue
             rooms=g["rooms"]
-            if pet_only:     rooms=[r for r in rooms if r.get("pet")]
+            if pet_only: rooms=[r for r in rooms if r.get("pet")]
             if lateout_only: rooms=[r for r in rooms if r.get("late_checkout","")]
             if not rooms: continue
             gd=dict(g); gd["rooms"]=rooms
             components.html(group_card_html(gd,idx), height=135+len(rooms)*42, scrolling=False)
 
     # ══════════════════════════════════════════════════════════════════════════════
-    #  LIVE TAB — Real-time cleaning & inspection tracking
+    # LIVE TAB — Real-time cleaning & inspection tracking
     # ══════════════════════════════════════════════════════════════════════════════
     with tab_live:
         _tmsg = st.session_state.pop("_live_toast", None)
@@ -3727,7 +3723,7 @@ else:
             try: st.toast(_tmsg)
             except Exception: pass
         import json as _json
-        _NOW = _now_iso   # shared Mountain-time timestamp helper
+        _NOW = _now_iso # shared Mountain-time timestamp helper
 
         # ── Status pipeline definition ─────────────────────────────────────────
         STATUS_FLOW = ["pending","already_clean","cleaning_started","cleaning_done","inspected"]
@@ -3740,14 +3736,14 @@ else:
         }
 
         # ── Load / init room statuses ──────────────────────────────────────────
-        if "room_statuses"not in st.session_state:
+        if "room_statuses" not in st.session_state:
             st.session_state["room_statuses"] = {}
 
         def _load_statuses():
             try:
                 st.session_state["room_statuses"] = db.get_room_statuses()
             except Exception:
-                pass  # table may not exist yet — use session-only tracking
+                pass # table may not exist yet — use session-only tracking
 
         def _save_status(room, fields):
             rs = st.session_state["room_statuses"]
@@ -3760,7 +3756,7 @@ else:
                     "updated_by": st.session_state.get("username","?")
                 })
             except Exception:
-                pass  # persist in session even if DB fails
+                pass # persist in session even if DB fails
 
         def _init_statuses_from_schedule():
             """Pre-populate room_statuses from the schedule if not in DB."""
@@ -3784,15 +3780,15 @@ else:
                     else:
                         # Always keep schedule info in sync, EXCEPT housekeeper
                         # if the room was swapped (swapped_from set) — keep DB HK.
-                        rs[rm]["group_label"]  = g.get("label","")
+                        rs[rm]["group_label"] = g.get("label","")
                         if not rs[rm].get("swapped_from"):
                             rs[rm]["housekeeper"] = g.get("housekeeper","")
-                        rs[rm]["inspector"]    = g.get("inspector","")
-                        rs[rm]["svc"]          = r.get("service","")
-                        rs[rm]["guest"]        = r.get("guest","")
-                        rs[rm]["pet"]          = r.get("pet","")
-                        rs[rm]["late"]         = r.get("late_checkout","")
-                        rs[rm]["bld"]          = r.get("bld","")
+                        rs[rm]["inspector"] = g.get("inspector","")
+                        rs[rm]["svc"] = r.get("service","")
+                        rs[rm]["guest"] = r.get("guest","")
+                        rs[rm]["pet"] = r.get("pet","")
+                        rs[rm]["late"] = r.get("late_checkout","")
+                        rs[rm]["bld"] = r.get("bld","")
 
         # Load from DB on first visit to this tab, then init from schedule
         if not st.session_state.get("_live_loaded"):
@@ -3806,10 +3802,10 @@ else:
         # Progress summary — only count non-DV rooms consistently
         _live_rooms = [r for r in rs.values() if r.get("svc","") != "Dust n Vac"]
         total_rooms_live = len(_live_rooms)
-        n_clean   = sum(1 for r in _live_rooms if r.get("status") in ("already_clean","cleaning_done","inspected"))
-        n_insp    = sum(1 for r in _live_rooms if r.get("status") == "inspected")
-        n_active  = sum(1 for r in _live_rooms if r.get("status") == "cleaning_started")
-        pct_done  = int(n_clean / max(total_rooms_live,1) * 100)
+        n_clean = sum(1 for r in _live_rooms if r.get("status") in ("already_clean","cleaning_done","inspected"))
+        n_insp = sum(1 for r in _live_rooms if r.get("status") == "inspected")
+        n_active = sum(1 for r in _live_rooms if r.get("status") == "cleaning_started")
+        pct_done = int(n_clean / max(total_rooms_live,1) * 100)
 
         st.markdown(f"""
     <div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);
@@ -3897,7 +3893,7 @@ else:
             live_status_filter = st.selectbox("Status",
                 ["All"] + list(STATUS_META.keys()),
                 key="live_status_filter",
-                format_func=lambda s: f"{STATUS_META[s]['icon']} {STATUS_META[s]['label']}"if s != "All"else "All Statuses")
+                format_func=lambda s: f"{STATUS_META[s]['icon']} {STATUS_META[s]['label']}" if s != "All" else "All Statuses")
         with lf4:
             show_dv = st.checkbox("Show DV", value=False, key="live_show_dv")
 
@@ -3905,10 +3901,10 @@ else:
         # Build inspector groups rooms mapping
         insp_groups: dict = {}
         for g in fg:
-            if g.get("service_type") == "Dust n Vac"and not show_dv:
+            if g.get("service_type") == "Dust n Vac" and not show_dv:
                 continue
             insp_name = g.get("inspector","—")
-            if live_view_insp != "All"and insp_name != live_view_insp: continue
+            if live_view_insp != "All" and insp_name != live_view_insp: continue
             if insp_name not in insp_groups:
                 insp_groups[insp_name] = []
             insp_groups[insp_name].append(g)
@@ -3921,7 +3917,7 @@ else:
                 # Inspector header
                 insp_rooms_all = [r for g in groups for r in g["rooms"]]
                 insp_done = sum(1 for r in insp_rooms_all if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
-                insp_pct  = int(insp_done / max(len(insp_rooms_all),1) * 100)
+                insp_pct = int(insp_done / max(len(insp_rooms_all),1) * 100)
 
                 st.markdown(f"""
     <div style="margin:16px 0 8px;display:flex;align-items:center;gap:10px">
@@ -3936,7 +3932,7 @@ else:
                 for _gidx, g in enumerate(groups):
                     hk_name = g.get("housekeeper","—")
                     g_label = g.get("label","—")
-                    _gk = f"{g_label}_{_gidx}"   # unique per-group key prefix
+                    _gk = f"{g_label}_{_gidx}" # unique per-group key prefix
 
                     # Filter by HK
                     rooms_in_g = g["rooms"]
@@ -3950,8 +3946,8 @@ else:
                     if not rooms_in_g: continue
 
                     g_done = sum(1 for r in g["rooms"] if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
-                    g_pct  = int(g_done / max(len(g["rooms"]),1) * 100)
-                    g_color = "#6366f1"if g.get("service_type")==SVC_FC else ("#14b8a6"if g.get("service_type")==SVC_DS else "#f59e0b")
+                    g_pct = int(g_done / max(len(g["rooms"]),1) * 100)
+                    g_color = "#6366f1" if g.get("service_type")==SVC_FC else ("#14b8a6" if g.get("service_type")==SVC_DS else "#f59e0b")
 
                     with st.expander(f"{g_label} · {hk_name} · {g_done}/{len(g['rooms'])} done", expanded=(g_pct < 100)):
 
@@ -4014,7 +4010,7 @@ else:
                             _seen_rm.add(_rc); _dedup_rooms.append(r)
                         for _ridx, r in enumerate(_dedup_rooms):
                             rm = r["room"]
-                            _rk = f"{_gk}_{_ridx}_{rm}"   # fully unique row key
+                            _rk = f"{_gk}_{_ridx}_{rm}" # fully unique row key
                             r_state = rs.get(rm, {"status":"pending"})
                             cur_status = r_state.get("status","pending")
                             sm = STATUS_META.get(cur_status, STATUS_META["pending"])
@@ -4025,10 +4021,10 @@ else:
 
                             ts_start = _fmt_ts(r_state.get("started_at",""))
                             ts_clean = _fmt_ts(r_state.get("cleaned_at",""))
-                            ts_insp  = _fmt_ts(r_state.get("inspected_at",""))
-                            ts_ac    = _fmt_ts(r_state.get("marked_clean_at",""))
+                            ts_insp = _fmt_ts(r_state.get("inspected_at",""))
+                            ts_ac = _fmt_ts(r_state.get("marked_clean_at",""))
 
-                            pet_icon = " "if r.get("pet") else ""
+                            pet_icon = " " if r.get("pet") else ""
                             late_html = (f'<span style="font-family:\'DM Mono\',monospace;font-size:.6rem;'
                                          f'color:#f59e0b;background:rgba(245,158,11,.12);border-radius:4px;'
                                          f'padding:1px 5px;margin-left:4px"> {r.get("late_checkout","")}</span>'
@@ -4049,14 +4045,14 @@ else:
                                 f'<div style="display:flex;align-items:center;justify-content:space-between;'
                                 f'gap:8px;flex-wrap:wrap;padding:7px 10px;background:rgba(255,255,255,.02);'
                                 f'border:1px solid rgba(99,102,241,.1);border-radius:8px;margin-bottom:4px">'
-                                f'  <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">'
-                                f'    <span style="font-family:\'DM Mono\',monospace;font-size:.82rem;'
+                                f' <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">'
+                                f' <span style="font-family:\'DM Mono\',monospace;font-size:.82rem;'
                                 f'font-weight:600;color:#6366f1;white-space:nowrap">{rm}</span>'
-                                f'    <span style="font-size:.76rem;color:#94a3b8;overflow:hidden;'
+                                f' <span style="font-size:.76rem;color:#94a3b8;overflow:hidden;'
                                 f'text-overflow:ellipsis;white-space:nowrap">{guest_disp}{pet_icon}</span>'
-                                f'    {late_html}'
-                                f'  </div>'
-                                f'  <div style="background:{sm["bg"]};border:1px solid {sm["border"]};'
+                                f' {late_html}'
+                                f' </div>'
+                                f' <div style="background:{sm["bg"]};border:1px solid {sm["border"]};'
                                 f'border-radius:6px;padding:3px 9px;font-size:.68rem;font-weight:600;'
                                 f'color:{sm["color"]};white-space:nowrap;flex-shrink:0;{_ring}">'
                                 f'{_dot}{sm["icon"]} {sm["label"]}</div>'
@@ -4114,7 +4110,7 @@ else:
                                 st.markdown(
                                     f'<div style="font-family:\'DM Mono\',monospace;font-size:.6rem;'
                                     f'color:#334155;padding:0 0 4px 8px;letter-spacing:.04em">'
-                                    f'{"  ·  ".join(ts_parts)}</div>',
+                                    f'{" · ".join(ts_parts)}</div>',
                                     unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════════════════
@@ -4132,25 +4128,25 @@ else:
                 "Time (min)":r.get("time",""),"Pet":r.get("pet",""),
                 "Current Guest or Status":r.get("guest",""),
                 # Verify rooms (stayover / P-U Models) get NO housekeeper or RQS
-                "HSKP":""if is_verify else g.get("housekeeper",""),
-                "RQS":""if is_verify else g.get("inspector",""),
+                "HSKP":"" if is_verify else g.get("housekeeper",""),
+                "RQS":"" if is_verify else g.get("inspector",""),
                 # Status is intentionally left BLANK in the downloaded file.
                 "Notes":r.get("notes",""),"Status":"",
                 "Carpet":"","Stripping":"","Arriving Guest":r.get("arriving",""),
                 # kept only for internal sort ordering below (dropped before export)
-                "_Group":("VERIFY — assign manually"if is_verify else g["label"]),
+                "_Group":("VERIFY — assign manually" if is_verify else g["label"]),
                 "_Svc":svc_rank,
-                "_Verify":"Yes"if is_verify else "No",
-                "_Uncertain":"Yes"if r.get("uncertain") else "No",
+                "_Verify":"Yes" if is_verify else "No",
+                "_Uncertain":"Yes" if r.get("uncertain") else "No",
             })
     export_df = pd.DataFrame(export_rows)
     # Order: by service band (Full Clean IH Daily Service Dust n Vac) with
     # confirmed rooms first; then uncertain rooms; then stayover/verify rows last.
-    if not export_df.empty and "_Verify"in export_df.columns:
-        normal      = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")].sort_values(["_Svc","_Group"])
+    if not export_df.empty and "_Verify" in export_df.columns:
+        normal = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")].sort_values(["_Svc","_Group"])
         unconfirmed = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="Yes")].sort_values(["_Svc","_Group"])
         verify_rows = export_df[export_df["_Verify"]=="Yes"].sort_values("_Group")
-        export_df   = pd.concat([normal,unconfirmed,verify_rows],ignore_index=True)
+        export_df = pd.concat([normal,unconfirmed,verify_rows],ignore_index=True)
     # Drop the internal sort-only helper columns so the file has exactly the
     # requested columns, in order.
     _EXPORT_COLS = ["Room","Service","Time (min)","Pet","Current Guest or Status",
@@ -4160,7 +4156,7 @@ else:
 
     # ── Build a formatted Excel workbook: the 12-column schedule up top, a 7-row
     # gap, then a pivot summary (RQS HSKP rooms, with subtotals and a grand
-    #    total) matching the reference layout. ──────────────────────────────────
+    # total) matching the reference layout. ──────────────────────────────────
     def _build_excel(main_df, rows_for_pivot):
         from io import BytesIO
         from openpyxl import Workbook
@@ -4169,18 +4165,18 @@ else:
         from collections import OrderedDict
 
         def _to_int(v):
-            try:    return int(float(v))
+            try: return int(float(v))
             except: return 0
 
         wb = Workbook(); ws = wb.active; ws.title = "Schedule"
-        FONT   = "Arial"
-        reg    = Font(name=FONT, size=10)
-        bold   = Font(name=FONT, size=10, bold=True)
-        hdr_f  = Font(name=FONT, size=10, bold=True, color="FFFFFF")
+        FONT = "Arial"
+        reg = Font(name=FONT, size=10)
+        bold = Font(name=FONT, size=10, bold=True)
+        hdr_f = Font(name=FONT, size=10, bold=True, color="FFFFFF")
         hdr_fl = PatternFill("solid", fgColor="2563A8")
         sub_fl = PatternFill("solid", fgColor="EEF0F3")
         rqs_fl = PatternFill("solid", fgColor="D9E1EC")
-        thin   = Side(style="thin", color="D0D5DD")
+        thin = Side(style="thin", color="D0D5DD")
         border = Border(bottom=thin)
 
         # ── Main table ───────────────────────────────────────────────────────
@@ -4193,7 +4189,7 @@ else:
             for ci, h in enumerate(cols, 1):
                 val = row[h]
                 if h == "Time (min)":
-                    val = _to_int(val) if str(val) != ""else ""
+                    val = _to_int(val) if str(val) != "" else ""
                 ws.cell(row=r_i, column=ci, value=val).font = reg
             r_i += 1
         main_end = r_i - 1
@@ -4206,13 +4202,13 @@ else:
             ws.column_dimensions[get_column_letter(ci)].width = widths.get(h, 14)
 
         # ── 7-row gap, then the pivot ────────────────────────────────────────
-        pivot_start = main_end + 7 + 1     # leave exactly 7 blank rows
+        pivot_start = main_end + 7 + 1 # leave exactly 7 blank rows
 
         # Group by RQS HSKP in first-seen order (preserves the schedule order)
         piv = OrderedDict()
         for r in rows_for_pivot:
             rqs = (r.get("RQS","") or "").strip() or "(blank)"
-            hk  = (r.get("HSKP","") or "").strip() or "(blank)"
+            hk = (r.get("HSKP","") or "").strip() or "(blank)"
             piv.setdefault(rqs, OrderedDict()).setdefault(hk, []).append(r)
 
         PH = ["RQS","HSKP","Room","Service","Sum of Time (min)"]
@@ -4227,12 +4223,12 @@ else:
                 hk_total = 0; first_hk = True
                 for it in items:
                     ws.cell(row=pr, column=1, value=(rqs if first_rqs else "")).font = reg
-                    ws.cell(row=pr, column=2, value=(hk  if first_hk  else "")).font = reg
+                    ws.cell(row=pr, column=2, value=(hk if first_hk else "")).font = reg
                     ws.cell(row=pr, column=3, value=it.get("Room","")).font = reg
                     ws.cell(row=pr, column=4, value=it.get("Service","")).font = reg
                     tv = it.get("Time (min)","")
-                    t  = _to_int(tv)
-                    ws.cell(row=pr, column=5, value=(t if str(tv) != ""else "")).font = reg
+                    t = _to_int(tv)
+                    ws.cell(row=pr, column=5, value=(t if str(tv) != "" else "")).font = reg
                     hk_total += t; first_rqs = False; first_hk = False; pr += 1
                 # Housekeeper subtotal (rooms in col 3, minutes in col 5)
                 ws.cell(row=pr, column=2, value=f"{hk} Total").font = bold
@@ -4254,9 +4250,9 @@ else:
         pr += 1
 
         # ── Light-workload summary: per RQS, the housekeepers whose Full Clean /
-        #    IH minutes fall below LOW_MIN, with their minutes and room counts, so
-        #    you can see at a glance who has spare capacity. Placed a couple of
-        #    rows below the pivot. ──────────────────────────────────────────────
+        # IH minutes fall below LOW_MIN, with their minutes and room counts, so
+        # you can see at a glance who has spare capacity. Placed a couple of
+        # rows below the pivot. ──────────────────────────────────────────────
         pr += 2
         lw_hdr = Font(name=FONT, size=11, bold=True, color="16202E")
         ws.cell(row=pr, column=1, value="Light Workload by RQS "
@@ -4266,7 +4262,7 @@ else:
         for ci, h in enumerate(LW, 1):
             c = ws.cell(row=pr, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
         pr += 1
-        low_fill = PatternFill("solid", fgColor="FFF4E5")   # soft amber highlight
+        low_fill = PatternFill("solid", fgColor="FFF4E5") # soft amber highlight
         any_light = False
         for rqs, hks in piv.items():
             for hk, items in hks.items():
