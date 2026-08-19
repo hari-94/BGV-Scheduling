@@ -1776,37 +1776,75 @@ def _cluster_adjacent_same_guest(rooms):
             if cur: bundles.append(cur)
     return bundles + singles
 
+def _unit_times(chart):
+    """Expand any composite bundle units into their real per-room times, so the
+    140/120 rules are checked against ACTUAL rooms, not a bundle's summed time."""
+    times = []
+    for r in chart:
+        members = r.get("_members")
+        if members:
+            times.extend(m["time"] for m in members)
+        else:
+            times.append(r["time"])
+    return times
+
 def _chart_feasible(chart, single_building=False):
-    """Hard rules for a Full Clean / IH chart (list of room dicts)."""
-    times = [r["time"] for r in chart]
+    """Hard rules for a Full Clean / IH chart (list of room dicts or bundle units)."""
+    times = _unit_times(chart)
     if sum(times) > MAX_FC: return False
-    if times.count(140) > 1: return False
+    if times.count(140) > 1: return False                 # never two 140s
     if times.count(140) >= 1 and times.count(120) > 1: return False
     blds = set(_bld(r) for r in chart)
-    if 2 in blds and 3 in blds: return False          # B2 and B3 never share
+    if 2 in blds and 3 in blds: return False              # B2 and B3 never share
     if single_building and len(blds) > 1: return False
     return True
 
 def _chart_nbld(chart): return len(set(_bld(r) for r in chart))
+def _chart_nflr(chart): return len(set((_bld(r), _flr(r)) for r in chart))
+def _chart_floor_gap(chart):
+    """Largest vertical gap between floors used within a single building. 0 for a
+    single-floor chart, 1 for adjacent floors (3+4), 2+ for distant floors (0+3).
+    Distant-floor charts are what we want to avoid."""
+    by_bld = {}
+    for r in chart:
+        by_bld.setdefault(_bld(r), set()).add(_flr(r))
+    gap = 0
+    for fs in by_bld.values():
+        if len(fs) > 1:
+            gap = max(gap, max(fs) - min(fs))
+    return gap
 def _chart_spread(chart):
     if not chart: return 0
     fl = [_flr(r) for r in chart]; nm = [_rnum(r) for r in chart]
-    # Weight room-number proximity more (walking down a hall) alongside floor
-    # changes, so charts group physically close rooms and cut housekeeper travel.
-    return (_chart_nbld(chart)-1)*100 + (max(fl)-min(fl))*10 + (max(nm)-min(nm))*2
+    # Travel cost, in priority order:
+    #  • crossing buildings is worst,
+    #  • then how many DISTINCT floors the housekeeper must visit,
+    #  • then — critically — how FAR APART those floors are: a chart that must
+    #    span two floors should use ADJACENT floors (3+4), never distant ones
+    #    (0+3). The gap term grows fast so the solver pairs neighbouring floors.
+    #  • then room-number distance along the hall.
+    n_floors = _chart_nflr(chart)
+    gap = _chart_floor_gap(chart)
+    return ((_chart_nbld(chart)-1)*400
+            + (n_floors-1)*120
+            + (gap*gap)*40
+            + (max(fl)-min(fl))*10
+            + (max(nm)-min(nm))*2)
 def _charts_xb(charts):     return sum(1 for c in charts if _chart_nbld(c) > 1)
 def _charts_spread(charts): return sum(_chart_spread(c) for c in charts if c)
 
 def _fc_bestfit(order):
-    """Best-fit that prefers not introducing a new building into a chart."""
+    """Best-fit placement that prefers, in order: not adding a new building, not
+    adding a new floor (keep the housekeeper on one floor), then tightest fit."""
     charts = []
     for r in order:
         best = None; bkey = None
         for c in charts:
             if _chart_feasible(c + [r]):
                 rem = MAX_FC - (sum(x["time"] for x in c) + r["time"])
-                intro = _chart_nbld(c + [r]) > _chart_nbld(c)
-                key = (1 if intro else 0, rem)
+                intro_bld = _chart_nbld(c + [r]) > _chart_nbld(c)
+                intro_flr = _chart_nflr(c + [r]) > _chart_nflr(c)
+                key = (1 if intro_bld else 0, 1 if intro_flr else 0, rem)
                 if bkey is None or key < bkey: bkey = key; best = c
         if best is None: charts.append([r])
         else: best.append(r)
@@ -1866,6 +1904,51 @@ def _fc_ls_tidy(charts, iters, rng):
             a.remove(u); a.append(v); b.remove(v); b.append(u)
     return [c for c in charts if c]
 
+def _fc_floor_consolidate(charts, rounds=25):
+    """Deterministic best-improvement pass dedicated to reducing floor travel:
+    first the number of distinct floors a housekeeper visits, and — when a chart
+    must span floors — keeping those floors ADJACENT (small gap) rather than
+    distant. Never changes the housekeeper count or breaks a hard rule."""
+    charts = [c[:] for c in charts if c]
+    def cost(c):
+        # floor-count dominates; floor-gap is the secondary term.
+        return _chart_nflr(c) * 100 + _chart_floor_gap(c) * 10
+    for _ in range(rounds):
+        best_gain = 0; best_op = None
+        n = len(charts)
+        for ai in range(n):
+            a = charts[ai]
+            if not a: continue
+            for bi in range(n):
+                if bi == ai: continue
+                b = charts[bi]
+                if not b: continue
+                base = cost(a) + cost(b)
+                for u in a:
+                    if len(a) == 1: break
+                    if _chart_feasible(b + [u]):
+                        na = [x for x in a if x is not u]; nb = b + [u]
+                        gain = base - (cost(na) + cost(nb))
+                        if gain > best_gain:
+                            best_gain = gain; best_op = ("move", ai, bi, u, None)
+                for u in a:
+                    for v in b:
+                        na = [x for x in a if x is not u] + [v]
+                        nb = [x for x in b if x is not v] + [u]
+                        if _chart_feasible(na) and _chart_feasible(nb):
+                            gain = base - (cost(na) + cost(nb))
+                            if gain > best_gain:
+                                best_gain = gain; best_op = ("swap", ai, bi, u, v)
+        if best_op is None: break
+        kind, ai, bi, u, v = best_op
+        if kind == "move":
+            charts[ai].remove(u); charts[bi].append(u)
+        else:
+            charts[ai].remove(u); charts[ai].append(v)
+            charts[bi].remove(v); charts[bi].append(u)
+        charts = [c for c in charts if c]
+    return [c for c in charts if c]
+
 def _bundle_to_unit(bundle):
     """Collapse a locked bundle of adjacent same-guest rooms into one composite
     'unit' the packer treats atomically. Carries the sub-rooms in _members."""
@@ -1908,6 +1991,10 @@ def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
         sorted(units, key=lambda r: -r["time"]),
         sorted(units, key=lambda r: (-(r["time"]==140), -(r["time"]==120), -r["time"])),
         sorted(units, key=lambda r: (BLD.get(_bld(r),1), _flr(r), _rnum(r))),
+        # Strict floor-sequential: fill one (building, floor) completely, heavy
+        # units first within the floor, before moving to the next floor — this is
+        # how the manual builds charts, and it maximizes single-floor housekeepers.
+        sorted(units, key=lambda r: (BLD.get(_bld(r),1), _flr(r), -r["time"], _rnum(r))),
     ]
     cands = [_fc_bestfit(o) for o in orders]
     for _ in range(restarts):
@@ -1929,7 +2016,10 @@ def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
             key = (nb, _charts_xb(r), _charts_spread(r))
             if key < best[0]: best = (key, r); nb0 = nb
     charts = [c[:] for c in best[1] if c]
-    charts = _fc_ls_tidy(charts, 8000, rng)   # tidy within the locked count
+    # Tidy within the locked count: consolidate onto single floors / tight halls.
+    charts = _fc_ls_tidy(charts, 12000, rng)
+    charts = _fc_floor_consolidate(charts)      # dedicated floor-reduction pass
+    charts = _fc_ls_tidy(charts, 4000, rng)     # final hall-tightening polish
     return _unpack_units(charts)
 
 def solve_ih(ih_rooms, seed=20240601):
@@ -3966,27 +4056,29 @@ else:
                 "Room":r.get("room",""),"Service":r.get("service",""),
                 "Time (min)":r.get("time",""),"Pet":r.get("pet",""),
                 "Current Guest or Status":r.get("guest",""),
-                "Late Checkout":r.get("late_checkout",""),
                 # Verify rooms (stayover / P-U Models) get NO housekeeper or RQS
-                "Housekeeper":"" if is_verify else g.get("housekeeper",""),
+                "HSKP":"" if is_verify else g.get("housekeeper",""),
                 "RQS":"" if is_verify else g.get("inspector",""),
                 "Notes":r.get("notes",""),"Status":r.get("status",""),
-                "Stripping":"","Carpet":"","Arriving Guest":r.get("arriving",""),
-                "Group":("VERIFY — assign manually" if is_verify else g["label"]),
-                "Service Type":g.get("service_type",""),
-                "Building":f"Building {r.get('bld','')}",
-                "Group Total (min)":("" if is_verify else g["time"]),
-                "Cross-Building":"Yes" if g.get("cross_bld") else "No",
-                "Verify":"Yes" if is_verify else "No",
-                "Uncertain":"Yes" if r.get("uncertain") else "No",
+                "Carpet":"","Stripping":"","Arriving Guest":r.get("arriving",""),
+                # kept only for internal sort ordering below (dropped before export)
+                "_Group":("VERIFY — assign manually" if is_verify else g["label"]),
+                "_Verify":"Yes" if is_verify else "No",
+                "_Uncertain":"Yes" if r.get("uncertain") else "No",
             })
     export_df = pd.DataFrame(export_rows)
     # Order: confirmed groups first, then uncertain, then verify rooms dead last.
-    if not export_df.empty and "Verify" in export_df.columns:
-        normal      = export_df[(export_df["Verify"]=="No") & (export_df["Uncertain"]=="No")].sort_values("Group")
-        unconfirmed = export_df[(export_df["Verify"]=="No") & (export_df["Uncertain"]=="Yes")].sort_values("Group")
-        verify_rows = export_df[export_df["Verify"]=="Yes"]
+    if not export_df.empty and "_Verify" in export_df.columns:
+        normal      = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")].sort_values("_Group")
+        unconfirmed = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="Yes")].sort_values("_Group")
+        verify_rows = export_df[export_df["_Verify"]=="Yes"]
         export_df   = pd.concat([normal,unconfirmed,verify_rows],ignore_index=True)
+    # Drop the internal sort-only helper columns so the file has exactly the
+    # requested columns, in order.
+    _EXPORT_COLS = ["Room","Service","Time (min)","Pet","Current Guest or Status",
+                    "HSKP","RQS","Notes","Status","Carpet","Stripping","Arriving Guest"]
+    if not export_df.empty:
+        export_df = export_df[[c for c in _EXPORT_COLS if c in export_df.columns]]
     # utf-8-sig adds a BOM so Excel reads emoji/accents correctly (no more mojibake)
     csv = export_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("⬇️ Download CSV", data=csv, file_name="cleaning_schedule.csv", mime="text/csv")
