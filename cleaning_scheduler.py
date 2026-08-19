@@ -1030,6 +1030,9 @@ def normalize_service(raw: str) -> str:
     if s in SKIP_SERVICES or "p/u" in s or (s.startswith("p") and "model" in s):
         return "__SKIP__"
     if "daily" in s: return SVC_DS
+    # Sheet Exchange is a light turn-down service handled by the Daily Service
+    # crew, so it's grouped with Daily Service.
+    if "sheet" in s: return SVC_DS
     # "Full Clean (IH)" / "Full Clean( IH)" / "... IH" -> separate IH stream,
     # packed apart from regular Full Clean and inspected by RQS 2.
     if ("full clean" in s or s.startswith("fc")) and "ih" in s:
@@ -1175,7 +1178,10 @@ def excel_to_room_text(file_obj):
         return None
     c_room = find_col("room")
     c_svc = find_col("service")
-    c_time = find_col("time")
+    # Prefer the canonical minutes column ("time (min)" / "sum of time (min)" /
+    # "time") over any other column that merely contains the word "time" (e.g. a
+    # "clean time start"). This prevents reading the wrong number for a room.
+    c_time = find_col("time (min)", "sum of time (min)", "time(min)", "time")
     c_pet = find_col("pet")
     c_guest = find_col("current guest or status", "current guest", "guest")
     c_late = find_col("late checkout", "late check")
@@ -1234,7 +1240,8 @@ def parse_rooms(text: str) -> pd.DataFrame:
     has_header = any(h in ("room","service","time","guest","current guest") for h in header)
     if has_header:
         data_rows = rows[1:]
-        i_room = col("room"); i_svc = col("service"); i_time = col("time")
+        i_room = col("room"); i_svc = col("service")
+        i_time = col("time (min)","sum of time (min)","time(min)","time")
         i_pet = col("pet"); i_guest = col("current guest","guest")
         i_late = col("late checkout","late check")
         i_status = col("status"); i_notes = col("notes")
