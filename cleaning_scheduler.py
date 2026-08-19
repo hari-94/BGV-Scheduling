@@ -4311,7 +4311,7 @@ td{{transition:background .15s ease}}
     # ── Build a formatted Excel workbook: the 12-column schedule up top, a 7-row
     # gap, then a pivot summary (RQS HSKP rooms, with subtotals and a grand
     # total) matching the reference layout. ──────────────────────────────────
-    def _build_excel(main_df, rows_for_pivot):
+    def _build_excel(main_df, rows_for_pivot, free_staff=None):
         from io import BytesIO
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -4439,13 +4439,72 @@ td{{transition:background .15s ease}}
                     value="None — all housekeepers at or above the threshold.").font = reg
             pr += 1
 
+        # ── Free & low-load staff (housekeepers AND RQS) — those who are free or
+        #    carrying little, so they can pick up the manual/unallocated rooms. ──
+        if free_staff:
+            pr += 2
+            ws.cell(row=pr, column=1, value="Free & Low-Load Staff").font = lw_hdr
+            pr += 1
+            FS = ["Staff","Role","Load","Rooms","Service"]
+            for ci, h in enumerate(FS, 1):
+                c = ws.cell(row=pr, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
+            pr += 1
+            free_fill = PatternFill("solid", fgColor="EAF7EE")   # soft green
+            low_fill2 = PatternFill("solid", fgColor="FFF4E5")   # soft amber
+            for row in free_staff:
+                ws.cell(row=pr, column=1, value=row.get("name","")).font = reg
+                ws.cell(row=pr, column=2, value=row.get("role","")).font = reg
+                ws.cell(row=pr, column=3, value=row.get("load","")).font = reg
+                ws.cell(row=pr, column=4, value=row.get("rooms","")).font = reg
+                ws.cell(row=pr, column=5, value=row.get("service","")).font = reg
+                fill = free_fill if row.get("free") else low_fill2
+                for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = fill
+                pr += 1
+
         ws.freeze_panes = "A2"
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
 
     # Rows for the pivot, in the same confirmeduncertainverify order as the table
     _pivot_rows = export_df.to_dict("records") if not export_df.empty else []
+
+    # ── Build the free & low-load staff list for the Excel (HKs + RQS) ─────────
+    _SVC_SHORT_XL = {SVC_FC:"FC", SVC_IH:"IH", SVC_DS:"DS", SVC_DV:"DV"}
+    RQS_LOW_ROOMS_XL = 8
+    _free_staff = []
+    # Housekeeper load + services from the schedule
+    _hk_load = {}   # name -> {"time":int,"rooms":int,"svcs":set}
+    _rqs_load = {}  # name -> {"rooms":int,"svcs":set}
+    for g in fg:
+        hk = g.get("housekeeper","")
+        svc = g.get("service_type","")
+        if hk and hk != "Manager":
+            d = _hk_load.setdefault(hk, {"time":0,"rooms":0,"svcs":set()})
+            d["time"] += g["time"]; d["rooms"] += len(g["rooms"]); d["svcs"].add(svc)
+        insp = g.get("inspector","")
+        if insp:
+            d = _rqs_load.setdefault(insp, {"rooms":0,"svcs":set()})
+            d["rooms"] += len(g["rooms"]); d["svcs"].add(svc)
+    def _svcs_txt(svcs):
+        return " ".join(_SVC_SHORT_XL[s] for s in [SVC_FC,SVC_IH,SVC_DS,SVC_DV] if s in svcs) or "—"
+    # Low housekeepers (under LOW_MIN minutes), lightest first
+    for hk, d in sorted(_hk_load.items(), key=lambda kv:kv[1]["time"]):
+        if d["time"] and d["time"] < LOW_MIN:
+            _free_staff.append({"name":hk,"role":"HK","load":f'{d["time"]}m',
+                                "rooms":d["rooms"],"service":_svcs_txt(d["svcs"]),"free":False})
+    # Free housekeepers (present, unassigned)
+    for hk in sorted(n for n in present_hk if n not in used_hk_set):
+        _free_staff.append({"name":hk,"role":"HK","load":"Free","rooms":0,"service":"—","free":True})
+    # Low RQS (fewer than 8 rooms)
+    for insp, d in sorted(_rqs_load.items(), key=lambda kv:kv[1]["rooms"]):
+        if d["rooms"] < RQS_LOW_ROOMS_XL:
+            _free_staff.append({"name":insp,"role":"RQS","load":f'{d["rooms"]} rm',
+                                "rooms":d["rooms"],"service":_svcs_txt(d["svcs"]),"free":False})
+    # Free RQS (present, assigned nothing)
+    for insp in sorted(n for n in present_insp if n not in _rqs_load):
+        _free_staff.append({"name":insp,"role":"RQS","load":"Free","rooms":0,"service":"—","free":True})
+
     try:
-        xlsx_bytes = _build_excel(export_df, _pivot_rows)
+        xlsx_bytes = _build_excel(export_df, _pivot_rows, free_staff=_free_staff)
         st.download_button("Download Excel", data=xlsx_bytes,
                            file_name="cleaning_schedule.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
