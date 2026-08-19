@@ -14,7 +14,7 @@ try:
 except ImportError:
     PLOTLY_OK = False
 
-st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Dashboard", page_icon="GC8", layout="wide")
 st.markdown("""<style>
 [data-testid="stSidebarNav"]{display:none !important;}
 </style>""", unsafe_allow_html=True)
@@ -25,21 +25,21 @@ for _k,_v in [("logged_in",False),("username",""),("role",""),
 
 auth.init_auth()
 if not st.session_state.get("logged_in"):
-    st.warning("🔒 Please sign in from the main page.")
+    st.warning("Please sign in from the main page.")
     st.stop()
 if not auth.can("can_view_dashboard"):
-    st.error("⛔ Dashboard requires RQS or Admin role.")
+    st.error("Dashboard requires RQS or Admin role.")
     st.stop()
 if not PLOTLY_OK:
     st.error("Install plotly: `pip install plotly`")
     st.stop()
 
 with st.sidebar:
-    st.markdown("### 🧭 Navigate")
-    st.page_link("cleaning_scheduler.py", label="🧹 Cleaning Schedule")
-    st.page_link("pages/1_Dashboard.py", label="📊 Dashboard")
+    st.markdown("### Navigate")
+    st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
+    st.page_link("pages/1_Dashboard.py", label="Dashboard")
     if st.session_state.get("role","") == "admin":
-        st.page_link("pages/2_Admin.py", label="⚙️ Admin")
+        st.page_link("pages/2_Admin.py", label="Admin")
     st.markdown("---")
     _u = st.session_state.get("display_name","") or st.session_state.get("username","")
     _r = st.session_state.get("role","")
@@ -200,7 +200,7 @@ section[data-testid="stSidebar"]{background:rgba(22,22,30,.55)!important;backdro
 </style>""", unsafe_allow_html=True)
 
 # Plotly font color follows theme
-_PLOT_FONT = "#1e293b" if _THEME.endswith("light") else "#e2e8f0"
+_PLOT_FONT = "#1e293b"if _THEME.endswith("light") else "#e2e8f0"
 
 # Chart palette — brighter on dark, deeper on light
 if _THEME.endswith("light"):
@@ -268,11 +268,11 @@ if fg:
 
 log = get_log()
 
-st.markdown('<p class="pg-title">📊 Performance Dashboard</p>', unsafe_allow_html=True)
+st.markdown('<p class="pg-title"> Performance Dashboard</p>', unsafe_allow_html=True)
 st.markdown('<p class="pg-sub">Daily · weekly · monthly metrics</p>', unsafe_allow_html=True)
 
 if not log:
-    st.info("💡 No data yet. Generate a schedule on the main page first.")
+    st.info("No data yet. Generate a schedule on the main page first.")
     st.stop()
 
 today     = date.today()
@@ -319,7 +319,7 @@ def agg_insp(snaps):
     return out
 
 tab_hk, tab_insp, tab_log, tab_manage = st.tabs([
-    "🧑‍🔧 Housekeepers","🔍 Inspectors","📅 Daily Log","🗂 Manage"])
+    "Housekeepers","Inspectors","Daily Log","Manage"])
 
 # ── HK tab ────────────────────────────────────────────────────────────────────
 with tab_hk:
@@ -355,18 +355,18 @@ with tab_hk:
 
         st.markdown('<p class="sec">Rooms Cleaned by Service Type</p>', unsafe_allow_html=True)
         if df["Total"].sum() == 0:
-            st.info("ℹ️ No room data yet. Generate a schedule and revisit.")
+            st.info("ℹ No room data yet. Generate a schedule and revisit.")
         else:
             dfc = df.sort_values("Total",ascending=True)
             fig = go.Figure()
             fig.add_trace(go.Bar(name="Full Clean",y=dfc["HK"],x=dfc["FC"],orientation="h",
-                marker_color=BLUE,text=[str(v) if v>0 else "" for v in dfc["FC"]],
+                marker_color=BLUE,text=[str(v) if v>0 else ""for v in dfc["FC"]],
                 textposition="inside",hovertemplate="<b>%{y}</b> FC: %{x}<extra></extra>"))
             fig.add_trace(go.Bar(name="Daily Service",y=dfc["HK"],x=dfc["DS"],orientation="h",
-                marker_color=TEAL,text=[str(v) if v>0 else "" for v in dfc["DS"]],
+                marker_color=TEAL,text=[str(v) if v>0 else ""for v in dfc["DS"]],
                 textposition="inside",hovertemplate="<b>%{y}</b> DS: %{x}<extra></extra>"))
             fig.add_trace(go.Bar(name="Dust & Vac",y=dfc["HK"],x=dfc["DV"],orientation="h",
-                marker_color=AMBER,text=[str(v) if v>0 else "" for v in dfc["DV"]],
+                marker_color=AMBER,text=[str(v) if v>0 else ""for v in dfc["DV"]],
                 textposition="inside",hovertemplate="<b>%{y}</b> DV: %{x}<extra></extra>"))
             fig.update_layout(barmode="stack",height=max(300,len(dfc)*26+80),
                 margin=dict(l=10,r=60,t=30,b=10),
@@ -381,7 +381,7 @@ with tab_hk:
         dft = df.sort_values("Avg Time",ascending=True)
         bc  = [TEAL if t>=330 else AMBER if t>=250 else RED for t in dft["Avg Time"]]
         ft  = go.Figure(go.Bar(y=dft["HK"],x=dft["Avg Time"],orientation="h",
-            marker_color=bc,opacity=.9,text=[f"{t}m" for t in dft["Avg Time"]],
+            marker_color=bc,opacity=.9,text=[f"{t}m"for t in dft["Avg Time"]],
             textposition="outside",
             hovertemplate="<b>%{y}</b><br>%{x} min/day<extra></extra>"))
         ft.add_vline(x=380,line_dash="dot",line_color=RED,annotation_text="380m cap")
@@ -434,7 +434,7 @@ with tab_insp:
 
         st.markdown('<p class="sec">Rooms Inspected</p>', unsafe_allow_html=True)
         if dfi["Rooms"].sum() == 0:
-            st.info("ℹ️ Inspector room counts are 0. Re-generate the schedule and revisit.")
+            st.info("ℹ Inspector room counts are 0. Re-generate the schedule and revisit.")
         else:
             dic = dfi.sort_values("Rooms",ascending=True)
             cr  = [RCOL.get(next((v["role"] for nm,v in id_.items() if nm==r),"FC"),PURPLE)
@@ -463,7 +463,7 @@ with tab_log:
         is_today = (d == str(today))
         nr=snap.get("total_rooms",0); ng=snap.get("n_groups",0)
         nh2=len(snap.get("hk",{})); ni2=len(snap.get("inspectors",{}))
-        lbl = f"{'📍 TODAY  ' if is_today else ''}📅 {d}  ·  {nr} rooms  ·  {ng} groups  ·  {nh2} HKs  ·  {ni2} inspectors"
+        lbl = f"{' TODAY' if is_today else ''} {d} · {nr} rooms · {ng} groups · {nh2} HKs · {ni2} inspectors"
         with st.expander(lbl, expanded=is_today):
             c1,c2 = st.columns(2)
             with c1:
@@ -487,7 +487,7 @@ with tab_manage:
     st.markdown('<p class="sec">Data Management</p>', unsafe_allow_html=True)
     m1,m2 = st.columns(2)
     with m1:
-        st.markdown("**📥 Export as CSV**")
+        st.markdown("** Export as CSV**")
         ar = []
         for snap in log:
             for hk,s in snap.get("hk",{}).items():
@@ -499,15 +499,15 @@ with tab_manage:
                     "Rooms":s.get("rooms",0),"Groups":s.get("groups",0),"Role":s.get("role","")})
         if ar:
             csv = pd.DataFrame(ar).to_csv(index=False).encode("utf-8")
-            st.download_button("⬇️ Download CSV",data=csv,
+            st.download_button("Download CSV",data=csv,
                 file_name="schedule_history.csv",mime="text/csv",use_container_width=True)
     with m2:
         if auth.can("can_delete_data"):
-            st.markdown("**🗑 Delete a Day**")
+            st.markdown("** Delete a Day**")
             dd = st.selectbox("Date",["— select —"]+all_dates)
             if st.button("Delete",type="secondary") and dd != "— select —":
                 db.delete_snapshot(dd); get_log.clear()
                 st.success(f"Deleted {dd}. Refresh to update.")
         else:
-            st.info("🔒 Only admins can delete data.")
+            st.info("Only admins can delete data.")
     st.caption(f"Records: {len(log)} day(s)")
