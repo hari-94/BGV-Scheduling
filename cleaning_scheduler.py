@@ -4048,9 +4048,13 @@ else:
 
     # ══════════════════════════════════════════════════════════════════════════════
     st.markdown("---")
+    # Service ordering for the download: Full Clean first, then IH, Daily Service,
+    # Dust n Vac; uncertain rooms after those; stayover/verify rooms dead last.
+    _SVC_ORDER = {SVC_FC:0, SVC_IH:1, SVC_DS:2, SVC_DV:3}
     export_rows=[]
     for g in fg:
         is_verify = g.get("verify_group", False)
+        svc_rank = _SVC_ORDER.get(g.get("service_type",""), 4)
         for r in g["rooms"]:
             export_rows.append({
                 "Room":r.get("room",""),"Service":r.get("service",""),
@@ -4059,19 +4063,22 @@ else:
                 # Verify rooms (stayover / P-U Models) get NO housekeeper or RQS
                 "HSKP":"" if is_verify else g.get("housekeeper",""),
                 "RQS":"" if is_verify else g.get("inspector",""),
-                "Notes":r.get("notes",""),"Status":r.get("status",""),
+                # Status is intentionally left BLANK in the downloaded file.
+                "Notes":r.get("notes",""),"Status":"",
                 "Carpet":"","Stripping":"","Arriving Guest":r.get("arriving",""),
                 # kept only for internal sort ordering below (dropped before export)
                 "_Group":("VERIFY — assign manually" if is_verify else g["label"]),
+                "_Svc":svc_rank,
                 "_Verify":"Yes" if is_verify else "No",
                 "_Uncertain":"Yes" if r.get("uncertain") else "No",
             })
     export_df = pd.DataFrame(export_rows)
-    # Order: confirmed groups first, then uncertain, then verify rooms dead last.
+    # Order: by service band (Full Clean → IH → Daily Service → Dust n Vac) with
+    # confirmed rooms first; then uncertain rooms; then stayover/verify rows last.
     if not export_df.empty and "_Verify" in export_df.columns:
-        normal      = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")].sort_values("_Group")
-        unconfirmed = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="Yes")].sort_values("_Group")
-        verify_rows = export_df[export_df["_Verify"]=="Yes"]
+        normal      = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")].sort_values(["_Svc","_Group"])
+        unconfirmed = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="Yes")].sort_values(["_Svc","_Group"])
+        verify_rows = export_df[export_df["_Verify"]=="Yes"].sort_values("_Group")
         export_df   = pd.concat([normal,unconfirmed,verify_rows],ignore_index=True)
     # Drop the internal sort-only helper columns so the file has exactly the
     # requested columns, in order.
@@ -4142,9 +4149,9 @@ else:
         for ci, h in enumerate(PH, 1):
             c = ws.cell(row=pr, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
         pr += 1
-        grand = 0
+        grand = 0; grand_rooms = 0
         for rqs, hks in piv.items():
-            rqs_total = 0; first_rqs = True
+            rqs_total = 0; rqs_rooms = 0; first_rqs = True
             for hk, items in hks.items():
                 hk_total = 0; first_hk = True
                 for it in items:
@@ -4156,20 +4163,60 @@ else:
                     t  = _to_int(tv)
                     ws.cell(row=pr, column=5, value=(t if str(tv) != "" else "")).font = reg
                     hk_total += t; first_rqs = False; first_hk = False; pr += 1
-                # Housekeeper subtotal
+                # Housekeeper subtotal (rooms in col 3, minutes in col 5)
                 ws.cell(row=pr, column=2, value=f"{hk} Total").font = bold
+                ws.cell(row=pr, column=3, value=f"{len(items)} room{'s' if len(items)!=1 else ''}").font = bold
                 ws.cell(row=pr, column=5, value=(hk_total or "")).font = bold
                 for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = sub_fl
-                rqs_total += hk_total; pr += 1
-            # RQS subtotal
+                rqs_total += hk_total; rqs_rooms += len(items); pr += 1
+            # RQS subtotal — total rooms for this RQS in col 3, total minutes in col 5
             ws.cell(row=pr, column=1, value=f"{rqs} Total").font = bold
+            ws.cell(row=pr, column=3, value=f"{rqs_rooms} room{'s' if rqs_rooms!=1 else ''}").font = bold
             ws.cell(row=pr, column=5, value=(rqs_total or "")).font = bold
             for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = rqs_fl
-            grand += rqs_total; pr += 1
-        # Grand total
+            grand += rqs_total; grand_rooms += rqs_rooms; pr += 1
+        # Grand total — total rooms across all RQS in col 3, total minutes in col 5
         ws.cell(row=pr, column=1, value="Grand Total").font = bold
+        ws.cell(row=pr, column=3, value=f"{grand_rooms} room{'s' if grand_rooms!=1 else ''}").font = bold
         ws.cell(row=pr, column=5, value=grand).font = bold
         for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = rqs_fl
+        pr += 1
+
+        # ── Light-workload summary: per RQS, the housekeepers whose Full Clean /
+        #    IH minutes fall below LOW_MIN, with their minutes and room counts, so
+        #    you can see at a glance who has spare capacity. Placed a couple of
+        #    rows below the pivot. ──────────────────────────────────────────────
+        pr += 2
+        lw_hdr = Font(name=FONT, size=11, bold=True, color="16202E")
+        ws.cell(row=pr, column=1, value="Light Workload by RQS "
+                f"(under {LOW_MIN} min)").font = lw_hdr
+        pr += 1
+        LW = ["RQS","HSKP","Total Time (min)","Room Count"]
+        for ci, h in enumerate(LW, 1):
+            c = ws.cell(row=pr, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
+        pr += 1
+        low_fill = PatternFill("solid", fgColor="FFF4E5")   # soft amber highlight
+        any_light = False
+        for rqs, hks in piv.items():
+            for hk, items in hks.items():
+                # only timed cleaning rooms count toward the workload figure
+                mins = sum(_to_int(it.get("Time (min)","")) for it in items)
+                # skip pure Dust n Vac / untimed groups and the blank bucket
+                timed = [it for it in items if str(it.get("Time (min)","")) != ""]
+                if not timed: continue
+                if hk == "(blank)": continue
+                if mins < LOW_MIN:
+                    any_light = True
+                    ws.cell(row=pr, column=1, value=rqs).font = reg
+                    ws.cell(row=pr, column=2, value=hk).font = reg
+                    ws.cell(row=pr, column=3, value=mins).font = reg
+                    ws.cell(row=pr, column=4, value=len(timed)).font = reg
+                    for ci in range(1, 5): ws.cell(row=pr, column=ci).fill = low_fill
+                    pr += 1
+        if not any_light:
+            ws.cell(row=pr, column=1,
+                    value="None — all housekeepers at or above the threshold.").font = reg
+            pr += 1
 
         ws.freeze_panes = "A2"
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
