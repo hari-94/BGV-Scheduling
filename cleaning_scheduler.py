@@ -3105,10 +3105,75 @@ if run:
     elif not present_hk:
         st.warning("No housekeepers marked as present.")
     else:
-        with st.spinner("⚡ Building schedule…"):
+        # ── Animated loading overlay (formal theme) ──────────────────────────
+        # A polished animation shown while the schedule is built. It cycles
+        # through the real pipeline stages so the wait feels purposeful.
+        _loader = st.empty()
+        _loader.markdown("""
+<style>
+@keyframes gc8spin { to { transform: rotate(360deg); } }
+@keyframes gc8pulse { 0%,100% { opacity:.35; } 50% { opacity:1; } }
+@keyframes gc8bar {
+  0% { left:-40%; width:40%; }
+  50% { width:55%; }
+  100% { left:100%; width:40%; }
+}
+@keyframes gc8fade { from { opacity:0; transform:translateY(4px);} to { opacity:1; transform:translateY(0);} }
+.gc8-wrap{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:44px 24px;margin:8px 0 4px;
+  background:#ffffff;border:1px solid #e2e5ea;border-radius:16px;
+  box-shadow:0 1px 3px rgba(20,32,54,.06),0 12px 30px rgba(20,32,54,.05);
+  animation:gc8fade .4s ease both;
+}
+.gc8-ring{
+  width:54px;height:54px;border-radius:50%;
+  border:4px solid #e6eaf1;border-top-color:#2563a8;
+  animation:gc8spin .8s linear infinite;margin-bottom:20px;
+}
+.gc8-title{
+  font-family:'Syne',sans-serif;font-weight:700;font-size:1.12rem;
+  color:#16202e;letter-spacing:-.01em;margin-bottom:6px;
+}
+.gc8-sub{
+  font-family:'DM Sans',sans-serif;font-size:.82rem;color:#5b6675;
+  margin-bottom:20px;min-height:1.1em;
+}
+.gc8-track{
+  position:relative;width:min(340px,80%);height:6px;border-radius:99px;
+  background:#eceef1;overflow:hidden;
+}
+.gc8-fill{
+  position:absolute;top:0;height:100%;border-radius:99px;
+  background:linear-gradient(90deg,#2563a8,#4b8bd0);
+  animation:gc8bar 1.35s cubic-bezier(.65,0,.35,1) infinite;
+}
+.gc8-steps{
+  display:flex;gap:18px;margin-top:22px;flex-wrap:wrap;justify-content:center;
+  font-family:'DM Mono',monospace;font-size:.68rem;letter-spacing:.03em;
+  text-transform:uppercase;color:#8a93a1;
+}
+.gc8-steps span{animation:gc8pulse 1.4s ease-in-out infinite;}
+.gc8-steps span:nth-child(2){animation-delay:.2s;}
+.gc8-steps span:nth-child(3){animation-delay:.4s;}
+.gc8-steps span:nth-child(4){animation-delay:.6s;}
+.gc8-steps span:nth-child(5){animation-delay:.8s;}
+</style>
+<div class="gc8-wrap">
+  <div class="gc8-ring"></div>
+  <div class="gc8-title">Building your schedule</div>
+  <div class="gc8-sub">Packing rooms into the fewest, tidiest charts…</div>
+  <div class="gc8-track"><div class="gc8-fill"></div></div>
+  <div class="gc8-steps">
+    <span>Parsing</span><span>Grouping</span><span>Floors</span><span>Assigning</span><span>Inspectors</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+        if True:
             try:
                 df = parse_rooms(raw_input)
                 if df.empty:
+                    _loader.empty()
                     st.error("No valid rows — check tab-separated data with a header row.")
                 else:
                     email_data      = parse_email_notes(email_text)
@@ -3213,8 +3278,10 @@ if run:
                     except Exception:
                         pass
 
+                    _loader.empty()
                     st.success(f"✅ Schedule generated — {len(fg)} groups from {len(df)} rooms.")
             except Exception as ex:
+                _loader.empty()
                 st.error(f"Error: {ex}")
                 import traceback; st.code(traceback.format_exc())
 
