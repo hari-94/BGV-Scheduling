@@ -133,7 +133,7 @@ DEFAULT_HK = {
     2: ["Liliana L","DIANIS","Cecilia Angeles","Elibeth Herrera","Jenifer S.",
         "Norma E","Santos","Yadira","Senia","Gloria R.","Ana Centeno","Camila O","DANIA","Andres"],
     3: ["JENNI CAICEDO","Federico","Nancy","Minoska","Lourdes","AMALIA",
-        "Elizabeth","Jorge Luis","Lorena","Nury","Lilliam","Janiris",
+        "Elizabeth","Lorena","Nury","Lilliam","Janiris",
         "Luis Urbina","Ana Hernandez","JOSSELIN"],
 }
 DEFAULT_INSPECTORS = [
