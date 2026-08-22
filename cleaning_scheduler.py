@@ -133,7 +133,7 @@ DEFAULT_HK = {
     2: ["Liliana L","DIANIS","Cecilia Angeles","Elibeth Herrera","Jenifer S.",
         "Norma E","Santos","Yadira","Senia","Gloria R.","Ana Centeno","Camila O","DANIA","Andres"],
     3: ["JENNI CAICEDO","Federico","Nancy","Minoska","Lourdes","AMALIA",
-        "Elizabeth","Lorena","Nury","Lilliam","Janiris",
+        "Elizabeth","Jorge Luis","Lorena","Nury","Lilliam","Janiris",
         "Luis Urbina","Ana Hernandez","JOSSELIN"],
 }
 DEFAULT_INSPECTORS = [
@@ -1074,7 +1074,7 @@ def parse_email_notes(text: str) -> dict:
     ROOM_RE = re.compile(r'\b([1-9]\d{3}[A-Z]{1,4})\b')
     TIME_RE = re.compile(r'\b(\d{1,2}:\d{2}\s*(?:am|pm))\b', re.IGNORECASE)
     SECTION_RE = re.compile(r'^([A-Za-z][A-Za-z &\'/]+):\s*$')
-    MOVE_RE = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*[-\u2013]\s*([1-9]\d{3}[A-Z]{1,4})')
+    MOVE_RE = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*[-\u2013>\u2192]+\s*([1-9]\d{3}[A-Z]{1,4})')
     CELEB_RE = re.compile(r'^(Birthday|Anniversary|Misc\.?)$', re.IGNORECASE)
     DEBULLET = re.compile(r'^[\s\t]*[*\u2022\u25e6\u2023\u2043\-]?\s*')
     NOTE_LABELS = {
@@ -2995,11 +2995,17 @@ with st.sidebar:
             c_all, c_none = st.columns(2)
             with c_all:
                 if st.button("Select all", key=f"selall_b{bld}", use_container_width=True):
-                    for _n in bld_hks: roster[_n]["present"] = True
+                    for _n in bld_hks:
+                        roster[_n]["present"] = True
+                        # also update the checkbox widget's own state so the tick
+                        # reflects the change after rerun
+                        st.session_state[f"att_{_n}"] = True
                     _persist_roster(); st.rerun()
             with c_none:
                 if st.button("Unselect all", key=f"selnone_b{bld}", use_container_width=True):
-                    for _n in bld_hks: roster[_n]["present"] = False
+                    for _n in bld_hks:
+                        roster[_n]["present"] = False
+                        st.session_state[f"att_{_n}"] = False
                     _persist_roster(); st.rerun()
 
             # ── Bulk replace: paste a list of names (e.g. from Excel) to replace
@@ -3046,7 +3052,14 @@ with st.sidebar:
             for name in bld_hks:
                 c_chk, c_name, c_left, c_right = st.columns([0.4,3.2,0.6,0.6])
                 with c_chk:
-                    checked = st.checkbox("", value=roster[name]["present"], key=f"att_{name}", label_visibility="collapsed")
+                    # Seed the widget's state from the roster once; thereafter the
+                    # widget (and Select/Unselect all, which write the same key)
+                    # drives the value. Passing both value= and an existing key
+                    # would conflict, so we only set the key.
+                    _ck = f"att_{name}"
+                    if _ck not in st.session_state:
+                        st.session_state[_ck] = roster[name]["present"]
+                    checked = st.checkbox("", key=_ck, label_visibility="collapsed")
                     if roster[name]["present"] != checked:
                         roster[name]["present"] = checked
                         _persist_roster()
@@ -3751,17 +3764,34 @@ else:
         # ── Build one row per housekeeper, grouped under their RQS (like the
         #    pivot). Verify/blank-housekeeper groups collect under "Unassigned". ─
         by_hk = {}   # hk_name -> {"insp":str, "bld":set, "rooms":[...], "time":int}
+        def _room_is_unalloc(r):
+            return str(r.get("guest","")).strip().lower() in ("unallocated","---","")
         for g in fg:
             hk   = g.get("housekeeper","") or ("Unassigned" if g.get("verify_group") else "")
             insp = g.get("inspector","")
             svc  = g.get("service_type","")
             if not hk: hk = "Unassigned"
-            rec = by_hk.setdefault(hk, {"insp":set(), "bld":set(), "rooms":[], "time":0})
-            if insp: rec["insp"].add(insp)
-            for r in g["rooms"]:
-                rec["bld"].add(r.get("bld",0))
-                rec["rooms"].append({**r, "_svc":svc})
-            rec["time"] += g["time"]
+            # Unallocated Full Clean / IH rooms are left for manual assignment (same
+            # as the Excel download): show them under "Unassigned" with no RQS,
+            # rather than pre-assigning a housekeeper. Dust n Vac keeps RQS 2 and
+            # Daily Service keeps its assignment, so only FC/IH are rerouted.
+            unalloc_here = svc in (SVC_FC, SVC_IH) and not g.get("verify_group")
+            alloc_rooms   = [r for r in g["rooms"] if not (unalloc_here and _room_is_unalloc(r))]
+            unalloc_rooms = [r for r in g["rooms"] if      unalloc_here and _room_is_unalloc(r)]
+
+            if alloc_rooms:
+                rec = by_hk.setdefault(hk, {"insp":set(), "bld":set(), "rooms":[], "time":0})
+                if insp: rec["insp"].add(insp)
+                for r in alloc_rooms:
+                    rec["bld"].add(r.get("bld",0))
+                    rec["rooms"].append({**r, "_svc":svc})
+                    rec["time"] += r.get("time",0)
+            if unalloc_rooms:
+                rec = by_hk.setdefault("Unassigned", {"insp":set(), "bld":set(), "rooms":[], "time":0})
+                for r in unalloc_rooms:
+                    rec["bld"].add(r.get("bld",0))
+                    rec["rooms"].append({**r, "_svc":svc})
+                    rec["time"] += r.get("time",0)
 
         def _keep(hk, rec):
             if _fhk  != "All" and hk != _fhk: return False
