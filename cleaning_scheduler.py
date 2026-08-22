@@ -3208,75 +3208,82 @@ st.markdown(f'<p class="pg-title">Good morning, {_first_name}! </p>', unsafe_all
 st.markdown(f'<p class="pg-sub">{_welcome_msg}</p>', unsafe_allow_html=True)
 
 st.markdown("---")
-col_data, col_cfg = st.columns([5,1], gap="medium")
-with col_data:
-    st.markdown('<p class="sec"> Room Data + Front-Desk Email</p>', unsafe_allow_html=True)
-    inp_a, inp_b = st.columns([3,2], gap="small")
-    with inp_a:
-        # ── Upload the Housekeeping Dashboard .xlsx directly (optional) ────────
-        # Alternative to copy-paste: an uploaded file is converted to the same
-        # tab-separated text the paste box uses and run through the exact same
-        # parser, so nothing downstream changes. We push the converted text into
-        # the text-area's session_state (tracking which file we've already read,
-        # so re-runs don't clobber manual edits) rather than passing value=,
-        # which avoids Streamlit's value/key conflict warning.
-        if auth.can("can_paste_input"):
-            _xl = st.file_uploader("Upload Housekeeping Dashboard (.xlsx)",
-                                   type=["xlsx"], key="room_xlsx",
-                                   help="Optional — upload the exported dashboard instead of pasting.")
-            if _xl is not None:
-                _sig = f"{_xl.name}:{getattr(_xl,'size','?')}"
-                if st.session_state.get("_room_xlsx_sig") != _sig:
-                    try:
-                        _txt, _n_up, _sheet_up = excel_to_room_text(_xl)
-                        st.session_state["room_input"] = _txt
-                        st.session_state["_room_xlsx_sig"] = _sig
-                        st.session_state["_room_xlsx_msg"] = (
-                            "ok", f"Read {_n_up} rooms from '{_sheet_up}'. "
-                                  f"Click Generate to build the schedule.")
-                    except ImportError:
-                        st.session_state["_room_xlsx_sig"] = _sig
-                        st.session_state["_room_xlsx_msg"] = (
-                            "err", "The .xlsx reader isn't installed on the server yet "
-                                   "(openpyxl). Once the app redeploys it'll work — for "
-                                   "now you can copy-paste the data below.")
-                    except Exception as _e:
-                        st.session_state["_room_xlsx_sig"] = _sig
-                        st.session_state["_room_xlsx_msg"] = (
-                            "err", f"Couldn't read that file: {_e}. "
-                                   f"You can still copy-paste the data below.")
-                _msg = st.session_state.get("_room_xlsx_msg")
-                if _msg:
-                    if _msg[0] == "ok":
-                        st.caption(_msg[1])
-                    else:
-                        st.error(_msg[1])
-        raw_input = st.text_area("rooms", label_visibility="collapsed", height=230,
-            disabled=not auth.can("can_paste_input"),
-            placeholder="Room\tService\tTime\tPet\tCurrent Guest or Status\n1020D\tFull Clean\t120\t\tSmith, John",
-            key="room_input")
-        st.caption("Upload the .xlsx above, or copy-paste from Excel (include header row).")
-    with inp_b:
-        email_text = st.text_area("email", label_visibility="collapsed", height=230,
-            disabled=not auth.can("can_paste_input"),
-            placeholder="Paste today's front-desk email...\n\nLate Checkouts:\n* 10:30 am\n * 1234A",
-            key="email_input")
-        st.caption("Late checkouts, room moves, notes auto-matched.")
-with col_cfg:
-    st.markdown('<p class="sec"></p>', unsafe_allow_html=True)
-    _today_bg = ("rgba(255,255,255,.7)" if _IS_GLASS else "#ffffff") if _IS_LIGHT else ("rgba(40,40,52,.5)" if _IS_GLASS else "rgba(255,255,255,.03)")
-    _today_br = "rgba(99,102,241,.18)"
-    _today_hd = "#0f172a" if _IS_LIGHT else "#e2e8f0"
-    _today_tx = "#475569" if _IS_LIGHT else "#94a3b8"
-    st.markdown(f'<div style="background:{_today_bg};border:1px solid {_today_br};border-radius:10px;'
-                f'padding:11px 13px;font-size:.78rem;color:{_today_tx};margin-bottom:10px">'
-                f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">Today</div>'
-                f'<div> <b>{len(present_hk)}</b> HKs present</div>'
-                f'<div> <b>{len(present_insp)}</b> inspectors</div></div>', unsafe_allow_html=True)
-    _can_gen = auth.can("can_generate")
-    run = st.button("Generate", type="primary", use_container_width=True,
-                    disabled=not _can_gen,
-                    help="" if _can_gen else "Housekeeper role — view only")
+# Once a schedule has been generated, collapse the upload/paste inputs so the
+# dashboard (metrics + table) is front and center. The section can be reopened
+# any time to re-upload or edit and regenerate.
+_has_sched = bool(st.session_state.get("groups_data"))
+_inp_exp = st.expander("Room Data + Front-Desk Email"
+                       + ("  —  tap to edit / regenerate" if _has_sched else ""),
+                       expanded=not _has_sched)
+with _inp_exp:
+    col_data, col_cfg = st.columns([5,1], gap="medium")
+    with col_data:
+        inp_a, inp_b = st.columns([3,2], gap="small")
+        with inp_a:
+            # ── Upload the Housekeeping Dashboard .xlsx directly (optional) ────────
+            # Alternative to copy-paste: an uploaded file is converted to the same
+            # tab-separated text the paste box uses and run through the exact same
+            # parser, so nothing downstream changes. We push the converted text into
+            # the text-area's session_state (tracking which file we've already read,
+            # so re-runs don't clobber manual edits) rather than passing value=,
+            # which avoids Streamlit's value/key conflict warning.
+            if auth.can("can_paste_input"):
+                _xl = st.file_uploader("Upload Housekeeping Dashboard (.xlsx)",
+                                       type=["xlsx"], key="room_xlsx",
+                                       help="Optional — upload the exported dashboard instead of pasting.")
+                if _xl is not None:
+                    _sig = f"{_xl.name}:{getattr(_xl,'size','?')}"
+                    if st.session_state.get("_room_xlsx_sig") != _sig:
+                        try:
+                            _txt, _n_up, _sheet_up = excel_to_room_text(_xl)
+                            st.session_state["room_input"] = _txt
+                            st.session_state["_room_xlsx_sig"] = _sig
+                            st.session_state["_room_xlsx_msg"] = (
+                                "ok", f"Read {_n_up} rooms from '{_sheet_up}'. "
+                                      f"Click Generate to build the schedule.")
+                        except ImportError:
+                            st.session_state["_room_xlsx_sig"] = _sig
+                            st.session_state["_room_xlsx_msg"] = (
+                                "err", "The .xlsx reader isn't installed on the server yet "
+                                       "(openpyxl). Once the app redeploys it'll work — for "
+                                       "now you can copy-paste the data below.")
+                        except Exception as _e:
+                            st.session_state["_room_xlsx_sig"] = _sig
+                            st.session_state["_room_xlsx_msg"] = (
+                                "err", f"Couldn't read that file: {_e}. "
+                                       f"You can still copy-paste the data below.")
+                    _msg = st.session_state.get("_room_xlsx_msg")
+                    if _msg:
+                        if _msg[0] == "ok":
+                            st.caption(_msg[1])
+                        else:
+                            st.error(_msg[1])
+            raw_input = st.text_area("rooms", label_visibility="collapsed", height=230,
+                disabled=not auth.can("can_paste_input"),
+                placeholder="Room\tService\tTime\tPet\tCurrent Guest or Status\n1020D\tFull Clean\t120\t\tSmith, John",
+                key="room_input")
+            st.caption("Upload the .xlsx above, or copy-paste from Excel (include header row).")
+        with inp_b:
+            email_text = st.text_area("email", label_visibility="collapsed", height=230,
+                disabled=not auth.can("can_paste_input"),
+                placeholder="Paste today's front-desk email...\n\nLate Checkouts:\n* 10:30 am\n * 1234A",
+                key="email_input")
+            st.caption("Late checkouts, room moves, notes auto-matched.")
+    with col_cfg:
+        st.markdown('<p class="sec"></p>', unsafe_allow_html=True)
+        _today_bg = ("rgba(255,255,255,.7)" if _IS_GLASS else "#ffffff") if _IS_LIGHT else ("rgba(40,40,52,.5)" if _IS_GLASS else "rgba(255,255,255,.03)")
+        _today_br = "rgba(99,102,241,.18)"
+        _today_hd = "#0f172a" if _IS_LIGHT else "#e2e8f0"
+        _today_tx = "#475569" if _IS_LIGHT else "#94a3b8"
+        st.markdown(f'<div style="background:{_today_bg};border:1px solid {_today_br};border-radius:10px;'
+                    f'padding:11px 13px;font-size:.78rem;color:{_today_tx};margin-bottom:10px">'
+                    f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">Today</div>'
+                    f'<div> <b>{len(present_hk)}</b> HKs present</div>'
+                    f'<div> <b>{len(present_insp)}</b> inspectors</div></div>', unsafe_allow_html=True)
+        _can_gen = auth.can("can_generate")
+        run = st.button("Generate", type="primary", use_container_width=True,
+                        disabled=not _can_gen,
+                        help="" if _can_gen else "Housekeeper role — view only")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SNAPSHOT
