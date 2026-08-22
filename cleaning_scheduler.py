@@ -1111,8 +1111,11 @@ def parse_email_notes(text: str) -> dict:
             for mv in MOVE_RE.finditer(content.upper()):
                 for rf in expand_compound_room(mv.group(1)):
                     for rt in expand_compound_room(mv.group(2)):
-                        notes.setdefault(rf, []).append(f"Room Move {rt}")
-                        notes.setdefault(rt, []).append(f"Room Move {rf}")
+                        # Tag BOTH rooms with the full move so origin and
+                        # destination are both visible, e.g. "Room Move 2234A>2234B".
+                        move_txt = f"Room Move {rf}>{rt}"
+                        notes.setdefault(rf, []).append(move_txt)
+                        notes.setdefault(rt, []).append(move_txt)
             continue
         if section == "celebrations":
             cm = CELEB_RE.match(content)
@@ -2504,6 +2507,12 @@ def _insp_combined_score(batches):
     cx = [_batch_complexity(b) for b in nonempty]
     hv = [_batch_heavy(b) for b in nonempty]
     hc = [_batch_heavy_charts(b) for b in nonempty]
+    # Worst single inspector's travel: minimizing the SUM alone can still leave
+    # one inspector hauling all over the property while the rest are tight. Adding
+    # the maximum individual travel makes the optimizer actively pull work off the
+    # worst-travelling RQS, evening out travel rather than just totalling it.
+    travels = [_insp_travel_score(b) for b in nonempty]
+    worst_travel = max(travels) if travels else 0
     # Count inspectors forced across all 3 buildings — this is the worst case
     # for an inspector and must be avoided even at the cost of heavy-work
     # balance. Each such batch adds an overriding penalty that dwarfs the
@@ -2528,6 +2537,7 @@ def _insp_combined_score(batches):
             + (max(hc)-min(hc))*14
             + (max(hv)-min(hv))*8
             + tt*2
+            + worst_travel*3
             + (max(cx)-min(cx)))
 
 def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
@@ -2566,20 +2576,46 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     leftover_fc = fc_sorted[coverable:] # only these need RQS1/RQS2 help
 
     batches=[dedicated_fc[i:i+per] for i in range(0,len(dedicated_fc),per)]
-    # Balance batches to reduce cross-building travel
-    improved=True; max_iter=len(batches)*per*2 if batches else 0; iters=0
-    while improved and iters<max_iter:
-        improved=False; iters+=1
-        for bi in range(len(batches)):
-            for bj in range(bi+1,len(batches)):
-                for gi,ga in enumerate(batches[bi]):
-                    for gj,gb in enumerate(batches[bj]):
-                        new_bi=batches[bi][:gi]+[gb]+batches[bi][gi+1:]
-                        new_bj=batches[bj][:gj]+[ga]+batches[bj][gj+1:]
-                        if _insp_combined_score([new_bi,new_bj])<_insp_combined_score([batches[bi],batches[bj]]):
-                            batches[bi],batches[bj]=new_bi,new_bj; improved=True; break
+    # Balance batches to reduce cross-building and floor travel. Run several full
+    # passes; each pass keeps swapping charts between batches while any swap lowers
+    # the combined score (which now also penalizes the single worst-travelling
+    # inspector), so we don't settle for a solution where one RQS roams.
+    def _optimize_batches(batches):
+        improved=True; max_iter=(len(batches)*per*4 if batches else 0); iters=0
+        while improved and iters<max_iter:
+            improved=False; iters+=1
+            for bi in range(len(batches)):
+                for bj in range(bi+1,len(batches)):
+                    for gi,ga in enumerate(batches[bi]):
+                        for gj,gb in enumerate(batches[bj]):
+                            new_bi=batches[bi][:gi]+[gb]+batches[bi][gi+1:]
+                            new_bj=batches[bj][:gj]+[ga]+batches[bj][gj+1:]
+                            if _insp_combined_score([new_bi,new_bj])<_insp_combined_score([batches[bi],batches[bj]]):
+                                batches[bi],batches[bj]=new_bi,new_bj; improved=True; break
+                        if improved: break
                     if improved: break
-                if improved: break
+        return batches
+    batches=_optimize_batches(batches)
+    # Extra pass: explicitly target the worst-travelling batch and try to hand its
+    # farthest-out chart to a batch that can absorb it more cheaply.
+    for _ in range(len(batches)):
+        if len(batches)<2: break
+        tscore=[(_insp_travel_score(b),i) for i,b in enumerate(batches) if b]
+        if not tscore: break
+        _, wi = max(tscore)
+        moved=False
+        for gi,ga in enumerate(batches[wi]):
+            for bj in range(len(batches)):
+                if bj==wi or not batches[bj]: continue
+                for gj,gb in enumerate(batches[bj]):
+                    new_wi=batches[wi][:gi]+[gb]+batches[wi][gi+1:]
+                    new_bj=batches[bj][:gj]+[ga]+batches[bj][gj+1:]
+                    if _insp_combined_score([new_wi,new_bj])<_insp_combined_score([batches[wi],batches[bj]]):
+                        batches[wi],batches[bj]=new_wi,new_bj; moved=True; break
+                if moved: break
+            if moved: break
+        if not moved: break
+        batches=_optimize_batches(batches)
     fc_inspectors_q = list(fc_inspectors)
     for batch in batches:
         if not batch: continue
