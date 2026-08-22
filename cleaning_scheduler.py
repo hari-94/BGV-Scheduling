@@ -2455,6 +2455,16 @@ def _insp_travel_score(batch):
     spread=0
     for b,fs in floors_by_bld.items():
         if fs: spread += (max(fs)-min(fs))
+    # Non-sequential penalty: an inspector should cover a CONTIGUOUS band of
+    # floors (e.g. 2-3-4), not hop over gaps (e.g. 2 then 5). For each building we
+    # count the missing floors between the lowest and highest floor the inspector
+    # visits — every gap floor is extra elevator/stair travel — and penalize it
+    # heavily so the optimizer keeps each inspector on sequential floors.
+    gap=0
+    for b,fs in floors_by_bld.items():
+        if len(fs) > 1:
+            lo, hi = min(fs), max(fs)
+            gap += (hi - lo + 1) - len(fs)   # count of skipped floors in the band
     # Horizontal spread: how far apart the room numbers are within each building
     # (walking down a long hall). Grouping physically close rooms cuts RQS travel.
     nums_by_bld={}
@@ -2473,7 +2483,8 @@ def _insp_travel_score(batch):
     # 3-building inspector as nearly forbidden.
     nbld = len(blds)
     three_bld_penalty = 400 if nbld >= 3 else 0
-    return nbld*12 + three_bld_penalty + cross*4 + len(floor_keys)*3 + spread*2 + hspread
+    return (nbld*12 + three_bld_penalty + cross*4 + len(floor_keys)*3
+            + spread*2 + gap*8 + hspread)
 def _batch_heavy(batch):
     """Count of big rooms (120/140 min) across a batch — used to spread the
     hard-to-inspect rooms evenly across inspectors."""
@@ -4406,6 +4417,13 @@ td{{transition:background .15s ease}}
             _blank_assign = _is_unalloc and _svc_type in (SVC_FC, SVC_IH)
             _hskp = "" if (is_verify or _blank_assign) else g.get("housekeeper","")
             _rqs  = "" if (is_verify or _blank_assign) else g.get("inspector","")
+            # Fold the late-checkout into Notes so it shows in the download. Format
+            # as "Late Out: <time>" and keep any existing room note alongside it.
+            _note = (r.get("notes","") or "").strip()
+            _lc = (r.get("late_checkout","") or "").strip()
+            if _lc:
+                _lc_txt = _lc if _lc.lower().startswith("late out") else f"Late Out: {_lc}"
+                _note = f"{_lc_txt}" + (f" · {_note}" if _note else "")
             export_rows.append({
                 "Room":r.get("room",""),"Service":r.get("service",""),
                 "Time (min)":r.get("time",""),"Pet":r.get("pet",""),
@@ -4413,7 +4431,7 @@ td{{transition:background .15s ease}}
                 "HSKP":_hskp,
                 "RQS":_rqs,
                 # Status is intentionally left BLANK in the downloaded file.
-                "Notes":r.get("notes",""),"Status":"",
+                "Notes":_note,"Status":"",
                 "Carpet":"","Stripping":"","Arriving Guest":r.get("arriving",""),
                 # kept only for internal sort ordering below (dropped before export)
                 "_Group":("VERIFY — assign manually" if is_verify else g["label"]),
