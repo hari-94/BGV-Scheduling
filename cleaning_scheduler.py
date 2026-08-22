@@ -2953,11 +2953,11 @@ with st.sidebar:
                 n = new_hk_name.strip()
                 if n and n not in st.session_state["hk_roster"]:
                     st.session_state["hk_roster"][n] = {"building":new_hk_bld,"present":True}
-                    _persist_roster(); st.success(f"Added {n}")
+                    _persist_roster(); st.rerun()
             rm_hk = st.selectbox("Remove", ["—"]+list(st.session_state["hk_roster"].keys()), key="rm_hk_sel")
             if st.button("Remove", key="btn_rm_hk") and rm_hk != "—":
                 del st.session_state["hk_roster"][rm_hk]
-                _persist_roster(); st.success(f"Removed {rm_hk}")
+                _persist_roster(); st.rerun()
 
         st.markdown("### Housekeepers")
         st.caption("Check to mark present. Use the arrow buttons to move between buildings.")
@@ -2991,6 +2991,17 @@ with st.sidebar:
                 f'</div>',
                 unsafe_allow_html=True)
 
+            # ── Select all / none for this building ──────────────────────────
+            c_all, c_none = st.columns(2)
+            with c_all:
+                if st.button("Select all", key=f"selall_b{bld}", use_container_width=True):
+                    for _n in bld_hks: roster[_n]["present"] = True
+                    _persist_roster(); st.rerun()
+            with c_none:
+                if st.button("Unselect all", key=f"selnone_b{bld}", use_container_width=True):
+                    for _n in bld_hks: roster[_n]["present"] = False
+                    _persist_roster(); st.rerun()
+
             # ── Bulk replace: paste a list of names (e.g. from Excel) to replace
             # ALL housekeepers currently in this building ────────────────────
             with st.expander(f"Bulk set Building {bld} names"):
@@ -3001,7 +3012,8 @@ with st.sidebar:
                     label_visibility="collapsed")
                 if st.button(f"Replace Building {bld} list", key=f"bulk_apply_b{bld}",
                              use_container_width=True):
-                    # Parse: split on newlines and commas, trim, drop blanks/dupes
+                    # Parse: split on newlines and commas, trim, drop blanks/dupes,
+                    # PRESERVING the pasted order.
                     raw = re.split(r'[\n,]+', _bulk or "")
                     new_names = []
                     seen = set()
@@ -3010,10 +3022,18 @@ with st.sidebar:
                         if nm and nm.lower() not in seen:
                             seen.add(nm.lower()); new_names.append(nm)
                     if new_names:
-                        # Remove every current HK in this building, then add the new
-                        # list. Housekeepers in OTHER buildings are untouched.
+                        # 1) Remove everyone currently in THIS building.
                         for _n in [n for n,v in roster.items() if v["building"]==bld]:
                             del roster[_n]
+                        # 2) Remove any pasted name that already exists in ANOTHER
+                        #    building, so the name lives ONLY in the new building
+                        #    (no duplicates across buildings).
+                        _new_lower = {nm.lower() for nm in new_names}
+                        for _n in [n for n in roster if n.lower() in _new_lower]:
+                            del roster[_n]
+                        # 3) Rebuild this building in the exact pasted order. Because
+                        #    dict preserves insertion order, appending them now keeps
+                        #    the order you pasted.
                         for _n in new_names:
                             roster[_n] = {"building":bld, "present":True}
                         st.session_state["hk_roster"] = roster
@@ -3046,15 +3066,12 @@ with st.sidebar:
                             roster[name]["building"] = bld+1; _persist_roster(); st.rerun()
                 if roster[name]["present"]: present_hk.append(name)
 
-        # Persist HK attendance immediately so it survives logout/login.
+        # Persist HK attendance immediately so it survives logout/login. The
+        # authoritative store is the 'roster' record (via _persist_roster); we no
+        # longer double-write to save_full_schedule, which used a different key and
+        # could resurrect deleted names.
         if roster != _hk_before:
-            try:
-                _existing = db.load_full_schedule() or {}
-                _existing["hk_roster"] = dict(roster)
-                _existing["insp_roster"] = dict(st.session_state.get("insp_roster",{}))
-                db.save_full_schedule(_existing)
-            except Exception:
-                pass
+            _persist_roster()
 
         st.markdown("---")
         with st.expander("Add / Remove Inspector"):
@@ -3062,10 +3079,10 @@ with st.sidebar:
             if st.button("Add Inspector", key="btn_add_insp"):
                 n = new_insp.strip()
                 if n and n not in st.session_state["insp_roster"]:
-                    st.session_state["insp_roster"][n]=True; _persist_roster(); st.success(f"Added {n}")
+                    st.session_state["insp_roster"][n]=True; _persist_roster(); st.rerun()
             rm_insp = st.selectbox("Remove",["—"]+list(st.session_state["insp_roster"].keys()),key="rm_insp_sel")
             if st.button("Remove", key="btn_rm_insp") and rm_insp != "—":
-                del st.session_state["insp_roster"][rm_insp]; _persist_roster(); st.success(f"Removed {rm_insp}")
+                del st.session_state["insp_roster"][rm_insp]; _persist_roster(); st.rerun()
 
         st.markdown("### Inspectors")
         insp_roster = st.session_state["insp_roster"]
@@ -3080,13 +3097,7 @@ with st.sidebar:
             # clear cached RQS role picks so they re-pick from the new order
             for _k in ("rqs1","rqs2"):
                 if _k in st.session_state: st.session_state[_k] = ""
-            try:
-                _existing = db.load_full_schedule() or {}
-                _existing["insp_roster"] = dict(insp_roster)
-                _existing["hk_roster"] = dict(st.session_state.get("hk_roster",{}))
-                db.save_full_schedule(_existing)
-            except Exception:
-                pass
+            _persist_roster()
             st.toast("RQS order shuffled")
             st.rerun()
         present_insp = []
