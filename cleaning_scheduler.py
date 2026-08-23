@@ -4141,12 +4141,17 @@ td{{transition:background .15s ease}}
             return "".join(svs) or '<span style="color:#9aa4b2">—</span>'
 
         # Housekeeper rows
-        _hk_low = []   # (name, load_str, load_col, nrooms, svc_html, rqs_str, kind)
+        _hk_low = []   # (name, load_str, load_col, nrooms, svc_html, rqs_str, rooms_names, kind)
+        def _room_names(recs_rooms):
+            # sorted room codes for display next to the count
+            names = [str(x.get("room","")) for x in recs_rooms if x.get("room")]
+            return ", ".join(sorted(names))
         for hk, rec in by_hk.items():
             if hk == "Unassigned": continue
             if rec["time"] and rec["time"] < LOW_MIN:
                 _hk_low.append((hk, f'{rec["time"]}m', "#b45309", len(rec["rooms"]),
-                                _svc_summary(rec["rooms"]), " · ".join(sorted(rec["insp"])), rec["time"]))
+                                _svc_summary(rec["rooms"]), " · ".join(sorted(rec["insp"])),
+                                _room_names(rec["rooms"]), rec["time"]))
         _hk_low.sort(key=lambda t:t[-1])   # lightest first
         _hk_free = sorted(n for n in present_hk if n not in used_hk_set)
 
@@ -4163,7 +4168,8 @@ td{{transition:background .15s ease}}
         for insp, info in rqs_rooms.items():
             if info["n"] < RQS_LOW_ROOMS:
                 _rqs_low.append((insp, f'{info["n"]} rm', "#b45309", info["n"],
-                                 _svc_summary(info["rooms"]), "", info["n"]))
+                                 _svc_summary(info["rooms"]), "",
+                                 _room_names(info["rooms"]), info["n"]))
         _rqs_low.sort(key=lambda t:t[-1])
         _rqs_free = sorted(n for n in present_insp if n not in rqs_rooms)
 
@@ -4183,15 +4189,22 @@ td{{transition:background .15s ease}}
                         f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]}">{svc_html}</td>'
                         f'<td style="padding:7px 12px;border-bottom:1px solid {_C["row_br"]};'
                         f'color:#5b6675">{who}</td></tr>')
+            # rooms_txt shows the count and, when present, the actual room codes
+            def _rooms_cell(nrm, names):
+                base = f'{nrm} room{"s" if nrm!=1 else ""}'
+                if names:
+                    return (f'{base}<span style="color:#9aa4b2"> — </span>'
+                            f'<span style="color:#5b6675">{e(names)}</span>')
+                return base
             srows = ""
-            for hk, load, col, nrm, svc, insp, _ in _hk_low:
-                srows += _row(hk, load, col, f'{nrm} room{"s" if nrm!=1 else ""}', svc,
+            for hk, load, col, nrm, svc, insp, names, _ in _hk_low:
+                srows += _row(hk, load, col, _rooms_cell(nrm, names), svc,
                               e(insp) or "—", "HK")
             for hk in _hk_free:
                 srows += _row(hk, "Free", "#059669", "0 rooms",
                               '<span style="color:#9aa4b2">—</span>', "—", "HK")
-            for insp, load, col, nrm, svc, _, _n in _rqs_low:
-                srows += _row(insp, load, col, f'{nrm} room{"s" if nrm!=1 else ""}', svc,
+            for insp, load, col, nrm, svc, _, names, _n in _rqs_low:
+                srows += _row(insp, load, col, _rooms_cell(nrm, names), svc,
                               "—", "RQS")
             for insp in _rqs_free:
                 srows += _row(insp, "Free", "#059669", "0 rooms",
@@ -4750,7 +4763,7 @@ td{{transition:background .15s ease}}
                 f"RQS under {RQS_LOW_ROOMS_XL} rooms   \u00b7   plus anyone free"
             )).font = reg
             pr += 1
-            FS = ["Staff","Role","Status","Load","Rooms","Service"]
+            FS = ["Staff","Role","Status","Load","Rooms","Room List","Service"]
             for ci, h in enumerate(FS, 1):
                 c = ws.cell(row=pr, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
             pr += 1
@@ -4763,9 +4776,10 @@ td{{transition:background .15s ease}}
                 ws.cell(row=pr, column=3, value=status).font = reg
                 ws.cell(row=pr, column=4, value=row.get("load","")).font = reg
                 ws.cell(row=pr, column=5, value=row.get("rooms","")).font = reg
-                ws.cell(row=pr, column=6, value=row.get("service","")).font = reg
+                ws.cell(row=pr, column=6, value=row.get("room_names","")).font = reg
+                ws.cell(row=pr, column=7, value=row.get("service","")).font = reg
                 fill = free_fill if status == "Free" else low_fill2
-                for ci in range(1, 7): ws.cell(row=pr, column=ci).fill = fill
+                for ci in range(1, 8): ws.cell(row=pr, column=ci).fill = fill
                 pr += 1
         else:
             ws.cell(row=pr, column=1,
@@ -4783,36 +4797,44 @@ td{{transition:background .15s ease}}
     _SVC_SHORT_XL = {SVC_FC:"FC", SVC_IH:"IH", SVC_DS:"DS", SVC_DV:"DV"}
     RQS_LOW_ROOMS_XL = 8
     _free_staff = []
-    _hk_load = {}   # name -> {"time":int,"rooms":int,"svcs":set}
-    _rqs_load = {}  # name -> {"rooms":int,"svcs":set}
+    _hk_load = {}   # name -> {"time":int,"rooms":int,"svcs":set,"names":[...]}
+    _rqs_load = {}  # name -> {"rooms":int,"svcs":set,"names":[...]}
+    def _rnames(g):
+        return [str(r.get("room","")) for r in g["rooms"] if r.get("room")]
     for g in fg:
         hk = g.get("housekeeper","")
         svc = g.get("service_type","")
         if hk and hk != "Manager":
-            d = _hk_load.setdefault(hk, {"time":0,"rooms":0,"svcs":set()})
+            d = _hk_load.setdefault(hk, {"time":0,"rooms":0,"svcs":set(),"names":[]})
             d["time"] += g["time"]; d["rooms"] += len(g["rooms"]); d["svcs"].add(svc)
+            d["names"].extend(_rnames(g))
         insp = g.get("inspector","")
         if insp:
-            d = _rqs_load.setdefault(insp, {"rooms":0,"svcs":set()})
+            d = _rqs_load.setdefault(insp, {"rooms":0,"svcs":set(),"names":[]})
             d["rooms"] += len(g["rooms"]); d["svcs"].add(svc)
+            d["names"].extend(_rnames(g))
     def _svcs_txt(svcs):
         return " ".join(_SVC_SHORT_XL[s] for s in [SVC_FC,SVC_IH,SVC_DS,SVC_DV] if s in svcs) or "—"
+    def _names_txt(names):
+        return ", ".join(sorted(names)) if names else ""
     # Housekeepers — light (under LOW_MIN minutes), lightest first
     for hk, d in sorted(_hk_load.items(), key=lambda kv:kv[1]["time"]):
         if d["time"] and d["time"] < LOW_MIN:
             _free_staff.append({"name":hk,"role":"HK","status":"Light","load":f'{d["time"]}m',
-                                "rooms":d["rooms"],"service":_svcs_txt(d["svcs"]),"free":False})
+                                "rooms":d["rooms"],"room_names":_names_txt(d["names"]),
+                                "service":_svcs_txt(d["svcs"]),"free":False})
     for hk in sorted(n for n in present_hk if n not in used_hk_set):
         _free_staff.append({"name":hk,"role":"HK","status":"Free","load":"Free",
-                            "rooms":0,"service":"—","free":True})
+                            "rooms":0,"room_names":"","service":"—","free":True})
     # RQS — light (fewer than 8 rooms), fewest first
     for insp, d in sorted(_rqs_load.items(), key=lambda kv:kv[1]["rooms"]):
         if d["rooms"] < RQS_LOW_ROOMS_XL:
             _free_staff.append({"name":insp,"role":"RQS","status":"Light","load":f'{d["rooms"]} rm',
-                                "rooms":d["rooms"],"service":_svcs_txt(d["svcs"]),"free":False})
+                                "rooms":d["rooms"],"room_names":_names_txt(d["names"]),
+                                "service":_svcs_txt(d["svcs"]),"free":False})
     for insp in sorted(n for n in present_insp if n not in _rqs_load):
         _free_staff.append({"name":insp,"role":"RQS","status":"Free","load":"Free",
-                            "rooms":0,"service":"—","free":True})
+                            "rooms":0,"room_names":"","service":"—","free":True})
 
     try:
         xlsx_bytes = _build_excel(export_df, _pivot_rows, free_staff=_free_staff)
