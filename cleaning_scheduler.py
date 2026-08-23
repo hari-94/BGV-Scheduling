@@ -4686,111 +4686,47 @@ td{{transition:background .15s ease}}
         for ci, h in enumerate(cols, 1):
             ws.column_dimensions[get_column_letter(ci)].width = widths.get(h, 14)
 
-        # ── 7-row gap, then the pivot ────────────────────────────────────────
-        pivot_start = main_end + 7 + 1 # leave exactly 7 blank rows
-
-        # Group by RQS HSKP in first-seen order (preserves the schedule order)
-        piv = OrderedDict()
-        for r in rows_for_pivot:
-            rqs = (r.get("RQS","") or "").strip() or "(blank)"
-            hk = (r.get("HSKP","") or "").strip() or "(blank)"
-            piv.setdefault(rqs, OrderedDict()).setdefault(hk, []).append(r)
-
-        PH = ["RQS","HSKP","Room","Service","Sum of Time (min)"]
-        pr = pivot_start
-        for ci, h in enumerate(PH, 1):
-            c = ws.cell(row=pr, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
-        pr += 1
-        grand = 0; grand_rooms = 0
-        for rqs, hks in piv.items():
-            rqs_total = 0; rqs_rooms = 0; first_rqs = True
-            for hk, items in hks.items():
-                hk_total = 0; first_hk = True
-                for it in items:
-                    ws.cell(row=pr, column=1, value=(rqs if first_rqs else "")).font = reg
-                    ws.cell(row=pr, column=2, value=(hk if first_hk else "")).font = reg
-                    ws.cell(row=pr, column=3, value=it.get("Room","")).font = reg
-                    ws.cell(row=pr, column=4, value=it.get("Service","")).font = reg
-                    tv = it.get("Time (min)","")
-                    t = _to_int(tv)
-                    ws.cell(row=pr, column=5, value=(t if str(tv) != "" else "")).font = reg
-                    hk_total += t; first_rqs = False; first_hk = False; pr += 1
-                # Housekeeper subtotal (rooms in col 3, minutes in col 5)
-                ws.cell(row=pr, column=2, value=f"{hk} Total").font = bold
-                ws.cell(row=pr, column=3, value=f"{len(items)} room{'s' if len(items)!=1 else ''}").font = bold
-                ws.cell(row=pr, column=5, value=(hk_total or "")).font = bold
-                for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = sub_fl
-                rqs_total += hk_total; rqs_rooms += len(items); pr += 1
-            # RQS subtotal — total rooms for this RQS in col 3, total minutes in col 5
-            ws.cell(row=pr, column=1, value=f"{rqs} Total").font = bold
-            ws.cell(row=pr, column=3, value=f"{rqs_rooms} room{'s' if rqs_rooms!=1 else ''}").font = bold
-            ws.cell(row=pr, column=5, value=(rqs_total or "")).font = bold
-            for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = rqs_fl
-            grand += rqs_total; grand_rooms += rqs_rooms; pr += 1
-        # Grand total — total rooms across all RQS in col 3, total minutes in col 5
-        ws.cell(row=pr, column=1, value="Grand Total").font = bold
-        ws.cell(row=pr, column=3, value=f"{grand_rooms} room{'s' if grand_rooms!=1 else ''}").font = bold
-        ws.cell(row=pr, column=5, value=grand).font = bold
-        for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = rqs_fl
-        pr += 1
-
-        # ── Light-workload summary: per RQS, the housekeepers whose Full Clean /
-        # IH minutes fall below LOW_MIN, with their minutes and room counts, so
-        # you can see at a glance who has spare capacity. Placed a couple of
-        # rows below the pivot. ──────────────────────────────────────────────
-        pr += 2
+        # ── Staff balance summary (no pivot — done manually after edits) ──────
+        # A single table showing who is LIGHT (spare capacity) or HEAVY (near the
+        # cap) so you can rebalance by hand: housekeepers by minutes, RQS by rooms.
+        summary_start = main_end + 7 + 1   # leave exactly 7 blank rows
+        pr = summary_start
         lw_hdr = Font(name=FONT, size=11, bold=True, color="16202E")
-        ws.cell(row=pr, column=1, value="Light Workload by RQS "
-                f"(under {LOW_MIN} min)").font = lw_hdr
-        pr += 1
-        LW = ["RQS","HSKP","Total Time (min)","Room Count"]
-        for ci, h in enumerate(LW, 1):
-            c = ws.cell(row=pr, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
-        pr += 1
-        low_fill = PatternFill("solid", fgColor="FFF4E5") # soft amber highlight
-        any_light = False
-        for rqs, hks in piv.items():
-            for hk, items in hks.items():
-                # only timed cleaning rooms count toward the workload figure
-                mins = sum(_to_int(it.get("Time (min)","")) for it in items)
-                # skip pure Dust n Vac / untimed groups and the blank bucket
-                timed = [it for it in items if str(it.get("Time (min)","")) != ""]
-                if not timed: continue
-                if hk == "(blank)": continue
-                if mins < LOW_MIN:
-                    any_light = True
-                    ws.cell(row=pr, column=1, value=rqs).font = reg
-                    ws.cell(row=pr, column=2, value=hk).font = reg
-                    ws.cell(row=pr, column=3, value=mins).font = reg
-                    ws.cell(row=pr, column=4, value=len(timed)).font = reg
-                    for ci in range(1, 5): ws.cell(row=pr, column=ci).fill = low_fill
-                    pr += 1
-        if not any_light:
-            ws.cell(row=pr, column=1,
-                    value="None — all housekeepers at or above the threshold.").font = reg
-            pr += 1
+        # thresholds (mirrors the values used to build free_staff below)
+        LOW_MIN_XL = LOW_MIN; HK_HEAVY_MIN = 360
+        RQS_LOW_ROOMS_XL = 8; RQS_HEAVY_ROOMS = 12
 
-        # ── Free & low-load staff (housekeepers AND RQS) — those who are free or
-        #    carrying little, so they can pick up the manual/unallocated rooms. ──
         if free_staff:
-            pr += 2
-            ws.cell(row=pr, column=1, value="Free & Low-Load Staff").font = lw_hdr
+            ws.cell(row=pr, column=1, value="Staff to Rebalance").font = lw_hdr
             pr += 1
-            FS = ["Staff","Role","Load","Rooms","Service"]
+            ws.cell(row=pr, column=1, value=(
+                f"HK light < {LOW_MIN} min / heavy \u2265 {HK_HEAVY_MIN} min   \u00b7   "
+                f"RQS light < {RQS_LOW_ROOMS_XL} rooms / heavy \u2265 {RQS_HEAVY_ROOMS} rooms"
+            )).font = reg
+            pr += 1
+            FS = ["Staff","Role","Status","Load","Rooms","Service"]
             for ci, h in enumerate(FS, 1):
                 c = ws.cell(row=pr, column=ci, value=h); c.font = hdr_f; c.fill = hdr_fl
             pr += 1
-            free_fill = PatternFill("solid", fgColor="EAF7EE")   # soft green
-            low_fill2 = PatternFill("solid", fgColor="FFF4E5")   # soft amber
+            free_fill  = PatternFill("solid", fgColor="EAF7EE")   # green  = free
+            low_fill2  = PatternFill("solid", fgColor="FFF4E5")   # amber  = light
+            heavy_fill = PatternFill("solid", fgColor="FDE8E8")   # red    = heavy
             for row in free_staff:
+                status = row.get("status","")
                 ws.cell(row=pr, column=1, value=row.get("name","")).font = reg
                 ws.cell(row=pr, column=2, value=row.get("role","")).font = reg
-                ws.cell(row=pr, column=3, value=row.get("load","")).font = reg
-                ws.cell(row=pr, column=4, value=row.get("rooms","")).font = reg
-                ws.cell(row=pr, column=5, value=row.get("service","")).font = reg
-                fill = free_fill if row.get("free") else low_fill2
-                for ci in range(1, 6): ws.cell(row=pr, column=ci).fill = fill
+                ws.cell(row=pr, column=3, value=status).font = reg
+                ws.cell(row=pr, column=4, value=row.get("load","")).font = reg
+                ws.cell(row=pr, column=5, value=row.get("rooms","")).font = reg
+                ws.cell(row=pr, column=6, value=row.get("service","")).font = reg
+                fill = (free_fill if status == "Free"
+                        else heavy_fill if status == "Heavy"
+                        else low_fill2)
+                for ci in range(1, 7): ws.cell(row=pr, column=ci).fill = fill
                 pr += 1
+        else:
+            ws.cell(row=pr, column=1,
+                    value="All staff within normal load range.").font = reg
 
         ws.freeze_panes = "A2"
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
@@ -4798,11 +4734,15 @@ td{{transition:background .15s ease}}
     # Rows for the pivot, in the same confirmeduncertainverify order as the table
     _pivot_rows = export_df.to_dict("records") if not export_df.empty else []
 
-    # ── Build the free & low-load staff list for the Excel (HKs + RQS) ─────────
+    # ── Build the staff-rebalance list for the Excel (HKs + RQS) ───────────────
+    # LIGHT  = spare capacity (HK under LOW_MIN minutes, RQS under 8 rooms)
+    # FREE   = present but unassigned
+    # HEAVY  = near the cap (HK at/above HK_HEAVY_MIN, RQS at/above RQS_HEAVY_ROOMS)
     _SVC_SHORT_XL = {SVC_FC:"FC", SVC_IH:"IH", SVC_DS:"DS", SVC_DV:"DV"}
     RQS_LOW_ROOMS_XL = 8
+    RQS_HEAVY_ROOMS  = 12          # near the 12-13 room inspector ceiling
+    HK_HEAVY_MIN     = 360         # near the 380 chart cap
     _free_staff = []
-    # Housekeeper load + services from the schedule
     _hk_load = {}   # name -> {"time":int,"rooms":int,"svcs":set}
     _rqs_load = {}  # name -> {"rooms":int,"svcs":set}
     for g in fg:
@@ -4817,22 +4757,30 @@ td{{transition:background .15s ease}}
             d["rooms"] += len(g["rooms"]); d["svcs"].add(svc)
     def _svcs_txt(svcs):
         return " ".join(_SVC_SHORT_XL[s] for s in [SVC_FC,SVC_IH,SVC_DS,SVC_DV] if s in svcs) or "—"
-    # Low housekeepers (under LOW_MIN minutes), lightest first
+    # Housekeepers — light first, then heavy
     for hk, d in sorted(_hk_load.items(), key=lambda kv:kv[1]["time"]):
         if d["time"] and d["time"] < LOW_MIN:
-            _free_staff.append({"name":hk,"role":"HK","load":f'{d["time"]}m',
+            _free_staff.append({"name":hk,"role":"HK","status":"Light","load":f'{d["time"]}m',
                                 "rooms":d["rooms"],"service":_svcs_txt(d["svcs"]),"free":False})
-    # Free housekeepers (present, unassigned)
     for hk in sorted(n for n in present_hk if n not in used_hk_set):
-        _free_staff.append({"name":hk,"role":"HK","load":"Free","rooms":0,"service":"—","free":True})
-    # Low RQS (fewer than 8 rooms)
+        _free_staff.append({"name":hk,"role":"HK","status":"Free","load":"Free",
+                            "rooms":0,"service":"—","free":True})
+    for hk, d in sorted(_hk_load.items(), key=lambda kv:-kv[1]["time"]):
+        if d["time"] >= HK_HEAVY_MIN:
+            _free_staff.append({"name":hk,"role":"HK","status":"Heavy","load":f'{d["time"]}m',
+                                "rooms":d["rooms"],"service":_svcs_txt(d["svcs"]),"free":False})
+    # RQS — light first, then heavy
     for insp, d in sorted(_rqs_load.items(), key=lambda kv:kv[1]["rooms"]):
         if d["rooms"] < RQS_LOW_ROOMS_XL:
-            _free_staff.append({"name":insp,"role":"RQS","load":f'{d["rooms"]} rm',
+            _free_staff.append({"name":insp,"role":"RQS","status":"Light","load":f'{d["rooms"]} rm',
                                 "rooms":d["rooms"],"service":_svcs_txt(d["svcs"]),"free":False})
-    # Free RQS (present, assigned nothing)
     for insp in sorted(n for n in present_insp if n not in _rqs_load):
-        _free_staff.append({"name":insp,"role":"RQS","load":"Free","rooms":0,"service":"—","free":True})
+        _free_staff.append({"name":insp,"role":"RQS","status":"Free","load":"Free",
+                            "rooms":0,"service":"—","free":True})
+    for insp, d in sorted(_rqs_load.items(), key=lambda kv:-kv[1]["rooms"]):
+        if d["rooms"] >= RQS_HEAVY_ROOMS:
+            _free_staff.append({"name":insp,"role":"RQS","status":"Heavy","load":f'{d["rooms"]} rm',
+                                "rooms":d["rooms"],"service":_svcs_txt(d["svcs"]),"free":False})
 
     try:
         xlsx_bytes = _build_excel(export_df, _pivot_rows, free_staff=_free_staff)
