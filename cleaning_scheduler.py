@@ -2027,14 +2027,79 @@ def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
             if key < best[0]: best = (key, r); nb0 = nb
     charts = [c[:] for c in best[1] if c]
     # Fill charts toward the 330-380 band FIRST so nobody is left light, then let
-    # the floor-tidy passes run LAST — this restores the floor-consolidated layout
-    # (housekeepers kept on single floors / tight halls) that the greedy fill would
-    # otherwise scatter. Floor tidiness is the final, authoritative step.
+    # the floor-tidy passes run to restore the single-floor layout...
     charts = _fc_greedy_finish(charts)
     charts = _fc_ls_tidy(charts, 12000, rng)
     charts = _fc_floor_consolidate(charts)     # dedicated floor-reduction pass
     charts = _fc_ls_tidy(charts, 4000, rng)    # final hall-tightening polish
+    # ...then a final top-up: the tidy passes above optimize only floor spread and
+    # can pull a chart back under 330. This pass lifts any under-330 chart back up
+    # toward the cap by pulling in rooms — preferring same-floor rooms so tidiness
+    # is preserved, and only crossing to another floor if that's the only way to
+    # clear 330. Never exceeds the cap or breaks a rule.
+    charts = _fc_topup_light(charts)
     return _unpack_units(charts)
+
+def _fc_topup_light(charts, rounds=200):
+    """Lift under-LOW_MIN charts toward the cap, and — higher value — try to
+    dissolve a light chart entirely by redistributing its rooms into others, which
+    both removes a light chart and frees a housekeeper.
+
+    Two strategies each round:
+      A. DISSOLVE: if the lightest chart's rooms can all be absorbed by other
+         charts (within cap + rules), do it — one fewer housekeeper, no light chart.
+      B. TOP-UP: otherwise pull a room from a donor into the lightest chart to lift
+         it toward LOW_MIN, preferring same-floor donors and never dropping a donor
+         that's at/above LOW_MIN below it."""
+    charts = [c[:] for c in charts if c]
+    if len(charts) < 2: return charts
+    def _tt(u):
+        m = u.get("_members")
+        return sum(x["time"] for x in m) if m else u["time"]
+    def t(c): return sum(_tt(u) for u in c)
+    for _ in range(rounds):
+        order = sorted(range(len(charts)), key=lambda i: t(charts[i]))
+        light_i = order[0]
+        if t(charts[light_i]) >= LOW_MIN: break
+
+        # ── Strategy A: can we place EVERY unit of the light chart elsewhere? ──
+        others = [i for i in range(len(charts)) if i != light_i]
+        trial = {i: list(charts[i]) for i in others}
+        ok = True
+        for u in charts[light_i]:
+            placed = False
+            # prefer the fullest chart that can still take it (tightest pack)
+            for i in sorted(others, key=lambda k: -t(trial[k])):
+                if _chart_feasible(trial[i] + [u]):
+                    trial[i].append(u); placed = True; break
+            if not placed: ok = False; break
+        if ok:
+            for i in others: charts[i] = trial[i]
+            charts[light_i] = []
+            charts = [c for c in charts if c]
+            continue
+
+        # ── Strategy B: pull one donor room into the light chart ──────────────
+        cur = t(charts[light_i]); gap = MAX_FC - cur
+        cur_flrs = set((_bld(x), _flr(x)) for x in charts[light_i])
+        best = None
+        for di in range(len(charts)):
+            if di == light_i or len(charts[di]) <= 1: continue
+            dt = t(charts[di])
+            for u in charts[di]:
+                ut = _tt(u)
+                if ut > gap: continue
+                if dt - ut < LOW_MIN and dt >= LOW_MIN: continue
+                if not _chart_feasible(charts[light_i] + [u]): continue
+                same_floor = 1 if (_bld(u), _flr(u)) in cur_flrs else 0
+                cand = (same_floor, ut)
+                if best is None or cand > best[0]:
+                    best = (cand, di, u)
+        if best is None: break
+        _, di, u = best
+        charts[di].remove(u); charts[light_i].append(u)
+        charts = [c for c in charts if c]
+    return charts
 
 def _fc_greedy_finish(charts):
     """Re-pack units so each chart is FILLED before the next is opened, keeping the
@@ -2570,17 +2635,39 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
         min(g.get("floors",{0})) if g.get("floors") else 0,
         min(r.get("num",0) for r in g["rooms"]) if g["rooms"] else 0
     ))
-    # How many FC batches can the dedicated inspectors cover?
+    # How many FC charts can the dedicated inspectors cover? With tight room-based
+    # packing an inspector holds up to ~13 rooms (often 4-5 small charts), so the
+    # dedicated pool can absorb more charts than n_dedicated*per. Estimate capacity
+    # by rooms and only push the genuine overflow to RQS1/RQS2.
     n_dedicated = len(fc_inspectors)
-    coverable = n_dedicated * per # FC groups the dedicated inspectors can take
+    coverable = n_dedicated * max(per, 5)  # generous chart budget; room cap binds
     dedicated_fc = fc_sorted[:coverable]
     leftover_fc = fc_sorted[coverable:] # only these need RQS1/RQS2 help
 
-    batches=[dedicated_fc[i:i+per] for i in range(0,len(dedicated_fc),per)]
+    # Pack each inspector as FULL as possible (up to a room ceiling) before opening
+    # the next, so we use the fewest inspectors and each gets as many complete
+    # charts as will fit — rather than spreading charts thinly across everyone.
+    # The ROOM ceiling is the real limit (an inspector can carry ~12-13 rooms);
+    # we allow more than `per` charts as long as rooms stay under the ceiling, so
+    # inspectors fill up to capacity instead of stopping at 3 thin charts.
+    INSP_ROOM_MAX = 13          # an inspector can carry up to ~12-13 rooms
+    INSP_CHART_MAX = max(per, 5)  # allow filling toward the room ceiling
+    def _grooms(g): return len(g["rooms"])
+    batches = []
+    cur = []; cur_rooms = 0
+    for g in dedicated_fc:
+        gr = _grooms(g)
+        if cur and (cur_rooms + gr > INSP_ROOM_MAX or len(cur) >= INSP_CHART_MAX):
+            batches.append(cur); cur = []; cur_rooms = 0
+        cur.append(g); cur_rooms += gr
+    if cur: batches.append(cur)
     # Balance batches to reduce cross-building and floor travel. Run several full
     # passes; each pass keeps swapping charts between batches while any swap lowers
     # the combined score (which now also penalizes the single worst-travelling
-    # inspector), so we don't settle for a solution where one RQS roams.
+    # inspector), so we don't settle for a solution where one RQS roams. Swaps are
+    # rejected if they would push an inspector over the room ceiling.
+    def _brooms(b): return sum(len(g["rooms"]) for g in b)
+    def _within_cap(b): return _brooms(b) <= INSP_ROOM_MAX
     def _optimize_batches(batches):
         improved=True; max_iter=(len(batches)*per*4 if batches else 0); iters=0
         while improved and iters<max_iter:
@@ -2591,6 +2678,8 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
                         for gj,gb in enumerate(batches[bj]):
                             new_bi=batches[bi][:gi]+[gb]+batches[bi][gi+1:]
                             new_bj=batches[bj][:gj]+[ga]+batches[bj][gj+1:]
+                            # don't let a travel-swap push an inspector over the ceiling
+                            if not (_within_cap(new_bi) and _within_cap(new_bj)): continue
                             if _insp_combined_score([new_bi,new_bj])<_insp_combined_score([batches[bi],batches[bj]]):
                                 batches[bi],batches[bj]=new_bi,new_bj; improved=True; break
                         if improved: break
@@ -2611,6 +2700,7 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
                 for gj,gb in enumerate(batches[bj]):
                     new_wi=batches[wi][:gi]+[gb]+batches[wi][gi+1:]
                     new_bj=batches[bj][:gj]+[ga]+batches[bj][gj+1:]
+                    if not (_within_cap(new_wi) and _within_cap(new_bj)): continue
                     if _insp_combined_score([new_wi,new_bj])<_insp_combined_score([batches[wi],batches[bj]]):
                         batches[wi],batches[bj]=new_wi,new_bj; moved=True; break
                 if moved: break
