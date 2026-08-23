@@ -2026,13 +2026,14 @@ def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
             key = (nb, _charts_xb(r), _charts_spread(r))
             if key < best[0]: best = (key, r); nb0 = nb
     charts = [c[:] for c in best[1] if c]
-    # Tidy placement first (single floors, tight halls) within the locked count,
-    # then finish each chart LAST so the fill is authoritative: every chart is
-    # filled to at least LOW_MIN (330) and up toward the 380 cap, so nobody is left
-    # under 330 except the unavoidable final remainder.
-    charts = _fc_ls_tidy(charts, 6000, rng)
-    charts = _fc_floor_consolidate(charts)
+    # Fill charts toward the 330-380 band FIRST so nobody is left light, then let
+    # the floor-tidy passes run LAST — this restores the floor-consolidated layout
+    # (housekeepers kept on single floors / tight halls) that the greedy fill would
+    # otherwise scatter. Floor tidiness is the final, authoritative step.
     charts = _fc_greedy_finish(charts)
+    charts = _fc_ls_tidy(charts, 12000, rng)
+    charts = _fc_floor_consolidate(charts)     # dedicated floor-reduction pass
+    charts = _fc_ls_tidy(charts, 4000, rng)    # final hall-tightening polish
     return _unpack_units(charts)
 
 def _fc_greedy_finish(charts):
