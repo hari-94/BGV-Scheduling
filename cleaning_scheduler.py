@@ -2038,7 +2038,55 @@ def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
     # is preserved, and only crossing to another floor if that's the only way to
     # clear 330. Never exceeds the cap or breaks a rule.
     charts = _fc_topup_light(charts)
+    # Finally, reduce the "easy" 120+70+70+70 = 330 charts: try to swap one of the
+    # 70s for a bigger room (120/140) from a heavier chart so the chart becomes a
+    # tougher combination, but only when a valid swap exists that keeps both charts
+    # legal and neither drops below 330. Only fires when an alternative exists.
+    charts = _fc_reduce_easy_330(charts)
     return _unpack_units(charts)
+
+def _fc_reduce_easy_330(charts, rounds=120):
+    """Discourage the exact 120+70+70+70 = 330 shape. For each such chart, try to
+    swap one of its 70s with a 120/140 from another chart, provided both charts
+    stay <=380 and >=LOW_MIN and no rule breaks. Keeps room counts and building
+    coherence; only changes which rooms sit where. No-op when no valid swap."""
+    charts = [c[:] for c in charts if c]
+    if len(charts) < 2: return charts
+    def _times(c):
+        out = []
+        for u in c:
+            m = u.get("_members")
+            out.extend(x["time"] for x in m) if m else out.append(u["time"])
+        return out
+    def _t(c): return sum(_times(c))
+    def _is_easy(c): return sorted(_times(c)) == [70, 70, 70, 120]
+    for _ in range(rounds):
+        moved = False
+        for i, ci in enumerate(charts):
+            if not _is_easy(ci): continue
+            # a 70-min unit in this chart to give away
+            for a in ci:
+                if _unit_time_sum([a]) != 70: continue
+                # find a donor chart with a 120/140 unit we can take in exchange
+                for j, cj in enumerate(charts):
+                    if j == i: continue
+                    for b in cj:
+                        bt = _unit_time_sum([b])
+                        if bt < 120: continue          # want a bigger room
+                        new_ci = [x for x in ci if x is not a] + [b]
+                        new_cj = [x for x in cj if x is not b] + [a]
+                        if not (_chart_feasible(new_ci) and _chart_feasible(new_cj)): continue
+                        # both must stay in the valid band after the swap
+                        if not (LOW_MIN <= _t(new_ci) <= MAX_FC): continue
+                        if not (LOW_MIN <= _t(new_cj) <= MAX_FC): continue
+                        # and the target chart must no longer be the easy shape
+                        if _is_easy(new_ci): continue
+                        charts[i] = new_ci; charts[j] = new_cj; moved = True; break
+                    if moved: break
+                if moved: break
+            if moved: break
+        if not moved: break
+    return charts
 
 def _fc_topup_light(charts, rounds=200):
     """Lift under-LOW_MIN charts toward the cap, and — higher value — try to
@@ -2163,7 +2211,6 @@ def _fc_greedy_finish(charts):
             used, total = _fill_from(i, pool)
             u_chart = [pool[k] for k in used]
             nflr = len(set((_bld(x), _flr(x)) for x in u_chart))
-            # higher is better: clears 330, then fewer floors (negated), then fuller
             rank = (1 if total >= LOW_MIN else 0, -nflr, total)
             if best is None or rank > best[0]:
                 best = (rank, used, total)
