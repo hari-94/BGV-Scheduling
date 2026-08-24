@@ -12,3 +12,10 @@ showSidebarNavigation = false
 [server]
 headless = true
 enableCORS = false
+
+[runner]
+# Disable Streamlit "magic" — the implicit display of bare expressions. The app
+# renders everything through explicit st.* calls, so magic is never wanted here.
+# With it on, bare statements whose value is None (e.g. list.append(...),
+# helper calls) were being auto-rendered as a column of "None" on the page.
+magicEnabled = false
