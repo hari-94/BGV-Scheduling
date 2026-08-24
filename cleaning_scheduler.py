@@ -2116,8 +2116,17 @@ def _fc_topup_light(charts, rounds=200):
         ok = True
         for u in charts[light_i]:
             placed = False
-            # prefer the fullest chart that can still take it (tightest pack)
-            for i in sorted(others, key=lambda k: -t(trial[k])):
+            ub, uf = _bld(u), _flr(u)
+            # Rank candidate charts so the unit lands close by: same floor first,
+            # then same building, then (as a last resort) fullest chart. This keeps
+            # a dissolved single-room housekeeper's rooms with a neighbour rather
+            # than scattering them across buildings.
+            def _rank(k):
+                c = trial[k]
+                same_floor = any((_bld(x), _flr(x)) == (ub, uf) for x in c)
+                same_bld   = any(_bld(x) == ub for x in c)
+                return (0 if same_floor else 1, 0 if same_bld else 1, -t(c))
+            for i in sorted(others, key=_rank):
                 if _chart_feasible(trial[i] + [u]):
                     trial[i].append(u); placed = True; break
             if not placed: ok = False; break
@@ -2191,8 +2200,13 @@ def _fc_greedy_finish(charts):
                 if same_floor:
                     floor_pen = 0
                 else:
-                    # distance to the nearest floor already in the chart
-                    floor_pen = min(abs(_flr(u)-_flr(x)) + (0 if _bld(u)==_bld(x) else 9)
+                    # distance to the nearest floor already in the chart. Crossing
+                    # into a DIFFERENT building is treated as much more expensive
+                    # than moving floors within the same building, so the fill only
+                    # crosses buildings when there is genuinely no same-building
+                    # room left to reach LOW_MIN — this stops a lone B1 room from
+                    # being stranded onto an otherwise-B3 chart (and vice-versa).
+                    floor_pen = min(abs(_flr(u)-_flr(x)) + (0 if _bld(u)==_bld(x) else 100)
                                     for x in chart)
                 key = (0 if same_floor else 1, floor_pen, -ut)   # lower is better
                 if best_key is None or key < best_key:
