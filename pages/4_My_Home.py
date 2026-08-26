@@ -13,7 +13,7 @@ import auth, db, roster_import as ri
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
 # sys.modules, so reload it rather than dying on a helper it does not have yet.
-if getattr(ri, "__version__", 0) < 4:
+if getattr(ri, "__version__", 0) < 5:
     import importlib
     ri = importlib.reload(ri)
 
@@ -136,7 +136,7 @@ KIND_STYLE = {
     ri.KIND_DAILY:   ("#ccfbf1", "#0f5c55", "Daily Service"),
     ri.KIND_WORKING: ("#dcfce7", "#166534", "Working"),
     ri.KIND_OFF:     ("#f1f5f9", "#94a3b8", "Off"),
-    ri.KIND_OTHER:   ("#fef3c7", "#92400e", "Other duty"),
+    ri.KIND_OTHER:   ("#fef3c7", "#92400e", "Working — other duty"),
     # Red is reserved for the thing the workbook paints red: a no-call/no-show.
     ri.KIND_NOCALL:  ("#fee2e2", "#991b1b", "No call / no show"),
     ri.KIND_VTO:     ("#e0e7ff", "#3730a3", "VTO — paid"),

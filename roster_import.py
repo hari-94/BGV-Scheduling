@@ -22,7 +22,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 4
+__version__ = 5
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -68,16 +68,23 @@ def norm_name(s) -> str:
     return n
 
 # ── Cell status vocabulary ────────────────────────────────────────────────────
-# Explicitly not at work.
+# Genuinely not at work. Note VTO is deliberately NOT here: it is paid, and a
+# cell like "VTO - KEYSTONE" must not be read as ordinary time off.
 _OFF_RE = re.compile(
-    r"\b(r\s*[/-]?\s*off|off\s*/?\s*grant?ed|off|sick|fmla|fmlo|vto|vacation|"
-    r"no\s*show|call\s*out|p\s*-?\s*loa|ploa|loa)\b")
-# At work, but not cleaning guest rooms — so not available to the scheduler.
-_OTHER_RE = re.compile(
-    r"\b(hsp|keystone|ullr|garages?|projects?|food|maps|stripping\s+linen|rollaways|"
-    r"lavar\s+botes|cleaning\s+(windows|carpets)|breck\s*in|training|firc|eng|"
+    r"\b(r\s*[/-]?\s*off|off\s*/?\s*grant?ed|off|sick|fmla|fmlo|vacation|"
+    r"call\s*out|p\s*-?\s*loa|ploa|loa)\b")
+# Volunteered time off: paid, but not a worked day here. Keystone and FIRC are
+# the sister properties — going there is volunteering away, however it is
+# written: "VTO", "KEYSTONE VTO", "KEYSTONE", "FIRC", "VTO - FIRC".
+_VTO_RE = re.compile(r"\b(vto|v\.t\.o\.?|keystone|firc)\b", re.I)
+# At work but not on guest rooms. Used only to tell a recognised duty from an
+# unfamiliar one — both count as a worked day either way.
+_KNOWN_OTHER_RE = re.compile(
+    r"\b(hsp|ullr|garages?|projects?|food|maps|stripping\s+linen|rollaways|"
+    r"lavar\s+botes|cleaning\s+(windows|carpets)|breck\s*in|training|eng|"
     r"help\s+with\s+party|safety\s+meeting|stairs\s*only|baseboards|"
-    r"listening\s+session|conference|meeting)\b")
+    r"listening\s+session|conference|meeting|spiff|touch\s*up|sales|"
+    r"am\s+team|voluntario|deep\s+clean|inventory|inventario|windows)\b")
 # Inspector role codes.
 _RQS_RE = re.compile(r"^(rqs?\s*[12]|rq\s*[12])\b")
 # A leading number is the person's chart/zone load — they are working.
@@ -110,39 +117,48 @@ _NOCALL_RE = re.compile(r"\bn[c/\s-]*n[s/\s-]*h?\b|\bno\s*call\b|\bno\s*show\b",
 #: "VTO - KEYSTONE" is time off spent at another property.
 _VTO_ONLY_RE = re.compile(r"^\s*(vto|v\.t\.o\.?)\s*$", re.I)
 
-def classify(raw) -> str:
-    """Map one schedule cell to a status kind.
+def classify_full(raw):
+    """(kind, recognised) for one schedule cell.
 
-    Order matters. "VTO + Daily Service" is a daily-service shift, and
-    "3 + VTO" is a full shift that ends early — both are present, even though
-    each mentions VTO. Only a cell that leads with an off/other code is out.
+    The rule is deliberately inverted from where this started: a day is a
+    WORKING day unless it is off, sick, a no-call, or volunteered away. Cooking
+    for the staff, projects, garages, deep cleans — the person is at work and
+    paid, so it counts. An unfamiliar code therefore counts as worked too, and
+    is merely flagged as unrecognised rather than silently written off.
+
+    Order matters. What the cell LEADS with wins: "3 + VTO" is a full shift
+    that ended early and "VTO + Daily Service" is a daily-service shift, even
+    though both mention VTO.
     """
     s = re.sub(r"\s+", " ", str(raw or "").strip())
     if not s:
-        return KIND_OFF
+        return KIND_OFF, True
     low = s.lower()
     if _NOCALL_RE.search(low) or "call sick" in low:
-        return KIND_NOCALL
-    if _VTO_ONLY_RE.match(s):
-        return KIND_VTO
+        return KIND_NOCALL, True
     if "daily service" in low:
-        return KIND_DAILY
-    # What the cell LEADS with decides it. "3 + VTO" is a shift that ends early,
-    # and "RQS 1 + training w/Alejandro" is an RQS 1 shift — neither is time off,
-    # even though a later word would otherwise match an off/other-duty rule.
+        return KIND_DAILY, True
     if _LEAD_NUM_RE.match(s):
-        return KIND_WORKING
+        return KIND_WORKING, True
     if _RQS_RE.match(low):
-        return KIND_WORKING
+        return KIND_WORKING, True
     if low in ("on", "on am", "on pm", "hskp", "housekeeper") or re.match(r"^on\b", low):
-        return KIND_WORKING
+        return KIND_WORKING, True
     if _OFF_RE.search(low):
-        return KIND_OFF
-    if _OTHER_RE.search(low):
-        return KIND_OTHER
+        return KIND_OFF, True
+    if _VTO_RE.search(low):
+        return KIND_VTO, True
     if "lead" in low:
-        return KIND_WORKING
-    return KIND_UNKNOWN
+        return KIND_WORKING, True
+    # Anything left is a duty of some sort — a worked day, recognised or not.
+    return KIND_OTHER, bool(_KNOWN_OTHER_RE.search(low))
+
+def classify(raw) -> str:
+    return classify_full(raw)[0]
+
+def is_recognised(raw) -> bool:
+    """False for a duty we have no name for. It still counts as worked."""
+    return classify_full(raw)[1]
 
 # ── Controlled vocabulary for editing ─────────────────────────────────────────
 # One canonical option list per role, ordered by how often each value actually
@@ -328,7 +344,7 @@ def _walk_people_rows(ws):
 
 def _person_record(name, group, bld, raw):
     raw = re.sub(r"\s+", " ", str(raw or "").strip())
-    kind = classify(raw)
+    kind, known = classify_full(raw)
     return {
         "name":     name,
         "section":  {"hk": f"Building {bld}", "rqs": "RQS", "other": bld}[group],
@@ -337,6 +353,8 @@ def _person_record(name, group, bld, raw):
         "raw":      raw,
         "kind":     kind,
         "present":  kind in PRESENT_KINDS,
+        "worked":   kind in WORKED_KINDS,
+        "recognised": known,
         "daily_service": kind == KIND_DAILY,
     }
 
@@ -546,11 +564,11 @@ def history_rows(weeks, overrides=None, upto=None):
                 if upto and iso > upto:
                     continue
                 raw = rec.get("cells", {}).get(iso, "")
-                kind = classify(raw)
+                kind, known = classify_full(raw)
                 # A red cell is a no-call even when the cell itself is blank,
                 # which is how most of them look.
                 if iso in (rec.get("nocall") or []):
-                    kind = KIND_NOCALL
+                    kind, known = KIND_NOCALL, True
                 name = rec.get("name", key)
                 out.append({
                     "date": iso, "week": wk, "person": name,
@@ -565,6 +583,7 @@ def history_rows(weeks, overrides=None, upto=None):
                     "building": rec.get("building"),
                     "raw": raw, "kind": kind,
                     "worked": kind in WORKED_KINDS,
+                    "recognised": known,
                     "paid_off": kind in PAID_OFF_KINDS,
                     "no_call": kind == KIND_NOCALL,
                     "daily_service": kind == KIND_DAILY,
@@ -1065,7 +1084,7 @@ def build_roster_update(people, existing_roster=None):
     others, unknown, cover = [], [], []
 
     for p in people:
-        if p["kind"] == KIND_UNKNOWN and p["raw"]:
+        if p["raw"] and not p.get("recognised", True):
             unknown.append((p["name"], p["raw"]))
         # A houseperson or lead put on rooms today counts as a housekeeper.
         if p["group"] != "hk" and is_room_cover(p["raw"]):

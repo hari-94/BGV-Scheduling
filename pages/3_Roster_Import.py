@@ -16,7 +16,7 @@ import auth, db, roster_import as ri
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 4:
+if getattr(ri, "__version__", 0) < 5:
     import importlib
     ri = importlib.reload(ri)
 
@@ -1108,10 +1108,11 @@ with tab_apply:
                         f'{e(", ".join(update["new_people"]))} — check these are not a '
                         f're-spelling of someone already on the roster.</div>', unsafe_allow_html=True)
         if update["unknown"]:
-            st.markdown(f'<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;'
-                        f'padding:10px 13px;font-size:.78rem;color:#991b1b;margin-top:8px">'
-                        f'<b>{len(update["unknown"])} cell(s) not recognised</b>, treated as NOT '
-                        f'available: {", ".join(f"<b>{e(n)}</b> ({e(v)})" for n, v in update["unknown"])}'
+            st.markdown(f'<div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;'
+                        f'padding:10px 13px;font-size:.78rem;color:#7e22ce;margin-top:8px">'
+                        f'<b>{len(update["unknown"])} duty we have no name for</b> — counted as '
+                        f'a worked day, just not offered guest rooms: '
+                        f'{", ".join(f"<b>{e(n)}</b> ({e(v)})" for n, v in update["unknown"])}'
                         f'</div>', unsafe_allow_html=True)
 
         st.markdown('<p class="sec">Detail</p>', unsafe_allow_html=True)
