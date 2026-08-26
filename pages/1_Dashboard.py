@@ -36,10 +36,12 @@ if not PLOTLY_OK:
 
 with st.sidebar:
     st.markdown("### Navigate")
+    st.page_link("pages/4_My_Home.py", label="My Home")
     st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
     st.page_link("pages/1_Dashboard.py", label="Dashboard")
-    if st.session_state.get("role","") == "admin":
+    if st.session_state.get("role","") in ("admin","rqs"):
         st.page_link("pages/3_Roster_Import.py", label="Roster Import")
+    if st.session_state.get("role","") == "admin":
         st.page_link("pages/2_Admin.py", label="Admin")
     st.markdown("---")
     _u = st.session_state.get("display_name","") or st.session_state.get("username","")

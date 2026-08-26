@@ -3230,19 +3230,25 @@ with st.sidebar:
     # rqs Schedule + Dashboard
     # hk nothing (just name/role/signout above)
     _role = _cu["role"]
+    st.markdown("---")
+    st.markdown("### Navigate")
+    # My Home is for everyone -- it is the only page a housekeeper needs.
+    try:
+        st.page_link("pages/4_My_Home.py", label="My Home")
+    except Exception:
+        pass
     if _role in ("admin","rqs"):
-        st.markdown("---")
-        st.markdown("### Navigate")
         st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
         try:
             st.page_link("pages/1_Dashboard.py", label="Dashboard")
         except Exception:
             pass
+        # RQS run schedules daily, so they get Roster Import too.
+        try:
+            st.page_link("pages/3_Roster_Import.py", label="Roster Import")
+        except Exception:
+            pass
         if _role == "admin":
-            try:
-                st.page_link("pages/3_Roster_Import.py", label="Roster Import")
-            except Exception:
-                pass
             try:
                 st.page_link("pages/2_Admin.py", label="Admin")
             except Exception:

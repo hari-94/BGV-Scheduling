@@ -152,6 +152,76 @@ def options_for(rec, present_values=()) -> list:
             opts.append(v); seen.add(v.casefold())
     return [BLANK_LABEL] + opts
 
+# ── Legends, transcribed from the workbook's own side columns ────────────────
+#: Housekeeper cells lead with a number: their 8-10am extra task. They clean
+#: rooms the rest of the day, so the number never means "not available".
+#: (Sheet "Jan 5 - 11" cols J-L; wording drifts slightly between weeks.)
+HK_TASK_LEGEND = {
+    "1": "Breakroom - Bld 2 or 3 (clean and tidy)",
+    "2": "Linea vieja / mattress pad - check cart closet",
+    "3": "Vacuum & cart - keep clean and serviceable",
+    "4": "Amenities bottles - clean, refill, organise",
+    "5": "Garages - pick up trash B1/B2/B3",
+}
+#: Houseperson cells are a zone number, not a task.
+#: (Sheet "Dec 14 - 20": "Task for houseperson according to their number".)
+HP_ZONE_LEGEND = {
+    "1": "Runner Building 2",
+    "2": "Lobby",
+    "3": "Pool - Building 1",
+    "4": "Runner Building 1",
+    "5": "Runner Building 3",
+    "6": "Pool - Building 3",
+    "7": "Plaza - Building 3",
+}
+
+def legend_for(rec, raw):
+    """Plain-English meaning of a leading number, by role. '' when none."""
+    m = re.match(r"^(\d+)", str(raw or "").strip())
+    if not m:
+        return ""
+    n = m.group(1)
+    if rec.get("group") == "hk":
+        return HK_TASK_LEGEND.get(n, "")
+    if "Houseperson" in str(rec.get("section", "")):
+        return HP_ZONE_LEGEND.get(n, "")
+    return ""
+
+# ── Non-housekeepers drafted onto rooms ───────────────────────────────────────
+#: On short days a houseperson (or lead) is marked to clean rooms instead.
+#: The sheet says so in words -- "HSKP", "HOUSEKEEPER", "cleaning Rooms",
+#: "Stripping linen or HSKP (cleaning Rooms)" -- so those people are genuine
+#: room cleaners for the day and belong in the housekeeper roster.
+_COVER_RE = re.compile(r"\b(hskp|housekeep\w*|cleaning\s+rooms?)\b", re.I)
+#: An RQS who "opens the office" and assigns daily services on Hotsos is doing
+#: desk work, not cleaning -- see the RQS 1/RQS 2 + FLOATING legend. Without
+#: this, "Opening the office + Daily services - Send the report" would draft an
+#: inspector onto rooms they are not actually cleaning.
+_ADMIN_RE = re.compile(
+    r"\b(office|assign\w*|report\w*|reporte|enviar|hotsos|send|email|calendar)\b", re.I)
+
+def is_room_cover(raw) -> bool:
+    """True when a non-housekeeper's cell puts them on guest rooms today."""
+    s = str(raw or "")
+    if not s:
+        return False
+    if _COVER_RE.search(s):          # says HSKP / HOUSEKEEPER outright
+        return True
+    if _ADMIN_RE.search(s):          # desk work that merely mentions the words
+        return False
+    return "daily service" in s.lower()
+
+def cover_building(raw, default=1) -> int:
+    """Building named in a cover cell, else Building 1.
+
+    Building 1 is the safe default: under the movement rule a B1 housekeeper
+    may work any building, so a drafted-in helper stays assignable anywhere.
+    """
+    m = re.search(r"\bbld\s*([123])\b|\bbuilding\s*([123])\b", str(raw or ""), re.I)
+    if m:
+        return int(m.group(1) or m.group(2))
+    return default
+
 def rqs_role(raw):
     """Return 1 or 2 when a cell names an explicit RQS role, else None."""
     low = _norm(raw)
@@ -389,6 +459,75 @@ def merge_roster(update, existing_roster, keep_missing=True):
                 new_roster[name] = {"building": v.get("building", 1), "present": False}
     return new_roster
 
+# ── Attendance history ────────────────────────────────────────────────────────
+#: A worked day, for counting purposes: on the clock in any capacity.
+WORKED_KINDS = (KIND_WORKING, KIND_DAILY, KIND_OTHER)
+
+def history_rows(weeks, overrides=None, upto=None):
+    """Flatten every stored week into one row per person per dated day.
+
+    Rows carry the role, the raw cell, the classified kind and whether it
+    counts as worked — enough to answer "how many days has this person worked
+    this month, and doing what".
+    """
+    overrides = overrides or {}
+    out = []
+    for wk in sorted(weeks):
+        week = weeks[wk]
+        eff, _applied = apply_overrides(week, overrides, wk)
+        for key, rec in eff["people"].items():
+            for iso in eff["dates"]:
+                if upto and iso > upto:
+                    continue
+                raw = rec.get("cells", {}).get(iso, "")
+                kind = classify(raw)
+                out.append({
+                    "date": iso, "week": wk, "person": rec.get("name", key),
+                    "key": key, "section": rec["section"], "group": rec["group"],
+                    "raw": raw, "kind": kind,
+                    "worked": kind in WORKED_KINDS,
+                    "daily_service": kind == KIND_DAILY,
+                    "cover": rec["group"] != "hk" and is_room_cover(raw),
+                    "dow": _dt.date.fromisoformat(iso).strftime("%a"),
+                })
+    return out
+
+def summarise_person(rows, person_key=None, person=None):
+    """Totals and habits for one person, from history_rows output."""
+    mine = [r for r in rows
+            if (r["key"] == person_key if person_key else r["person"] == person)]
+    worked = [r for r in mine if r["worked"]]
+    dow_counts = {}
+    for r in worked:
+        dow_counts[r["dow"]] = dow_counts.get(r["dow"], 0) + 1
+    roles, shifts = {}, {}
+    for r in worked:
+        roles[r["section"]] = roles.get(r["section"], 0) + 1
+        label = ("Daily Service" if r["daily_service"]
+                 else "Room cover" if r["cover"]
+                 else "Other duty" if r["kind"] == KIND_OTHER else "Regular")
+        shifts[label] = shifts.get(label, 0) + 1
+    order = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    return {
+        "rows": mine, "worked": worked,
+        "n_worked": len(worked), "n_days": len(mine),
+        "off": len([r for r in mine if r["kind"] == KIND_OFF]),
+        "by_dow": {d: dow_counts.get(d, 0) for d in order},
+        "roles": dict(sorted(roles.items(), key=lambda x: -x[1])),
+        "shifts": dict(sorted(shifts.items(), key=lambda x: -x[1])),
+        "usual_days": [d for d in order
+                       if dow_counts.get(d, 0) >= max(1, max(dow_counts.values()) * 0.6)]
+                      if dow_counts else [],
+    }
+
+def period_bounds(today=None):
+    """(week_start, month_start, year_start) as ISO strings, weeks Sunday-based."""
+    today = today or _dt.date.today()
+    week_start = today - _dt.timedelta(days=(today.weekday() + 1) % 7)
+    return (week_start.isoformat(),
+            today.replace(day=1).isoformat(),
+            today.replace(month=1, day=1).isoformat())
+
 def write_overrides_to_workbook(raw_bytes, weeks, overrides):
     """Write in-app edits into a copy of the uploaded workbook.
 
@@ -476,11 +615,22 @@ def build_roster_update(people, existing_roster=None):
 
     hk_roster, ds_team, changes, new_people = {}, [], [], []
     inspectors, rqs = {}, {1: "", 2: ""}
-    others, unknown = [], []
+    others, unknown, cover = [], [], []
 
     for p in people:
         if p["kind"] == KIND_UNKNOWN and p["raw"]:
             unknown.append((p["name"], p["raw"]))
+        # A houseperson or lead put on rooms today counts as a housekeeper.
+        if p["group"] != "hk" and is_room_cover(p["raw"]):
+            canonical = by_norm.get(norm_name(p["name"]), p["name"])
+            bld = cover_building(p["raw"])
+            hk_roster[canonical] = {"building": bld, "present": True}
+            cover.append({"name": canonical, "from": p["section"],
+                          "raw": p["raw"], "building": bld})
+            if "daily service" in p["raw"].lower():
+                ds_team.append(canonical)
+            others.append(p)
+            continue
         if p["group"] == "hk":
             canonical = by_norm.get(norm_name(p["name"]), p["name"])
             old = existing_roster.get(canonical, {})
@@ -509,4 +659,5 @@ def build_roster_update(people, existing_roster=None):
         "new_people":  new_people,
         "others":      others,
         "unknown":     unknown,
+        "cover":       cover,
     }

@@ -175,6 +175,7 @@ cu = auth.current_user()
 # ── Manual sidebar navigation (replaces hidden auto-nav) ─────────────────────
 with st.sidebar:
     st.markdown("### Navigate")
+    st.page_link("pages/4_My_Home.py", label="My Home")
     st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
     st.page_link("pages/1_Dashboard.py", label="Dashboard")
     st.page_link("pages/3_Roster_Import.py", label="Roster Import")

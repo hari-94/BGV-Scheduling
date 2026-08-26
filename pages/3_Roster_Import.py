@@ -29,9 +29,13 @@ if not st.session_state.get("logged_in"):
                 '<div style="color:#64748b">Please sign in from the main page.</div></div>',
                 unsafe_allow_html=True)
     st.stop()
-if not auth.can("can_edit_roster"):
-    st.error("Admin access required to import or edit the staff schedule.")
+# Admin and RQS both run schedules day to day, so both get this page.
+# can_generate is exactly that distinction: true for admin and rqs, false for
+# housekeepers (who get My Home instead).
+if not auth.can("can_generate"):
+    st.error("This page is for admins and RQS. Your own schedule is on **My Home**.")
     st.stop()
+IS_ADMIN = auth.can("can_manage_users")
 
 st.markdown("""
 <style>
@@ -68,6 +72,20 @@ table.wk tr.grp td{background:#eef2f7;font-family:'DM Mono',monospace;font-size:
 .cell{display:block;border-radius:5px;padding:2px 6px;font-size:.72rem;line-height:1.3}
 .chg{outline:2px solid #f59e0b;outline-offset:1px}
 .ovr{box-shadow:inset 3px 0 0 #7c3aed}
+.cov{box-shadow:inset 0 -2px 0 #7c3aed}
+table.wk tbody tr:hover td{background:#f7f9fc}
+table.wk tbody tr:hover td.nm{background:#eef2f7}
+.cell{transition:transform .1s ease}
+.cell:hover{transform:translateY(-1px)}
+.stTabs [data-baseweb="tab-list"]{gap:4px;background:#fff!important;
+  border:1px solid var(--border)!important;border-radius:10px;padding:4px!important}
+.stTabs [data-baseweb="tab"]{border-radius:7px!important;padding:7px 15px!important;
+  font-size:.78rem!important;font-weight:600!important;color:var(--txt2)!important;
+  border:none!important;background:transparent!important}
+.stTabs [aria-selected="true"]{background:#2563a8!important;color:#fff!important}
+.stamp{animation:fadeUp .35s cubic-bezier(.16,1,.3,1) both}
+@keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+[data-testid="stMetricValue"]{font-family:'Syne',sans-serif!important;font-weight:700!important}
 footer{visibility:hidden!important;}#MainMenu{visibility:hidden!important;}
 header[data-testid="stHeader"]{background:transparent!important;height:0!important;}
 section[data-testid="stSidebar"]{background:#fff!important;border-right:1px solid var(--border)!important;}
@@ -85,6 +103,7 @@ section[data-testid="stSidebar"]{background:#fff!important;border-right:1px soli
 
 with st.sidebar:
     st.markdown("### Navigate")
+    st.page_link("pages/4_My_Home.py", label="My Home")
     st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
     st.page_link("pages/1_Dashboard.py", label="Dashboard")
     st.page_link("pages/3_Roster_Import.py", label="Roster Import")
@@ -182,8 +201,11 @@ else:
                 '<span class="v">Never — upload the workbook below</span></div></div>',
                 unsafe_allow_html=True)
 
-tab_week, tab_changes, tab_sync, tab_apply = st.tabs(
-    ["Week view", "What changed", "Upload & sync", "Apply to roster"])
+# Ordered by how often each is actually used: the week grid is a daily glance,
+# attendance drives time-off decisions, applying is occasional now that it
+# happens automatically, and uploading is weekly.
+tab_week, tab_att, tab_apply, tab_changes, tab_sync = st.tabs(
+    ["Week view", "Attendance", "Apply to roster", "What changed", "Upload & sync"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  UPLOAD & SYNC
@@ -362,6 +384,22 @@ with tab_week:
               '<span><span class="pill" style="background:#fff;box-shadow:inset 3px 0 0 #7c3aed">&nbsp;&nbsp;</span> edited in app</span>'
             + '</div>', unsafe_allow_html=True)
 
+        with st.expander("What the numbers mean (from the workbook's own legend)"):
+            lc = st.columns(2)
+            with lc[0]:
+                st.markdown('<div class="mono">HOUSEKEEPER — 8AM TO 10AM EXTRA TASK</div>',
+                            unsafe_allow_html=True)
+                st.markdown("".join(
+                    f'<div style="font-size:.79rem;margin:3px 0"><b>{k}</b> &nbsp;{e(v)}</div>'
+                    for k, v in ri.HK_TASK_LEGEND.items()), unsafe_allow_html=True)
+                st.caption("They clean rooms the rest of the day — the number never "
+                           "means unavailable.")
+            with lc[1]:
+                st.markdown('<div class="mono">HOUSEPERSON — ZONE</div>', unsafe_allow_html=True)
+                st.markdown("".join(
+                    f'<div style="font-size:.79rem;margin:3px 0"><b>{k}</b> &nbsp;{e(v)}</div>'
+                    for k, v in ri.HP_ZONE_LEGEND.items()), unsafe_allow_html=True)
+
         # ── grid ──────────────────────────────────────────────────────────────
         dates = eff["dates"]
         head = "".join(
@@ -380,11 +418,16 @@ with tab_week:
                 bg, fg = KIND_STYLE[kind]
                 cls = "cell"
                 if (name, dt) in changed_set: cls += " chg"
-                tip = ""
+                tips = []
+                means = ri.legend_for(rec, raw)
+                if means: tips.append(means)
+                if rec["group"] != "hk" and ri.is_room_cover(raw):
+                    cls += " cov"; tips.append("On guest rooms today")
                 if (name, dt) in applied:
                     cls += " ovr"
-                    was = applied[(name, dt)]["excel"] or "(blank)"
-                    tip = f' title="Edited in app · Excel says: {e(was)}"'
+                    tips.append(f'Edited in app · Excel says: '
+                                f'{applied[(name, dt)]["excel"] or "(blank)"}')
+                tip = f' title="{e(" — ".join(tips))}"' if tips else ""
                 tds.append(f'<td><span class="{cls}" style="background:{bg};color:{fg}"{tip}>'
                            f'{e(raw) or "&nbsp;"}</span></td>')
             body.append(f'<tr><td class="nm">{e(name)}</td>{"".join(tds)}</tr>')
@@ -477,6 +520,135 @@ with tab_week:
                     st.rerun()
                 except Exception as ex:
                     st.error(f"Could not revert: {ex}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ATTENDANCE — how much has each person actually worked
+# ══════════════════════════════════════════════════════════════════════════════
+@st.cache_data(ttl=300, show_spinner="Reading attendance history…")
+def _history(_token: str):
+    """Flatten every stored week once. Keyed on a token so it refreshes when
+    the workbook or the in-app edits change."""
+    weeks = db.load_staff_weeks()
+    return ri.history_rows(weeks, db.load_staff_overrides())
+
+with tab_att:
+    if not week_keys:
+        st.info("No weeks stored yet. Upload the workbook on the **Upload & sync** tab.")
+    else:
+        token = f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}'
+        rows = _history(token)
+        today = datetime.date.today()
+        wk_s, mo_s, yr_s = ri.period_bounds(today)
+        t_iso = today.isoformat()
+
+        c = st.columns([2, 1, 2])
+        with c[0]:
+            period = st.radio("Period", ["This week", "This month", "This year", "All stored"],
+                              horizontal=True, key="ri_att_period", label_visibility="collapsed")
+        start = {"This week": wk_s, "This month": mo_s,
+                 "This year": yr_s, "All stored": "0000-01-01"}[period]
+        with c[2]:
+            groups2 = ["Everyone", "Housekeepers", "RQS", "Other teams"]
+            gsel = st.selectbox("Team", groups2, key="ri_att_grp", label_visibility="collapsed")
+
+        sub = [r for r in rows if start <= r["date"] <= t_iso]
+        if gsel == "Housekeepers":  sub = [r for r in sub if r["group"] == "hk"]
+        elif gsel == "RQS":         sub = [r for r in sub if r["group"] == "rqs"]
+        elif gsel == "Other teams": sub = [r for r in sub if r["group"] == "other"]
+
+        if not sub:
+            st.info(f"Nothing recorded for **{period.lower()}** yet.")
+        else:
+            people = sorted({r["key"] for r in sub})
+            summ = {p: ri.summarise_person(sub, person_key=p) for p in people}
+            worked_days = sum(s["n_worked"] for s in summ.values())
+            m = st.columns(4)
+            m[0].metric("People", len(people))
+            m[1].metric("Days worked", worked_days)
+            m[2].metric("Avg days / person", f'{worked_days/max(len(people),1):.1f}')
+            m[3].metric("Covering rooms",
+                        sum(1 for r in sub if r["cover"]))
+
+            st.markdown('<p class="sec">Who has worked how much</p>', unsafe_allow_html=True)
+            st.caption("Sorted by days worked. Use it to see who is due time off "
+                       "and who is carrying the week.")
+            tbl = []
+            for p in people:
+                s = summ[p]
+                if not s["rows"]: continue
+                rec0 = s["rows"][0]
+                tbl.append({
+                    "Person": rec0["person"],
+                    "Team": rec0["section"],
+                    "Worked": s["n_worked"],
+                    "Off": s["off"],
+                    "Daily Service": s["shifts"].get("Daily Service", 0),
+                    "Room cover": s["shifts"].get("Room cover", 0),
+                    "Other duty": s["shifts"].get("Other duty", 0),
+                    "Usual days": ", ".join(s["usual_days"]) or "—",
+                })
+            df = pd.DataFrame(tbl).sort_values("Worked", ascending=False)
+            st.dataframe(
+                df, use_container_width=True, hide_index=True,
+                height=min(60 + 33 * len(df), 520),
+                column_config={
+                    "Worked": st.column_config.ProgressColumn(
+                        "Worked", format="%d",
+                        min_value=0, max_value=int(df["Worked"].max() or 1)),
+                })
+
+            st.markdown('<p class="sec">One person in detail</p>', unsafe_allow_html=True)
+            pick = st.selectbox("Person", [summ[p]["rows"][0]["person"] for p in people
+                                           if summ[p]["rows"]],
+                                key="ri_att_person", label_visibility="collapsed")
+            pk = next(p for p in people if summ[p]["rows"] and
+                      summ[p]["rows"][0]["person"] == pick)
+            s = summ[pk]
+            d1, d2 = st.columns([3, 2])
+            with d1:
+                st.markdown('<div class="mono" style="margin-bottom:4px">DAYS OF THE WEEK '
+                            'USUALLY WORKED</div>', unsafe_allow_html=True)
+                mx = max(s["by_dow"].values()) or 1
+                bars = ""
+                for d, n in s["by_dow"].items():
+                    pct = int(100 * n / mx)
+                    hot = n >= mx * 0.6
+                    bars += (f'<div style="display:flex;align-items:center;gap:9px;margin:3px 0">'
+                             f'<span style="width:34px;font-size:.74rem;color:#5b6675">{d}</span>'
+                             f'<div style="flex:1;background:#eef1f5;border-radius:4px;height:14px">'
+                             f'<div style="width:{pct}%;height:14px;border-radius:4px;'
+                             f'background:{"#2563a8" if hot else "#b9c6d6"}"></div></div>'
+                             f'<span style="width:26px;text-align:right;font-size:.74rem;'
+                             f'color:#16202e;font-weight:600">{n}</span></div>')
+                st.markdown(bars, unsafe_allow_html=True)
+            with d2:
+                st.markdown('<div class="mono" style="margin-bottom:4px">ROLES &amp; SHIFTS</div>',
+                            unsafe_allow_html=True)
+                chips = ""
+                for k2, v2 in list(s["roles"].items())[:4]:
+                    chips += (f'<span class="pill" style="background:#eef2ff;color:#3730a3;'
+                              f'margin:0 4px 4px 0;display:inline-block">{e(k2)} · {v2}</span>')
+                for k2, v2 in s["shifts"].items():
+                    bg, fg = {"Daily Service": ("#ccfbf1", "#115e59"),
+                              "Room cover": ("#ede9fe", "#5b21b6"),
+                              "Other duty": ("#fef3c7", "#92400e")}.get(k2, ("#dcfce7", "#15803d"))
+                    chips += (f'<span class="pill" style="background:{bg};color:{fg};'
+                              f'margin:0 4px 4px 0;display:inline-block">{e(k2)} · {v2}</span>')
+                st.markdown(chips, unsafe_allow_html=True)
+                st.markdown(f'<div style="margin-top:8px;font-size:.8rem;color:#5b6675">'
+                            f'Worked <b>{s["n_worked"]}</b> of {s["n_days"]} days '
+                            f'({100*s["n_worked"]/max(s["n_days"],1):.0f}%) · '
+                            f'off <b>{s["off"]}</b></div>', unsafe_allow_html=True)
+
+            with st.expander(f"Every recorded day for {pick}"):
+                dd = pd.DataFrame([{"Date": r["date"], "Day": r["dow"], "Team": r["section"],
+                                    "Cell": r["raw"] or "—",
+                                    "Status": KIND_LABEL[r["kind"]],
+                                    "Means": ri.legend_for(r, r["raw"]) or "—"}
+                                   for r in sorted(s["rows"], key=lambda x: x["date"],
+                                                   reverse=True)])
+                st.dataframe(dd, use_container_width=True, hide_index=True,
+                             height=min(60 + 33 * len(dd), 420))
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  WHAT CHANGED
@@ -604,6 +776,17 @@ with tab_apply:
         m[2].metric("Inspectors present", n_ins)
         m[3].metric("RQS 1 / RQS 2", f'{update["rqs1"] or "—"} / {update["rqs2"] or "—"}')
 
+        if update.get("cover"):
+            rows = "<br>".join(
+                f'&nbsp;&nbsp;<b>{e(c["name"])}</b> ({e(c["from"])}) → Building {c["building"]} '
+                f'<span style="opacity:.7">· "{e(c["raw"])}"</span>'
+                for c in update["cover"])
+            st.markdown(f'<div style="background:#ede9fe;border:1px solid #c4b5fd;border-radius:8px;'
+                        f'padding:10px 13px;font-size:.78rem;color:#5b21b6;margin-top:8px">'
+                        f'<b>{len(update["cover"])} person(s) drafted onto rooms</b> — the sheet '
+                        f'puts them on housekeeping today, so they are added to the roster:'
+                        f'<br>{rows}</div>', unsafe_allow_html=True)
+
         if update["building_changes"]:
             rows = "<br>".join(f'&nbsp;&nbsp;<b>{e(n)}</b>: Building {o} → Building {w}'
                                for n, o, w in update["building_changes"])
@@ -626,7 +809,8 @@ with tab_apply:
 
         st.markdown('<p class="sec">Detail</p>', unsafe_allow_html=True)
         det = pd.DataFrame([{"Name": p["name"], "Section": p["section"],
-                             "Status": KIND_LABEL[p["kind"]], "Cell": p["raw"] or "—"}
+                             "Status": KIND_LABEL[p["kind"]], "Cell": p["raw"] or "—",
+                             "Means": ri.legend_for(p, p["raw"]) or "—"}
                             for p in people])
         st.dataframe(det, use_container_width=True, hide_index=True,
                      height=min(60 + 33 * len(det), 460))

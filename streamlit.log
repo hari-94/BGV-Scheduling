@@ -1,4 +1,4 @@
-2026-08-26 10:19:42.705 
+2026-08-26 10:31:05.312 
 Warning: the config option 'server.enableCORS=false' is not compatible with 'server.enableXsrfProtection=true'.
 As a result, 'server.enableCORS' is being overridden to 'true'.
 
@@ -14,5 +14,5 @@ If cross origin resource sharing is required, please disable server.enableXsrfPr
 
   Local URL: http://localhost:8502
   Network URL: http://172.16.0.166:8502
-  External URL: http://4.18.17.114:8502
+  External URL: http://198.178.30.62:8502
 
