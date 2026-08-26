@@ -122,16 +122,16 @@ def person_label(info):
     return txt + f'  ·  {info["home"]}' if info.get("home") else txt
 
 
-# Same shades as the Roster Import grid so the two pages read alike.
+# Same brighter palette as the Roster Import grid, so the pages read alike.
 KIND_STYLE = {
-    ri.KIND_WORKING: ("#d7f5df", "#14663a", "Working"),
-    ri.KIND_DAILY:   ("#c5f2ef", "#0b5c58", "Daily Service"),
-    ri.KIND_OTHER:   ("#fdecc4", "#8a5300", "Working — other duty"),
-    ri.KIND_VTO:     ("#dfe3ff", "#2f3597", "VTO — paid"),
+    ri.KIND_WORKING: ("#a7f0bf", "#08532c", "Working"),
+    ri.KIND_DAILY:   ("#93ebe5", "#04504b", "Daily Service"),
+    ri.KIND_OTHER:   ("#ffdc73", "#6f3d00", "Working — other duty"),
+    ri.KIND_VTO:     ("#b9c2ff", "#1d24a3", "VTO — paid"),
     # Red is reserved for the thing the workbook paints red.
-    ri.KIND_NOCALL:  ("#ffc9c9", "#8f1414", "No call / no show"),
-    ri.KIND_OFF:     ("#f1f4f8", "#9aa5b4", "Off"),
-    ri.KIND_UNKNOWN: ("#f3e4ff", "#6b21a8", "Check with your lead"),
+    ri.KIND_NOCALL:  ("#ff8f8f", "#6d0b0b", "No call / no show"),
+    ri.KIND_OFF:     ("#e9eef4", "#7d8896", "Off"),
+    ri.KIND_UNKNOWN: ("#ddb3ff", "#4c1580", "Check with your lead"),
 }
 
 cu = auth.current_user()

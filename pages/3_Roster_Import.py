@@ -116,16 +116,17 @@ def person_label(info):
     return txt + f'  ·  {info["home"]}' if info.get("home") else txt
 
 
-# Shades chosen so the states read apart at a glance. No-call is the loudest
-# on purpose — it is the one a manager is scanning for.
+# Brighter, more saturated so the states carry at a glance in a dense grid.
+# Foregrounds are the darkened form of each hue, which keeps the text legible
+# on top of it. "Off" stays muted on purpose — it is the absence of a state.
 KIND_STYLE = {
-    ri.KIND_WORKING: ("#d7f5df", "#14663a"),   # green
-    ri.KIND_DAILY:   ("#c5f2ef", "#0b5c58"),   # teal
-    ri.KIND_OTHER:   ("#fdecc4", "#8a5300"),   # amber
-    ri.KIND_VTO:     ("#dfe3ff", "#2f3597"),   # indigo
-    ri.KIND_NOCALL:  ("#ffc9c9", "#8f1414"),   # strong red
-    ri.KIND_OFF:     ("#f1f4f8", "#9aa5b4"),   # pale grey
-    ri.KIND_UNKNOWN: ("#f3e4ff", "#6b21a8"),   # violet
+    ri.KIND_WORKING: ("#a7f0bf", "#08532c"),   # green
+    ri.KIND_DAILY:   ("#93ebe5", "#04504b"),   # teal
+    ri.KIND_OTHER:   ("#ffdc73", "#6f3d00"),   # amber
+    ri.KIND_VTO:     ("#b9c2ff", "#1d24a3"),   # indigo
+    ri.KIND_NOCALL:  ("#ff8f8f", "#6d0b0b"),   # red
+    ri.KIND_OFF:     ("#e9eef4", "#7d8896"),   # grey
+    ri.KIND_UNKNOWN: ("#ddb3ff", "#4c1580"),   # violet
 }
 KIND_LABEL = {ri.KIND_DAILY: "Daily Service", ri.KIND_WORKING: "Working",
               ri.KIND_OFF: "Off", ri.KIND_OTHER: "Other duty (counts as worked)",
@@ -480,11 +481,16 @@ with tab_week:
 
         st.markdown(
             '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:.7rem;color:#5b6675;margin:.5rem 0">'
-            + "".join(f'<span><span class="pill" style="background:{b};color:{f}">&nbsp;&nbsp;</span> {KIND_LABEL[k]}</span>'
+            # A hairline keeps the palest swatches from vanishing on white.
+            + "".join(f'<span><span class="pill" style="background:{b};color:{f};'
+                      f'border:1px solid rgba(22,32,46,.12)">&nbsp;&nbsp;</span> '
+                      f'{KIND_LABEL[k]}</span>'
                       for k, (b, f) in KIND_STYLE.items())
-            + '<span><span class="pill" style="background:#ffc9c9;box-shadow:inset 3px 0 0 #b91c1c">&nbsp;&nbsp;</span> no call / no show</span>'
-              '<span><span class="pill" style="background:#fff;color:#f59e0b;outline:2px solid #f59e0b">&nbsp;&nbsp;</span> changed at last sync</span>'
-              '<span><span class="pill" style="background:#fff;box-shadow:inset 3px 0 0 #7c3aed">&nbsp;&nbsp;</span> edited in app</span>'
+            + '<span><span class="pill" style="background:#fff;'
+              'outline:2px solid #f59e0b">&nbsp;&nbsp;</span> changed at last sync</span>'
+              '<span><span class="pill" style="background:#fff;'
+              'border:1px solid rgba(22,32,46,.12);box-shadow:inset 3px 0 0 #7c3aed">'
+              '&nbsp;&nbsp;</span> edited in app</span>'
             + '</div>', unsafe_allow_html=True)
 
         with st.expander("Download this week as Excel"):
