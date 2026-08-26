@@ -121,6 +121,30 @@ def human_ago(iso):
 # ══════════════════════════════════════════════════════════════════════════════
 #  HEADER — last-loaded stamp
 # ══════════════════════════════════════════════════════════════════════════════
+if not db.settings_table_ready():
+    st.markdown('<p class="pg-title">Roster Import</p>', unsafe_allow_html=True)
+    st.error(
+        "**One-time database setup needed.**\n\n"
+        "This page stores the staff schedule under text keys, but the "
+        "`app_settings` table does not exist yet, so nothing can be saved.\n\n"
+        "Open **Supabase → SQL Editor**, paste the contents of "
+        "`migration_app_settings.sql` from the repo, and run it. Then reload "
+        "this page.")
+    with st.expander("Show the SQL"):
+        try:
+            _sql = open(os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                                     "migration_app_settings.sql"), encoding="utf-8").read()
+        except Exception:
+            _sql = ("CREATE TABLE IF NOT EXISTS app_settings (\n"
+                    "  key        TEXT        PRIMARY KEY,\n"
+                    "  payload    JSONB       NOT NULL,\n"
+                    "  updated_at TIMESTAMPTZ DEFAULT now()\n);")
+        st.code(_sql, language="sql")
+    st.caption("Note: the standing roster (add/remove staff, building moves) has "
+               "never persisted either — it relies on the same missing table. "
+               "Running this SQL fixes both.")
+    st.stop()
+
 meta = db.load_staff_meta() or {}
 overrides = db.load_staff_overrides()
 week_keys = db.staff_week_keys()

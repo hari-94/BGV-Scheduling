@@ -106,12 +106,8 @@ def save_roster(hk_roster: dict, insp_roster: dict):
     staff STICK across sessions, reloads, and redeploys — instead of resetting to
     the hard-coded defaults. Stored in schedule_full under the fixed key 'roster'
     (reusing the existing table so no schema change is needed)."""
-    payload = json.dumps({"hk_roster": hk_roster, "insp_roster": insp_roster}, default=str)
     try:
-        _client().table("schedule_full").upsert(
-            {"date": "roster", "payload": payload},
-            on_conflict="date"
-        ).execute()
+        _upsert_key("roster", {"hk_roster": hk_roster, "insp_roster": insp_roster})
     except Exception as ex:
         print(f"[db] save_roster error: {ex}")
         raise
@@ -120,16 +116,7 @@ def load_roster() -> dict | None:
     """Load the persisted standing rosters. Returns
     {'hk_roster':..., 'insp_roster':...} or None if none saved yet."""
     try:
-        r = (_client().table("schedule_full")
-             .select("*")
-             .eq("date", "roster")
-             .limit(1)
-             .execute())
-        rows = r.data or []
-        if not rows:
-            return None
-        payload = rows[0]["payload"]
-        return json.loads(payload) if isinstance(payload, str) else payload
+        return _load_key("roster")
     except Exception as ex:
         print(f"[db] load_roster error: {ex}")
         return None
@@ -146,20 +133,80 @@ STAFF_FILE_KEY      = "staffsched_file"
 STAFF_AUTO_KEY      = "staffsched_autoapply"
 STAFF_WEEK_PREFIX   = "staffweek_"
 
+SETTINGS_TABLE = "app_settings"
+
+class SettingsTableMissing(RuntimeError):
+    """Raised when app_settings has not been created yet."""
+
+def _is_missing_table(ex) -> bool:
+    s = str(ex)
+    return "app_settings" in s and ("schema cache" in s or "does not exist" in s)
+
 def _upsert_key(key: str, obj) -> None:
-    _client().table("schedule_full").upsert(
-        {"date": key, "payload": json.dumps(obj, default=str)},
-        on_conflict="date"
-    ).execute()
+    """Write a text-keyed settings row.
+
+    NOT schedule_full — that table's `date` column is a real DATE, so a text
+    key like "roster" or "staffweek_2026-08-23" is rejected outright.
+    """
+    try:
+        _client().table(SETTINGS_TABLE).upsert(
+            {"key": key, "payload": json.dumps(obj, default=str)},
+            on_conflict="key"
+        ).execute()
+    except Exception as ex:
+        if _is_missing_table(ex):
+            raise SettingsTableMissing(SETUP_HINT) from ex
+        raise
 
 def _load_key(key: str):
-    r = (_client().table("schedule_full").select("*")
-         .eq("date", key).limit(1).execute())
+    try:
+        r = (_client().table(SETTINGS_TABLE).select("*")
+             .eq("key", key).limit(1).execute())
+    except Exception as ex:
+        if _is_missing_table(ex):
+            raise SettingsTableMissing(SETUP_HINT) from ex
+        raise
     rows = r.data or []
     if not rows:
         return None
     payload = rows[0]["payload"]
     return json.loads(payload) if isinstance(payload, str) else payload
+
+def _like_keys(prefix: str, with_payload: bool = False):
+    try:
+        r = (_client().table(SETTINGS_TABLE)
+             .select("*" if with_payload else "key")
+             .like("key", prefix + "%").execute())
+        return r.data or []
+    except Exception as ex:
+        if _is_missing_table(ex):
+            raise SettingsTableMissing(SETUP_HINT) from ex
+        raise
+
+def _delete_key(key: str) -> None:
+    try:
+        _client().table(SETTINGS_TABLE).delete().eq("key", key).execute()
+    except Exception as ex:
+        if _is_missing_table(ex):
+            raise SettingsTableMissing(SETUP_HINT) from ex
+        raise
+
+# ASCII only: this string is print()ed to the console, and a Windows terminal
+# on the cp1252 code page raises UnicodeEncodeError on characters like an arrow
+# -- which would turn a handled error into a crash.
+SETUP_HINT = (
+    "The 'app_settings' table does not exist yet. Run migration_app_settings.sql "
+    "in the Supabase SQL Editor to create it. Until then the staff schedule and "
+    "the standing roster cannot be saved."
+)
+
+def settings_table_ready() -> bool:
+    """True when app_settings exists — lets the UI say so once, clearly."""
+    try:
+        _client().table(SETTINGS_TABLE).select("key").limit(1).execute()
+        return True
+    except Exception:
+        return False
 
 def save_staff_meta(meta: dict) -> None:
     """Record who uploaded the workbook and when — drives the header stamp."""
@@ -193,12 +240,10 @@ def load_staff_week(week_key: str) -> dict | None:
 def load_staff_weeks() -> dict:
     """Every stored week, keyed by its Sunday ISO date."""
     try:
-        r = (_client().table("schedule_full").select("*")
-             .like("date", STAFF_WEEK_PREFIX + "%").execute())
         out = {}
-        for row in (r.data or []):
+        for row in _like_keys(STAFF_WEEK_PREFIX, with_payload=True):
             payload = row["payload"]
-            out[row["date"][len(STAFF_WEEK_PREFIX):]] = (
+            out[row["key"][len(STAFF_WEEK_PREFIX):]] = (
                 json.loads(payload) if isinstance(payload, str) else payload)
         return out
     except Exception as ex:
@@ -208,17 +253,15 @@ def load_staff_weeks() -> dict:
 def staff_week_keys() -> list:
     """Just the stored week ids — cheaper than pulling every payload."""
     try:
-        r = (_client().table("schedule_full").select("date")
-             .like("date", STAFF_WEEK_PREFIX + "%").execute())
-        return sorted(row["date"][len(STAFF_WEEK_PREFIX):] for row in (r.data or []))
+        return sorted(row["key"][len(STAFF_WEEK_PREFIX):]
+                      for row in _like_keys(STAFF_WEEK_PREFIX))
     except Exception as ex:
         print(f"[db] staff_week_keys error: {ex}")
         return []
 
 def delete_staff_week(week_key: str) -> None:
     try:
-        _client().table("schedule_full").delete().eq(
-            "date", STAFF_WEEK_PREFIX + week_key).execute()
+        _delete_key(STAFF_WEEK_PREFIX + week_key)
     except Exception as ex:
         print(f"[db] delete_staff_week error: {ex}")
 

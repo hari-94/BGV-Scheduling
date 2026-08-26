@@ -1,0 +1,129 @@
+2026-08-26 10:09:05.304 
+Warning: the config option 'server.enableCORS=false' is not compatible with 'server.enableXsrfProtection=true'.
+As a result, 'server.enableCORS' is being overridden to 'true'.
+
+More information:
+In order to protect against CSRF attacks, we send a cookie with each request.
+To do so, we must specify allowable origins, which places a restriction on
+cross-origin resource sharing.
+
+If cross origin resource sharing is required, please disable server.enableXsrfProtection.
+            
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8502
+  Network URL: http://172.16.0.166:8502
+  External URL: http://198.178.30.62:8502
+
+
+A module that was compiled using NumPy 1.x cannot be run in
+NumPy 2.4.6 as it may crash. To support both 1.x and 2.x
+versions of NumPy, modules must be compiled with NumPy 2.0.
+Some module may need to rebuild instead e.g. with 'pybind11>=2.12'.
+
+If you are a user of the module, the easiest solution will be to
+downgrade to 'numpy<2' or try to upgrade the affected module.
+We expect that some modules will need time to support NumPy 2.
+
+Traceback (most recent call last):  File "C:\Users\harip\Anaconda3\Lib\threading.py", line 1030, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Users\harip\Anaconda3\Lib\threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "C:\Users\harip\Anaconda3\Lib\threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 320, in _run_script_thread
+    self._run_script(request.rerun_data)
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 595, in _run_script
+    ) = exec_func_with_error_handling(code_to_exec, ctx)
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 88, in exec_func_with_error_handling
+    result = func()
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 579, in code_to_exec
+    exec(code, module.__dict__)
+  File "C:\Users\harip\AppData\Local\Temp\claude\C--Users-harip\182ffed6-c9fe-4580-a32b-82537717aa8d\scratchpad\bgv\cleaning_scheduler.py", line 5, in <module>
+    import pandas as pd
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\__init__.py", line 61, in <module>
+    from pandas.core.api import (
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\api.py", line 28, in <module>
+    from pandas.core.arrays import Categorical
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\arrays\__init__.py", line 1, in <module>
+    from pandas.core.arrays.arrow import ArrowExtensionArray
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\arrays\arrow\__init__.py", line 5, in <module>
+    from pandas.core.arrays.arrow.array import ArrowExtensionArray
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\arrays\arrow\array.py", line 53, in <module>
+    from pandas.core import (
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\ops\__init__.py", line 8, in <module>
+    from pandas.core.ops.array_ops import (
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\ops\array_ops.py", line 56, in <module>
+    from pandas.core.computation import expressions
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\computation\expressions.py", line 21, in <module>
+    from pandas.core.computation.check import NUMEXPR_INSTALLED
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\computation\check.py", line 5, in <module>
+    ne = import_optional_dependency("numexpr", errors="warn")
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\compat\_optional.py", line 135, in import_optional_dependency
+    module = importlib.import_module(name)
+  File "C:\Users\harip\Anaconda3\Lib\importlib\__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\numexpr\__init__.py", line 24, in <module>
+    from numexpr.interpreter import MAX_THREADS, use_vml, __BLOCK_SIZE1__
+AttributeError: _ARRAY_API not found
+
+A module that was compiled using NumPy 1.x cannot be run in
+NumPy 2.4.6 as it may crash. To support both 1.x and 2.x
+versions of NumPy, modules must be compiled with NumPy 2.0.
+Some module may need to rebuild instead e.g. with 'pybind11>=2.12'.
+
+If you are a user of the module, the easiest solution will be to
+downgrade to 'numpy<2' or try to upgrade the affected module.
+We expect that some modules will need time to support NumPy 2.
+
+Traceback (most recent call last):  File "C:\Users\harip\Anaconda3\Lib\threading.py", line 1030, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Users\harip\Anaconda3\Lib\threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "C:\Users\harip\Anaconda3\Lib\threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 320, in _run_script_thread
+    self._run_script(request.rerun_data)
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 595, in _run_script
+    ) = exec_func_with_error_handling(code_to_exec, ctx)
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 88, in exec_func_with_error_handling
+    result = func()
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 579, in code_to_exec
+    exec(code, module.__dict__)
+  File "C:\Users\harip\AppData\Local\Temp\claude\C--Users-harip\182ffed6-c9fe-4580-a32b-82537717aa8d\scratchpad\bgv\cleaning_scheduler.py", line 5, in <module>
+    import pandas as pd
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\__init__.py", line 61, in <module>
+    from pandas.core.api import (
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\api.py", line 28, in <module>
+    from pandas.core.arrays import Categorical
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\arrays\__init__.py", line 1, in <module>
+    from pandas.core.arrays.arrow import ArrowExtensionArray
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\arrays\arrow\__init__.py", line 5, in <module>
+    from pandas.core.arrays.arrow.array import ArrowExtensionArray
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\arrays\arrow\array.py", line 67, in <module>
+    from pandas.core.arrays.masked import BaseMaskedArray
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\arrays\masked.py", line 61, in <module>
+    from pandas.core import (
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\core\nanops.py", line 52, in <module>
+    bn = import_optional_dependency("bottleneck", errors="warn")
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\pandas\compat\_optional.py", line 135, in import_optional_dependency
+    module = importlib.import_module(name)
+  File "C:\Users\harip\Anaconda3\Lib\importlib\__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\bottleneck\__init__.py", line 7, in <module>
+    from .move import (move_argmax, move_argmin, move_max, move_mean, move_median,
+Traceback (most recent call last):
+  File "C:\Users\harip\Anaconda3\Lib\site-packages\numpy\core\_multiarray_umath.py", line 46, in __getattr__
+    raise ImportError(msg)
+ImportError: 
+A module that was compiled using NumPy 1.x cannot be run in
+NumPy 2.4.6 as it may crash. To support both 1.x and 2.x
+versions of NumPy, modules must be compiled with NumPy 2.0.
+Some module may need to rebuild instead e.g. with 'pybind11>=2.12'.
+
+If you are a user of the module, the easiest solution will be to
+downgrade to 'numpy<2' or try to upgrade the affected module.
+We expect that some modules will need time to support NumPy 2.
+
+
