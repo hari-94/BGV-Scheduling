@@ -22,7 +22,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 7
+__version__ = 8
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -106,6 +106,42 @@ NAME_ALIASES = {
     "elibeth h":         "elibeth herrera",
     "jhoselyn a":        "jhoselyn",
     "jhoselyn m":        "jhoselyn",
+    # One person who has worked Building 1, Building 3, Houseperson AM and PM.
+    # A different building in a different week never means a different person —
+    # only the spelling of the name does.
+    "junior d":          "junior torres",
+    "junior t":          "junior torres",
+    # Short form and full form of one person.
+    "danny":             "danny r",
+    "avelino":           "avelino rafael",
+    "dianis chavez":     "dianis",
+    "escarleth j":       "escarleth",
+    "francys m":         "francys",
+    "mauricio rivas":    "mauricio",
+    "mauricio r":        "mauricio",
+    "jose zendejas":     "jose z",       # Jose M is the AM Lead, a different person
+    "nancy ramirez":     "nancy",
+    # The Jennyfer spellings are one person, and NOT the same as Jenny Caicedo.
+    "jennyfer c":        "jennyfer caicedo",
+    "jennyfer":          "jennyfer caicedo",
+    # Jorge Luis, however written. "JORGE" and "Jorge Lead" are other people.
+    "jorge luis vides":  "jorge luis",
+    "jorge l":           "jorge luis",
+}
+
+#: Preferred display name once variants are merged, where the fullest form is
+#: not the one written most often. Without this the label would be whichever
+#: spelling appears most, e.g. "Junior D" rather than "Junior Torres".
+CANONICAL_LABELS = {
+    "junior torres":  "Junior Torres",
+    "liz salazar":    "Liz Salazar",
+    "rigo garcia":    "Rigo Garcia",
+    "cecilia angeles":"Cecilia Angeles",
+    "elibeth herrera":"Elibeth Herrera",
+    "jenni caicedo":  "Jenny Caicedo",
+    "jennyfer caicedo": "Jennyfer Caicedo",
+    "avelino rafael": "Avelino Rafael",
+    "jorge luis":     "Jorge Luis",
 }
 
 def norm_name(s) -> str:
@@ -699,7 +735,8 @@ def people_index(rows):
         groups[pid] = r["group"]
         sections.setdefault(pid, set()).add(r["section"])
         counts[pid] = counts.get(pid, 0) + 1
-    return {pid: {"label": max(sp.items(), key=lambda x: x[1])[0],
+    return {pid: {"label": CANONICAL_LABELS.get(
+                      pid.split("@")[0], max(sp.items(), key=lambda x: x[1])[0]),
                   "group": groups[pid], "sections": sorted(sections[pid]),
                   "home": homes.get(pid, ""), "n": counts[pid]}
             for pid, sp in spellings.items()}
