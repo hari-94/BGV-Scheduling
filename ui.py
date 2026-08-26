@@ -63,26 +63,39 @@ section[data-testid="stSidebar"]{display:none !important;}
 }
 .navactive [data-testid="stPageLink"] a p{color:#fff !important;}
 
-/* Tabs: a soft raised pill rather than a flat block. */
+/* Tabs: a soft raised pill rather than a flat block.
+   The radius is repeated on the selected state and on the inner wrapper —
+   the highlight is painted on a child, so setting it only on the tab button
+   leaves square corners poking out from under the rounded parent. */
 .stTabs [data-baseweb="tab-list"]{
   gap:6px !important;background:#f2f5f9 !important;
-  border:1px solid #e4e8ee !important;border-radius:12px !important;
-  padding:5px !important;
+  border:1px solid #e4e8ee !important;border-radius:14px !important;
+  padding:5px !important;overflow:visible !important;
 }
 .stTabs [data-baseweb="tab"]{
-  border-radius:9px !important;padding:8px 17px !important;
+  border-radius:11px !important;padding:8px 17px !important;
   font-size:.79rem !important;font-weight:600 !important;
   color:#5b6675 !important;border:none !important;background:transparent !important;
-  transition:background .16s ease,color .16s ease,box-shadow .16s ease !important;
+  overflow:hidden !important;
+  transition:background .16s ease,color .16s ease,box-shadow .16s ease,
+             transform .12s ease !important;
 }
-.stTabs [data-baseweb="tab"]:hover{background:rgba(255,255,255,.75) !important;color:#1c4a78 !important;}
+.stTabs [data-baseweb="tab"] > *{border-radius:11px !important;}
+.stTabs [data-baseweb="tab"]:hover{
+  background:rgba(255,255,255,.8) !important;color:#1c4a78 !important;
+}
 .stTabs [aria-selected="true"]{
+  border-radius:11px !important;
   background:linear-gradient(135deg,#1e4f86 0%,#2f74b8 55%,#4a90cc 100%) !important;
   color:#fff !important;
   box-shadow:0 3px 10px rgba(30,79,134,.26),inset 0 1px 0 rgba(255,255,255,.20) !important;
 }
+.stTabs [aria-selected="true"]:hover{transform:translateY(-1px);}
+.stTabs [aria-selected="true"] p,
+.stTabs [aria-selected="true"] div{color:#fff !important;}
+/* Streamlit's own sliding underline would sit square under the pill. */
 .stTabs [data-baseweb="tab-highlight"],
-.stTabs [data-baseweb="tab-border"]{display:none !important;}
+.stTabs [data-baseweb="tab-border"]{display:none !important;background:transparent !important;}
 
 /* Buttons pick up the same family. */
 .stButton>button[kind="primary"]{

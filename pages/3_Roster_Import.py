@@ -87,12 +87,7 @@ table.wk tbody tr:hover td{background:#f7f9fc}
 table.wk tbody tr:hover td.nm{background:#eef2f7}
 .cell{transition:transform .1s ease}
 .cell:hover{transform:translateY(-1px)}
-.stTabs [data-baseweb="tab-list"]{gap:4px;background:#fff!important;
-  border:1px solid var(--border)!important;border-radius:10px;padding:4px!important}
-.stTabs [data-baseweb="tab"]{border-radius:7px!important;padding:7px 15px!important;
-  font-size:.78rem!important;font-weight:600!important;color:var(--txt2)!important;
-  border:none!important;background:transparent!important}
-.stTabs [aria-selected="true"]{background:#2563a8!important;color:#fff!important}
+/* Tab styling lives in ui.py — one source for every page. */
 .stamp{animation:fadeUp .35s cubic-bezier(.16,1,.3,1) both}
 @keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 [data-testid="stMetricValue"]{font-family:'Syne',sans-serif!important;font-weight:700!important}
