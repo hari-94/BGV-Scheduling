@@ -173,11 +173,22 @@ def _load_key(key: str):
     return json.loads(payload) if isinstance(payload, str) else payload
 
 def _like_keys(prefix: str, with_payload: bool = False):
+    """Rows whose key starts with `prefix`.
+
+    Uses PostgREST's '*' wildcard, NOT a literal '%'. A raw '%' goes into the
+    query string unescaped and Supabase's edge worker throws on it (HTTP 500,
+    Cloudflare 1101) rather than running the query.
+
+    The result is re-filtered in Python because SQL LIKE treats '_' as a
+    single-character wildcard, and every prefix here contains one — so
+    'staffweek_*' would also match a hypothetical 'staffweekX...' key.
+    """
     try:
         r = (_client().table(SETTINGS_TABLE)
              .select("*" if with_payload else "key")
-             .like("key", prefix + "%").execute())
-        return r.data or []
+             .like("key", prefix + "*").execute())
+        return [row for row in (r.data or [])
+                if str(row.get("key", "")).startswith(prefix)]
     except Exception as ex:
         if _is_missing_table(ex):
             raise SettingsTableMissing(SETUP_HINT) from ex
