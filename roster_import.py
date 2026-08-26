@@ -22,7 +22,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 10
+__version__ = 11
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -297,7 +297,7 @@ def role_key(rec) -> str:
     g = rec.get("group")
     return "hk" if g == "hk" else ("rqs" if g == "rqs" else rec.get("section", ""))
 
-def options_for(rec, present_values=()) -> list:
+def options_for(rec, present_values=(), extra=()) -> list:
     """Dropdown choices for one person's row.
 
     Anything already in the sheet is appended so an existing one-off never
@@ -305,7 +305,7 @@ def options_for(rec, present_values=()) -> list:
     """
     opts = list(ROLE_OPTIONS.get(role_key(rec), []))
     seen = {o.casefold() for o in opts}
-    for v in present_values:
+    for v in list(extra) + list(present_values):
         v = str(v or "").strip()
         if v and v.casefold() not in seen:
             opts.append(v); seen.add(v.casefold())
@@ -460,9 +460,23 @@ def _walk_people_rows(ws):
         kind, bld = section
         yield r, name, kind, bld
 
-def _person_record(name, group, bld, raw):
+def cell_kind(rec, iso):
+    """Status of one person on one day, red fill included.
+
+    The red no-call marks live beside the cells, not in them, and most such
+    cells are blank — so classifying the text alone reports "off" and the
+    no-call disappears everywhere except the history. Everything that turns a
+    stored week into a status goes through here.
+    """
+    raw = (rec.get("cells") or {}).get(iso, "")
+    if iso in (rec.get("nocall") or []):
+        return KIND_NOCALL, True
+    return classify_full(raw)
+
+def _person_record(name, group, bld, raw, kind=None, known=None):
     raw = re.sub(r"\s+", " ", str(raw or "").strip())
-    kind, known = classify_full(raw)
+    if kind is None:
+        kind, known = classify_full(raw)
     return {
         "name":     name,
         "section":  {"hk": f"Building {bld}", "rqs": "RQS", "other": bld}[group],
@@ -724,11 +738,7 @@ def history_rows(weeks, overrides=None, upto=None):
                 if upto and iso > upto:
                     continue
                 raw = rec.get("cells", {}).get(iso, "")
-                kind, known = classify_full(raw)
-                # A red cell is a no-call even when the cell itself is blank,
-                # which is how most of them look.
-                if iso in (rec.get("nocall") or []):
-                    kind, known = KIND_NOCALL, True
+                kind, known = cell_kind(rec, iso)
                 out.append({
                     "date": iso, "week": wk, "person": name,
                     # Identity across weeks. The sheet writes the same person
@@ -1199,10 +1209,11 @@ def week_to_people(week, iso):
         name, _home = read_person(key, rec)
         if name is None:
             continue
+        k, known = cell_kind(rec, iso)
         out.append(_person_record(
             name, rec["group"],
             rec["building"] if rec["group"] == "hk" else rec["section"],
-            rec.get("cells", {}).get(iso, "")))
+            rec.get("cells", {}).get(iso, ""), k, known))
     return out
 
 #: Weekly summary rows near the top of every sheet, keyed by their column-A label.

@@ -16,7 +16,7 @@ import auth, db, roster_import as ri
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 10:
+if getattr(ri, "__version__", 0) < 11:
     import importlib
     ri = importlib.reload(ri)
 
@@ -81,6 +81,7 @@ table.wk tr.grp td{background:#eef2f7;font-family:'DM Mono',monospace;font-size:
 .chg{outline:2px solid #f59e0b;outline-offset:1px}
 .ovr{box-shadow:inset 3px 0 0 #7c3aed}
 .cov{box-shadow:inset 0 -2px 0 #7c3aed}
+.nocall{box-shadow:inset 3px 0 0 #b91c1c;font-weight:700}
 table.wk tbody tr:hover td{background:#f7f9fc}
 table.wk tbody tr:hover td.nm{background:#eef2f7}
 .cell{transition:transform .1s ease}
@@ -135,14 +136,16 @@ def person_label(info):
     return txt + f'  ·  {info["home"]}' if info.get("home") else txt
 
 
+# Shades chosen so the states read apart at a glance. No-call is the loudest
+# on purpose — it is the one a manager is scanning for.
 KIND_STYLE = {
-    ri.KIND_DAILY:   ("#ccfbf1", "#115e59"),
-    ri.KIND_WORKING: ("#dcfce7", "#15803d"),
-    ri.KIND_OFF:     ("#f8fafc", "#94a3b8"),
-    ri.KIND_OTHER:   ("#fef3c7", "#92400e"),
-    ri.KIND_NOCALL:  ("#fee2e2", "#991b1b"),
-    ri.KIND_VTO:     ("#e0e7ff", "#3730a3"),
-    ri.KIND_UNKNOWN: ("#faf5ff", "#7e22ce"),
+    ri.KIND_WORKING: ("#d7f5df", "#14663a"),   # green
+    ri.KIND_DAILY:   ("#c5f2ef", "#0b5c58"),   # teal
+    ri.KIND_OTHER:   ("#fdecc4", "#8a5300"),   # amber
+    ri.KIND_VTO:     ("#dfe3ff", "#2f3597"),   # indigo
+    ri.KIND_NOCALL:  ("#ffc9c9", "#8f1414"),   # strong red
+    ri.KIND_OFF:     ("#f1f4f8", "#9aa5b4"),   # pale grey
+    ri.KIND_UNKNOWN: ("#f3e4ff", "#6b21a8"),   # violet
 }
 KIND_LABEL = {ri.KIND_DAILY: "Daily Service", ri.KIND_WORKING: "Working",
               ri.KIND_OFF: "Off", ri.KIND_OTHER: "Other duty (counts as worked)",
@@ -192,6 +195,7 @@ if not db.settings_table_ready():
 
 meta = db.load_staff_meta() or {}
 overrides = db.load_staff_overrides()
+custom_opts = db.load_custom_options()
 week_keys = db.staff_week_keys()
 
 # ── Backfill the red no-call marks ────────────────────────────────────────────
@@ -470,7 +474,8 @@ with tab_week:
             '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:.7rem;color:#5b6675;margin:.5rem 0">'
             + "".join(f'<span><span class="pill" style="background:{b};color:{f}">&nbsp;&nbsp;</span> {KIND_LABEL[k]}</span>'
                       for k, (b, f) in KIND_STYLE.items())
-            + '<span><span class="pill" style="background:#fff;color:#f59e0b;outline:2px solid #f59e0b">&nbsp;&nbsp;</span> changed at last sync</span>'
+            + '<span><span class="pill" style="background:#ffc9c9;box-shadow:inset 3px 0 0 #b91c1c">&nbsp;&nbsp;</span> no call / no show</span>'
+              '<span><span class="pill" style="background:#fff;color:#f59e0b;outline:2px solid #f59e0b">&nbsp;&nbsp;</span> changed at last sync</span>'
               '<span><span class="pill" style="background:#fff;box-shadow:inset 3px 0 0 #7c3aed">&nbsp;&nbsp;</span> edited in app</span>'
             + '</div>', unsafe_allow_html=True)
 
@@ -504,11 +509,14 @@ with tab_week:
             tds = []
             for dt in dates:
                 raw = rec["cells"].get(dt, "")
-                kind = ri.classify(raw)
+                kind = ri.cell_kind(rec, dt)[0]
                 bg, fg = KIND_STYLE[kind]
                 cls = "cell"
                 if (name, dt) in changed_set: cls += " chg"
                 tips = []
+                if kind == ri.KIND_NOCALL:
+                    cls += " nocall"
+                    tips.append("No call / no show")
                 means = ri.legend_for(rec, raw)
                 if means: tips.append(means)
                 if rec["group"] != "hk" and ri.is_room_cover(raw):
@@ -518,8 +526,10 @@ with tab_week:
                     tips.append(f'Edited in app · Excel says: '
                                 f'{applied[(name, dt)]["excel"] or "(blank)"}')
                 tip = f' title="{e(" — ".join(tips))}"' if tips else ""
+                # Most red cells are blank, so give them a label to show.
+                shown = e(raw) or ("NC / NS" if kind == ri.KIND_NOCALL else "&nbsp;")
                 tds.append(f'<td><span class="{cls}" style="background:{bg};color:{fg}"{tip}>'
-                           f'{e(raw) or "&nbsp;"}</span></td>')
+                           f'{shown}</span></td>')
             body.append(f'<tr><td class="nm">{e(name)}</td>{"".join(tds)}</tr>')
         st.markdown(f'<div class="gridwrap"><table class="wk"><thead><tr><th>Name</th>{head}</tr>'
                     f'</thead><tbody>{"".join(body)}</tbody></table></div>',
@@ -550,7 +560,9 @@ with tab_week:
             # Union of the curated list and everything this section already uses,
             # so no existing one-off vanishes when its cell is opened.
             present = {rec["cells"].get(dt, "") for _n, rec in members for dt in dates}
-            opts = ri.options_for(members[0][1], sorted(v for v in present if v))
+            rkey = ri.role_key(members[0][1])
+            opts = ri.options_for(members[0][1], sorted(v for v in present if v),
+                                  extra=custom_opts.get(rkey, []))
             rows = [{"Name": n, **{cols_lbl[i]: to_cell(rec["cells"].get(dt, ""))
                                    for i, dt in enumerate(dates)}}
                     for n, rec in members]
@@ -558,6 +570,30 @@ with tab_week:
             st.markdown(f'<div class="sec" style="margin:.9rem 0 .3rem">{e(section)} '
                         f'<span style="color:#8a93a1;text-transform:none;letter-spacing:0">'
                         f'· {len(opts)-1} choices</span></div>', unsafe_allow_html=True)
+            with st.popover(f"＋ Add a choice for {section}"):
+                st.caption("Type anything the dropdown does not offer. It is added to "
+                           "this role's list and stays available from then on.")
+                nc1, nc2 = st.columns([3, 1])
+                newval = nc1.text_input("New choice", key=f"ri_new_{sel_wk}_{section}",
+                                        label_visibility="collapsed",
+                                        placeholder="e.g. TOUCH UP, Deep clean lobby")
+                if nc2.button("Add", key=f"ri_addbtn_{sel_wk}_{section}"):
+                    v = " ".join(str(newval or "").split())
+                    if not v:
+                        st.warning("Type a value first.")
+                    elif v.casefold() in {o.casefold() for o in opts}:
+                        st.info(f"'{v}' is already a choice.")
+                    else:
+                        merged = dict(custom_opts)
+                        merged[rkey] = sorted(set(merged.get(rkey, []) + [v]))
+                        try:
+                            db.save_custom_options(merged)
+                            st.success(f"Added '{v}'.")
+                            st.rerun()
+                        except Exception as ex:
+                            st.error(f"Could not save: {ex}")
+                if custom_opts.get(rkey):
+                    st.caption("Yours: " + ", ".join(custom_opts[rkey]))
             ed = st.data_editor(
                 base, hide_index=True, use_container_width=True,
                 key=f"ri_ed_{sel_wk}_{section}", num_rows="fixed",
@@ -796,7 +832,8 @@ with tab_plan:
         for section in [x for x in order if x in show]:
             members = sections[section]
             present = {rec["cells"].get(d, "") for _n, rec in members for d in dates}
-            opts = ri.options_for(members[0][1], sorted(v for v in present if v))
+            opts = ri.options_for(members[0][1], sorted(v for v in present if v),
+                                  extra=custom_opts.get(ri.role_key(members[0][1]), []))
             base = pd.DataFrame(
                 [{"Name": n, **{cols_lbl[i]: pl_to_cell(rec["cells"].get(d, ""))
                                 for i, d in enumerate(dates)}} for n, rec in members],

@@ -13,7 +13,7 @@ import auth, db, roster_import as ri
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
 # sys.modules, so reload it rather than dying on a helper it does not have yet.
-if getattr(ri, "__version__", 0) < 10:
+if getattr(ri, "__version__", 0) < 11:
     import importlib
     ri = importlib.reload(ri)
 
@@ -139,15 +139,16 @@ def person_label(info):
     return txt + f'  ·  {info["home"]}' if info.get("home") else txt
 
 
+# Same shades as the Roster Import grid so the two pages read alike.
 KIND_STYLE = {
-    ri.KIND_DAILY:   ("#ccfbf1", "#0f5c55", "Daily Service"),
-    ri.KIND_WORKING: ("#dcfce7", "#166534", "Working"),
-    ri.KIND_OFF:     ("#f1f5f9", "#94a3b8", "Off"),
-    ri.KIND_OTHER:   ("#fef3c7", "#92400e", "Working — other duty"),
-    # Red is reserved for the thing the workbook paints red: a no-call/no-show.
-    ri.KIND_NOCALL:  ("#fee2e2", "#991b1b", "No call / no show"),
-    ri.KIND_VTO:     ("#e0e7ff", "#3730a3", "VTO — paid"),
-    ri.KIND_UNKNOWN: ("#faf5ff", "#7e22ce", "Check with your lead"),
+    ri.KIND_WORKING: ("#d7f5df", "#14663a", "Working"),
+    ri.KIND_DAILY:   ("#c5f2ef", "#0b5c58", "Daily Service"),
+    ri.KIND_OTHER:   ("#fdecc4", "#8a5300", "Working — other duty"),
+    ri.KIND_VTO:     ("#dfe3ff", "#2f3597", "VTO — paid"),
+    # Red is reserved for the thing the workbook paints red.
+    ri.KIND_NOCALL:  ("#ffc9c9", "#8f1414", "No call / no show"),
+    ri.KIND_OFF:     ("#f1f4f8", "#9aa5b4", "Off"),
+    ri.KIND_UNKNOWN: ("#f3e4ff", "#6b21a8", "Check with your lead"),
 }
 
 cu = auth.current_user()
@@ -218,7 +219,10 @@ def strip(start: datetime.date, title: str):
             continue
         bg, fg, lbl = KIND_STYLE[r["kind"]]
         means = ri.legend_for(r, r["raw"])
-        body = (f'<span class="what" style="background:{bg};color:{fg}">'
+        # Most red cells are blank, so the label carries the meaning.
+        loud = (";box-shadow:inset 3px 0 0 #b91c1c;font-weight:700"
+                if r["kind"] == ri.KIND_NOCALL else "")
+        body = (f'<span class="what" style="background:{bg};color:{fg}{loud}">'
                 f'{e(r["raw"]) or lbl}</span>')
         if means:
             body += f'<div class="means">{e(means)}</div>'

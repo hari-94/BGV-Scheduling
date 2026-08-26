@@ -332,6 +332,21 @@ def staff_file_info() -> dict:
         print(f"[db] staff_file_info error: {ex}")
         return {}
 
+def save_custom_options(opts: dict) -> None:
+    """Extra dropdown choices a manager typed in, keyed by role."""
+    try:
+        _upsert_key("staffsched_options", opts)
+    except Exception as ex:
+        print(f"[db] save_custom_options error: {ex}")
+        raise
+
+def load_custom_options() -> dict:
+    try:
+        return _load_key("staffsched_options") or {}
+    except Exception as ex:
+        print(f"[db] load_custom_options error: {ex}")
+        return {}
+
 def load_autoapply() -> dict:
     """Which date's roster has already been auto-applied from the schedule."""
     try:
