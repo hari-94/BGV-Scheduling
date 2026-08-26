@@ -7,3 +7,7 @@ schedule_log.json
 __pycache__/
 *.pyc
 .DS_Store
+
+# Staff schedule workbooks (contain employee names)
+Schedule.xlsx
+*.xlsx

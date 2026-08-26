@@ -9,6 +9,11 @@ name = "📊 Dashboard"
 icon = "📊"
 
 [[pages]]
+path = "pages/3_Roster_Import.py"
+name = "📥 Roster Import"
+icon = "📥"
+
+[[pages]]
 path = "pages/2_Admin.py"
 name = "👑 Admin"
 icon = "👑"

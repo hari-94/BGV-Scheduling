@@ -3160,6 +3160,10 @@ with st.sidebar:
             pass
         if _role == "admin":
             try:
+                st.page_link("pages/3_Roster_Import.py", label="Roster Import")
+            except Exception:
+                pass
+            try:
                 st.page_link("pages/2_Admin.py", label="Admin")
             except Exception:
                 pass
@@ -3177,6 +3181,11 @@ with st.sidebar:
         groups_per_insp = 3
     else:
         st.markdown("## Daily Attendance")
+        _ri_note = st.session_state.get("roster_import_note")
+        if _ri_note:
+            st.markdown(f'<div style="background:#eff6ff;border:1px solid #bfdbfe;'
+                        f'border-radius:8px;padding:6px 10px;font-size:.72rem;color:#1e40af">'
+                        f'Imported {_html.escape(str(_ri_note))}</div>', unsafe_allow_html=True)
         st.markdown("---")
         with st.expander("Add / Remove Housekeeper"):
             col_a, col_b = st.columns([2,1])

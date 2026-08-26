@@ -39,6 +39,7 @@ with st.sidebar:
     st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
     st.page_link("pages/1_Dashboard.py", label="Dashboard")
     if st.session_state.get("role","") == "admin":
+        st.page_link("pages/3_Roster_Import.py", label="Roster Import")
         st.page_link("pages/2_Admin.py", label="Admin")
     st.markdown("---")
     _u = st.session_state.get("display_name","") or st.session_state.get("username","")
