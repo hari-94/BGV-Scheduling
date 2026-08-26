@@ -278,46 +278,109 @@ for col, (total, done, ahead, lbl) in zip(cols, cards):
     col.markdown(f'<div class="kpi"><div class="n">{total}</div>'
                  f'<div class="l">{lbl}</div>{sub}</div>', unsafe_allow_html=True)
 
-c1, c2 = st.columns([3, 2])
-with c1:
-    st.markdown('<div class="lbl">Days you usually work</div>', unsafe_allow_html=True)
-    mx = max(s_all["by_dow"].values()) or 1
-    bars = ""
-    for d, n in s_all["by_dow"].items():
-        pct = int(100 * n / mx)
-        hot = n >= mx * 0.6
-        fill = "linear-gradient(90deg,#2563a8,#4a90cc)" if hot else "#cbd5e1"
-        bars += (f'<div class="bar"><span class="d">{d}</span>'
-                 f'<div class="track"><div class="fill" '
-                 f'style="width:{max(pct, 2)}%;background:{fill}"></div></div>'
-                 f'<span class="v">{n}</span></div>')
-    st.markdown(bars, unsafe_allow_html=True)
-    if s_all["usual_days"]:
-        st.caption("Usually: " + ", ".join(s_all["usual_days"]))
-with c2:
-    st.markdown('<div class="lbl">Roles and shifts</div>', unsafe_allow_html=True)
-    chips = ""
-    for k2, v2 in list(s_all["roles"].items())[:4]:
-        chips += f'<span class="pill" style="background:#eef2ff;color:#3730a3">{e(k2)} · {v2}</span>'
-    for k2, v2 in s_all["shifts"].items():
-        bg, fg = {"Daily Service": ("#ccfbf1", "#0f5c55"),
-                  "Room cover": ("#ede9fe", "#5b21b6"),
-                  "Other duty": ("#fef3c7", "#92400e")}.get(k2, ("#dcfce7", "#166534"))
-        chips += f'<span class="pill" style="background:{bg};color:{fg}">{e(k2)} · {v2}</span>'
-    if s_all["n_no_call"]:
-        chips += (f'<span class="pill" style="background:#fee2e2;color:#991b1b">'
-                  f'No call · {s_all["n_no_call"]}</span>')
-    if s_all["n_paid_off"]:
-        chips += (f'<span class="pill" style="background:#e0e7ff;color:#3730a3">'
-                  f'VTO · {s_all["n_paid_off"]}</span>')
-    st.markdown(chips or '<span style="color:#8a93a1">—</span>', unsafe_allow_html=True)
-    pctw = 100 * s_all["n_worked"] / max(s_all["n_days"], 1)
-    st.markdown(f'<div style="margin-top:10px;font-size:.8rem;color:#5b6675">'
-                f'Worked <b>{s_all["n_worked"]}</b> of {s_all["n_days"]} recorded days '
-                f'({pctw:.0f}%)</div>', unsafe_allow_html=True)
+# ── Period filter ─────────────────────────────────────────────────────────────
+# The counters above are a fixed summary. Everything below follows this filter,
+# so a pattern can be read for one month or one year rather than all of time.
+st.markdown('<p class="sec">Break it down</p>', unsafe_allow_html=True)
 
-with st.expander("Every day on record"):
-    past = sorted([r for r in s_all["rows"] if r["date"] <= t_iso],
+all_dates = sorted(r["date"] for r in s_all["rows"])
+f1, f2 = st.columns([2, 3])
+with f1:
+    grain = st.radio("Period", ["Week", "Month", "Year", "All time"],
+                     horizontal=True, index=1, key="mh_grain",
+                     label_visibility="collapsed")
+
+def _week_start(iso):
+    d = datetime.date.fromisoformat(iso)
+    return (d - datetime.timedelta(days=(d.weekday() + 1) % 7)).isoformat()
+
+if grain == "Week":
+    keys = sorted({_week_start(d) for d in all_dates}, reverse=True)
+    fmt = lambda k: ri.week_label(k)
+elif grain == "Month":
+    keys = sorted({d[:7] for d in all_dates}, reverse=True)
+    fmt = lambda k: datetime.date.fromisoformat(k + "-01").strftime("%B %Y")
+elif grain == "Year":
+    keys = sorted({d[:4] for d in all_dates}, reverse=True)
+    fmt = lambda k: k
+else:
+    keys, fmt = ["all"], lambda k: "Everything on record"
+
+with f2:
+    default = 0
+    if grain == "Week" and _week_start(t_iso) in keys:
+        default = keys.index(_week_start(t_iso))
+    elif grain == "Month" and t_iso[:7] in keys:
+        default = keys.index(t_iso[:7])
+    elif grain == "Year" and t_iso[:4] in keys:
+        default = keys.index(t_iso[:4])
+    picked = st.selectbox("Which", keys, index=default, format_func=fmt,
+                          key=f"mh_pick_{grain}", label_visibility="collapsed")
+
+if grain == "Week":
+    sel = [r for r in s_all["rows"] if _week_start(r["date"]) == picked]
+elif grain == "Month":
+    sel = [r for r in s_all["rows"] if r["date"].startswith(picked)]
+elif grain == "Year":
+    sel = [r for r in s_all["rows"] if r["date"].startswith(picked)]
+else:
+    sel = list(s_all["rows"])
+
+s_sel = ri.summarise_person(sel, pid=mine)
+if not sel:
+    st.info("Nothing recorded for that period.")
+else:
+    m = st.columns(4)
+    done_sel = sum(1 for r in s_sel["worked"] if r["date"] <= t_iso)
+    m[0].metric("Days worked", s_sel["n_worked"],
+                delta=(f"{done_sel} so far" if s_sel["n_worked"] != done_sel else None),
+                delta_color="off")
+    m[1].metric("Days off", s_sel["off"])
+    m[2].metric("No call / no show", s_sel["n_no_call"])
+    m[3].metric("VTO — paid", s_sel["n_paid_off"])
+
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        st.markdown('<div class="lbl">Days you work in this period</div>',
+                    unsafe_allow_html=True)
+        mx = max(s_sel["by_dow"].values()) or 1
+        bars = ""
+        for d, n in s_sel["by_dow"].items():
+            pct = int(100 * n / mx)
+            hot = n >= mx * 0.6
+            fill = "linear-gradient(90deg,#2563a8,#4a90cc)" if hot else "#cbd5e1"
+            bars += (f'<div class="bar"><span class="d">{d}</span>'
+                     f'<div class="track"><div class="fill" '
+                     f'style="width:{max(pct, 2)}%;background:{fill}"></div></div>'
+                     f'<span class="v">{n}</span></div>')
+        st.markdown(bars, unsafe_allow_html=True)
+        if s_sel["usual_days"]:
+            st.caption("Usually: " + ", ".join(s_sel["usual_days"]))
+    with c2:
+        st.markdown('<div class="lbl">Roles and shifts</div>', unsafe_allow_html=True)
+        chips = ""
+        for k2, v2 in list(s_sel["roles"].items())[:4]:
+            chips += (f'<span class="pill" style="background:#eef2ff;color:#3730a3">'
+                      f'{e(k2)} · {v2}</span>')
+        for k2, v2 in s_sel["shifts"].items():
+            bg, fg = {"Daily Service": ("#c5f2ef", "#0b5c58"),
+                      "Room cover": ("#ede9fe", "#5b21b6"),
+                      "Other duty": ("#fdecc4", "#8a5300")}.get(k2, ("#d7f5df", "#14663a"))
+            chips += f'<span class="pill" style="background:{bg};color:{fg}">{e(k2)} · {v2}</span>'
+        if s_sel["n_no_call"]:
+            chips += (f'<span class="pill" style="background:#ffc9c9;color:#8f1414">'
+                      f'No call · {s_sel["n_no_call"]}</span>')
+        if s_sel["n_paid_off"]:
+            chips += (f'<span class="pill" style="background:#dfe3ff;color:#2f3597">'
+                      f'VTO · {s_sel["n_paid_off"]}</span>')
+        st.markdown(chips or '<span style="color:#8a93a1">—</span>', unsafe_allow_html=True)
+        pctw = 100 * s_sel["n_worked"] / max(s_sel["n_days"], 1)
+        st.markdown(f'<div style="margin-top:10px;font-size:.8rem;color:#5b6675">'
+                    f'Worked <b>{s_sel["n_worked"]}</b> of {s_sel["n_days"]} recorded days '
+                    f'({pctw:.0f}%)</div>', unsafe_allow_html=True)
+
+with st.expander(f"Every day — {fmt(picked)}"):
+    past = sorted([r for r in sel if r["date"] <= t_iso],
                   key=lambda x: x["date"], reverse=True)
     st.dataframe(
         pd.DataFrame([{"Date": r["date"], "Day": r["dow"], "Team": r["section"],
