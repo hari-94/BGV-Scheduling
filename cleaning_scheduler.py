@@ -18,6 +18,7 @@ st.set_page_config(
 
 # Import local modules after set_page_config
 import auth, db
+import ui
 
 # ── Hide Streamlit's auto-generated page navigation IMMEDIATELY ───────────────
 # This must be the first markdown call so the nav never flashes. We use every
@@ -3231,37 +3232,13 @@ with st.sidebar:
   </div>
   <span style="font-size:1.3rem;opacity:.8">{"" if _cu["role"]=="admin" else "" if _cu["role"]=="rqs" else ""}</span>
 </div>""", unsafe_allow_html=True)
-    if st.button("Sign Out", key="btn_logout", use_container_width=True):
-        auth.logout(); st.rerun()
+    # Sign out lives in the top bar now, the same place as on every page.
 
     # ── Role-based navigation ──────────────────────────────────────────────
     # admin Schedule + Dashboard + Admin
     # rqs Schedule + Dashboard
     # hk nothing (just name/role/signout above)
     _role = _cu["role"]
-    st.markdown("---")
-    st.markdown("### Navigate")
-    # My Home is for everyone -- it is the only page a housekeeper needs.
-    try:
-        st.page_link("pages/4_My_Home.py", label="My Home")
-    except Exception:
-        pass
-    if _role in ("admin","rqs"):
-        st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
-        try:
-            st.page_link("pages/1_Dashboard.py", label="Dashboard")
-        except Exception:
-            pass
-        # RQS run schedules daily, so they get Roster Import too.
-        try:
-            st.page_link("pages/3_Roster_Import.py", label="Roster Import")
-        except Exception:
-            pass
-        if _role == "admin":
-            try:
-                st.page_link("pages/2_Admin.py", label="Admin")
-            except Exception:
-                pass
 
     # ── Housekeepers: NO attendance/config sidebar ─────────────────────────
     # They only see their name, role, and sign-out above. Everything below
@@ -3544,6 +3521,8 @@ _cu = auth.current_user()
 _disp_name = _cu.get("display_name") or _cu.get("username","")
 _first_name = _disp_name.split()[0].title() if _disp_name else "there"
 _welcome_msg = auth.get_welcome_msg(_cu["role"])
+
+ui.topnav("Schedule", hide_sidebar=False)
 
 st.markdown(f'<p class="pg-title">Good morning, {_first_name}! </p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">{_welcome_msg}</p>', unsafe_allow_html=True)

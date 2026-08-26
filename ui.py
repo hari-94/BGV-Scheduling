@@ -1,10 +1,9 @@
 """
 ui.py — shared page chrome.
 
-A horizontal navigation bar and the styling that goes with it, so every page
-outside the scheduler looks and behaves the same. The Cleaning Schedule page
-deliberately does NOT use this: its sidebar carries the attendance controls,
-not navigation, so it keeps what it has.
+One horizontal navigation bar for every page, so moving between them never
+changes where the menu lives. The Cleaning Schedule page keeps its sidebar,
+but only for the attendance controls — its navigation comes from here too.
 """
 import streamlit as st
 import auth
@@ -21,126 +20,160 @@ NAV_ITEMS = [
 
 CHROME_CSS = """
 <style>
-/* Navigation lives across the top now, so the sidebar has nothing to hold. */
-section[data-testid="stSidebar"]{display:none !important;}
-[data-testid="collapsedControl"]{display:none !important;}
 [data-testid="stSidebarNav"]{display:none !important;}
 
-.navwrap{
-  display:flex;align-items:center;justify-content:space-between;gap:14px;
-  background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
-  border:1px solid #e4e8ee;border-radius:14px;padding:7px 10px;
-  margin:0 0 16px;box-shadow:0 1px 2px rgba(22,32,46,.04),0 6px 18px rgba(22,32,46,.05);
+/* The bar itself. A wrapper <div> cannot contain Streamlit columns — the
+   markdown closes before they render — so the row that HOLDS the page links
+   is styled directly instead. */
+[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
+  background:linear-gradient(180deg,#ffffff 0%,#f7f9fc 100%);
+  border:1px solid #e3e8ef;border-radius:16px;
+  padding:8px 12px !important;margin:0 0 18px !important;
+  align-items:center !important;gap:2px !important;
+  box-shadow:0 1px 2px rgba(16,26,42,.04),0 10px 26px rgba(16,26,42,.06);
 }
-.navwrap .who{
-  font-size:.74rem;color:#5b6675;white-space:nowrap;padding-right:6px;
+[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"])
+  [data-testid="stVerticalBlock"]{gap:0 !important;}
+
+.navwho{
+  font-size:.72rem;line-height:1.35;color:#64707f;text-align:right;
+  white-space:nowrap;padding-right:4px;
 }
-.navwrap .who b{color:#16202e}
+.navwho b{color:#16202e;font-weight:700}
+.navwho .role{
+  display:inline-block;margin-top:2px;padding:1px 8px;border-radius:20px;
+  background:#eef3fa;color:#3c6ea5;font-size:.6rem;font-weight:700;
+  letter-spacing:.07em;text-transform:uppercase;
+}
 
 /* st.page_link renders an anchor; dress it as a pill. */
+[data-testid="stPageLink"]{margin:0 !important;}
 [data-testid="stPageLink"] a{
-  border-radius:10px !important;padding:7px 14px !important;
+  border-radius:11px !important;padding:9px 10px !important;
   font-size:.82rem !important;font-weight:600 !important;
-  color:#5b6675 !important;text-decoration:none !important;
-  border:1px solid transparent !important;
-  transition:background .15s ease,color .15s ease,transform .12s ease,
-             box-shadow .15s ease !important;
+  color:#5a6675 !important;text-decoration:none !important;
+  justify-content:center !important;
+  transition:background .16s ease,color .16s ease,transform .14s ease,
+             box-shadow .16s ease !important;
 }
 [data-testid="stPageLink"] a:hover{
   background:#eef4fb !important;color:#1c4a78 !important;
   transform:translateY(-1px);
-  box-shadow:0 4px 10px rgba(37,99,168,.10) !important;
+  box-shadow:0 5px 14px rgba(37,99,168,.13) !important;
 }
 [data-testid="stPageLink"] a p{font-weight:600 !important;margin:0 !important;}
-/* The page you are on. */
-.navactive [data-testid="stPageLink"] a{
-  background:linear-gradient(135deg,#1e4f86 0%,#2f74b8 55%,#4a90cc 100%) !important;
-  color:#fff !important;
-  box-shadow:0 3px 10px rgba(30,79,134,.28),inset 0 1px 0 rgba(255,255,255,.18) !important;
-}
-.navactive [data-testid="stPageLink"] a:hover{
-  color:#fff !important;transform:translateY(-1px);
-}
-.navactive [data-testid="stPageLink"] a p{color:#fff !important;}
 
-/* Tabs: a soft raised pill rather than a flat block.
-   The radius is repeated on the selected state and on the inner wrapper —
-   the highlight is painted on a child, so setting it only on the tab button
-   leaves square corners poking out from under the rounded parent. */
+/* The page you are on. */
+.navactive + div [data-testid="stPageLink"] a,
+.navactive ~ div [data-testid="stPageLink"] a{
+  background:linear-gradient(135deg,#1b4a80 0%,#2d72b8 52%,#4b93d1 100%) !important;
+  color:#fff !important;
+  box-shadow:0 4px 14px rgba(27,74,128,.32),
+             inset 0 1px 0 rgba(255,255,255,.22) !important;
+}
+.navactive ~ div [data-testid="stPageLink"] a p{color:#fff !important;}
+.navactive ~ div [data-testid="stPageLink"] a:hover{
+  color:#fff !important;transform:translateY(-1px);filter:brightness(1.05);
+}
+
+/* Sign out sits quietly until you reach for it. */
+[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]) .stButton>button{
+  border-radius:11px !important;font-size:.78rem !important;font-weight:600 !important;
+  background:#fff !important;color:#5a6675 !important;
+  border:1px solid #dfe5ee !important;padding:8px 10px !important;
+}
+[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]) .stButton>button:hover{
+  background:#fff1f1 !important;color:#b42323 !important;
+  border-color:#f4c9c9 !important;
+}
+
+/* Tabs: a soft raised pill on a light track.
+   The radius is repeated on the selected state and the inner wrapper —
+   Streamlit paints the highlight on a child, so a radius set only on the
+   parent leaves square corners poking out underneath. */
 .stTabs [data-baseweb="tab-list"]{
-  gap:6px !important;background:#f2f5f9 !important;
-  border:1px solid #e4e8ee !important;border-radius:14px !important;
-  padding:5px !important;overflow:visible !important;
+  gap:6px !important;background:#eef2f7 !important;
+  border:1px solid #e3e8ef !important;border-radius:14px !important;
+  padding:5px !important;
 }
 .stTabs [data-baseweb="tab"]{
-  border-radius:11px !important;padding:8px 17px !important;
+  border-radius:11px !important;padding:8px 18px !important;
   font-size:.79rem !important;font-weight:600 !important;
-  color:#5b6675 !important;border:none !important;background:transparent !important;
+  color:#5a6675 !important;border:none !important;background:transparent !important;
   overflow:hidden !important;
   transition:background .16s ease,color .16s ease,box-shadow .16s ease,
-             transform .12s ease !important;
+             transform .14s ease !important;
 }
 .stTabs [data-baseweb="tab"] > *{border-radius:11px !important;}
-.stTabs [data-baseweb="tab"]:hover{
-  background:rgba(255,255,255,.8) !important;color:#1c4a78 !important;
-}
+.stTabs [data-baseweb="tab"]:hover{background:#fff !important;color:#1c4a78 !important;}
 .stTabs [aria-selected="true"]{
   border-radius:11px !important;
-  background:linear-gradient(135deg,#1e4f86 0%,#2f74b8 55%,#4a90cc 100%) !important;
+  background:linear-gradient(135deg,#1b4a80 0%,#2d72b8 52%,#4b93d1 100%) !important;
   color:#fff !important;
-  box-shadow:0 3px 10px rgba(30,79,134,.26),inset 0 1px 0 rgba(255,255,255,.20) !important;
+  box-shadow:0 4px 14px rgba(27,74,128,.30),
+             inset 0 1px 0 rgba(255,255,255,.22) !important;
 }
-.stTabs [aria-selected="true"]:hover{transform:translateY(-1px);}
+.stTabs [aria-selected="true"]:hover{transform:translateY(-1px);filter:brightness(1.05);}
 .stTabs [aria-selected="true"] p,
 .stTabs [aria-selected="true"] div{color:#fff !important;}
-/* Streamlit's own sliding underline would sit square under the pill. */
+/* Streamlit's sliding underline would sit square beneath the pill. */
 .stTabs [data-baseweb="tab-highlight"],
 .stTabs [data-baseweb="tab-border"]{display:none !important;background:transparent !important;}
 
-/* Buttons pick up the same family. */
 .stButton>button[kind="primary"]{
-  background:linear-gradient(135deg,#1e4f86 0%,#2f74b8 60%,#4a90cc 100%) !important;
+  background:linear-gradient(135deg,#1b4a80 0%,#2d72b8 55%,#4b93d1 100%) !important;
   border:none !important;color:#fff !important;
-  box-shadow:0 3px 10px rgba(30,79,134,.24) !important;
+  box-shadow:0 4px 12px rgba(27,74,128,.26) !important;
 }
-.stButton>button[kind="primary"]:hover{filter:brightness(1.06);transform:translateY(-1px);}
+.stButton>button[kind="primary"]:hover{filter:brightness(1.07);transform:translateY(-1px);}
 
-@media (max-width:820px){
-  .navwrap{flex-direction:column;align-items:stretch;gap:6px}
-  .navwrap .who{text-align:right;padding:0 4px 2px}
+@media (max-width:900px){
+  [data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
+    padding:6px !important;border-radius:13px;
+  }
+  [data-testid="stPageLink"] a{padding:8px 6px !important;font-size:.74rem !important;}
+  .navwho{font-size:.64rem}
   .stTabs [data-baseweb="tab"]{padding:6px 11px !important;font-size:.72rem !important;}
 }
 </style>
 """
 
-def topnav(active: str = ""):
+#: Widths: one narrow slot per link, a spacer that soaks up the middle, then
+#: the person and the way out. Without the spacer the links spread across the
+#: whole width and stop reading as a group.
+def _weights(n):
+    return [1.0] * n + [1.4, 1.5, 1.0]
+
+def topnav(active: str = "", hide_sidebar: bool = True):
     """Draw the horizontal navigation bar.
 
-    `active` is the label of the current page, so it can be highlighted.
-    Only destinations the signed-in role may reach are shown.
+    `active` is the label of the current page so it can be highlighted.
+    `hide_sidebar` is False on the scheduler, which still needs its sidebar for
+    the attendance controls.
     """
     st.markdown(CHROME_CSS, unsafe_allow_html=True)
-    items = [it for it in NAV_ITEMS if it[3] is None or auth.can(it[3])]
+    if hide_sidebar:
+        st.markdown('<style>section[data-testid="stSidebar"]{display:none !important;}'
+                    '[data-testid="collapsedControl"]{display:none !important;}</style>',
+                    unsafe_allow_html=True)
 
+    items = [it for it in NAV_ITEMS if it[3] is None or auth.can(it[3])]
     who = st.session_state.get("display_name") or st.session_state.get("username", "")
     role = str(st.session_state.get("role", "")).title()
 
-    st.markdown('<div class="navwrap">', unsafe_allow_html=True)
-    cols = st.columns(len(items) + 2, vertical_alignment="center")
+    cols = st.columns(_weights(len(items)), vertical_alignment="center")
     for col, (path, label, icon, _perm) in zip(cols, items):
         with col:
             if label == active:
-                st.markdown('<div class="navactive">', unsafe_allow_html=True)
-                st.page_link(path, label=label, icon=icon)
-                st.markdown("</div>", unsafe_allow_html=True)
-            else:
-                st.page_link(path, label=label, icon=icon)
-    with cols[-2]:
-        st.markdown(f'<div class="who">Signed in as <b>{who}</b><br>{role}</div>',
-                    unsafe_allow_html=True)
-    with cols[-1]:
+                # Marker div; the CSS reaches the link beside it. Streamlit
+                # gives no hook of its own for "this page link is current".
+                st.markdown('<span class="navactive"></span>', unsafe_allow_html=True)
+            st.page_link(path, label=label, icon=icon)
+    with cols[len(items) + 1]:
+        st.markdown(f'<div class="navwho">Signed in as <b>{who}</b><br>'
+                    f'<span class="role">{role}</span></div>', unsafe_allow_html=True)
+    with cols[len(items) + 2]:
         if st.button("Sign out", key=f"nav_signout_{active or 'x'}",
                      use_container_width=True):
             auth.logout()
             st.switch_page("cleaning_scheduler.py")
-    st.markdown("</div>", unsafe_allow_html=True)
