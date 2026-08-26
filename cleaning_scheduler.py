@@ -881,6 +881,10 @@ def _auto_apply_today(force=False):
     Returns a short note describing what happened, or None if it did nothing.
     """
     import roster_import as _ri
+    # A deploy can leave the previous copy in sys.modules; reload if it is old.
+    if getattr(_ri, "__version__", 0) < 3:
+        import importlib
+        _ri = importlib.reload(_ri)
     # Property-local date, NOT the server's. On a UTC host date.today() rolls
     # over around 5-6pm Mountain, which would pull tomorrow's crew mid-shift.
     today = _datetime.now(_MTN_TZ).date().isoformat()

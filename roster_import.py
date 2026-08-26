@@ -17,6 +17,13 @@ import re
 import datetime as _dt
 from collections import OrderedDict
 
+#: Bump when a page starts relying on a helper added here. Pages compare it
+#: against what they need and reload this module if the server handed them a
+#: stale copy from a previous deploy — otherwise the first call to a new
+#: function dies as an AttributeError inside a widget callback, which Streamlit
+#: reports with the message redacted.
+__version__ = 3
+
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
     ("housekeeper building 1", 1),

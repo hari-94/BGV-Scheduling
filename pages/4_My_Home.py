@@ -11,6 +11,12 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, roster_import as ri
 
+# See 3_Roster_Import.py: a deploy can leave a stale roster_import in
+# sys.modules, so reload it rather than dying on a helper it does not have yet.
+if getattr(ri, "__version__", 0) < 3:
+    import importlib
+    ri = importlib.reload(ri)
+
 st.set_page_config(page_title="My Home · Cleaning Schedule",
                    page_icon="GC8", layout="wide")
 st.markdown("""<style>[data-testid="stSidebarNav"]{display:none !important;}</style>""",

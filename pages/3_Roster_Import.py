@@ -12,6 +12,14 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, roster_import as ri
 
+# After a deploy the server can still hold the previous roster_import in
+# sys.modules while serving the new page file. The first call to a helper added
+# in this release then raises AttributeError from inside a widget callback, and
+# Streamlit redacts the message. Reload from disk instead of failing.
+if getattr(ri, "__version__", 0) < 3:
+    import importlib
+    ri = importlib.reload(ri)
+
 st.set_page_config(page_title="Roster Import · Cleaning Schedule",
                    page_icon="GC8", layout="wide")
 
