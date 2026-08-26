@@ -10,6 +10,7 @@ import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, roster_import as ri
+import ui
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
 # sys.modules, so reload it rather than dying on a helper it does not have yet.
@@ -111,25 +112,7 @@ section[data-testid="stSidebar"]{background:#fff!important;border-right:1px soli
 }
 </style>""", unsafe_allow_html=True)
 
-with st.sidebar:
-    st.markdown("### Navigate")
-    st.page_link("pages/4_My_Home.py", label="My Home")
-    st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
-    if auth.can("can_view_dashboard"):
-        st.page_link("pages/1_Dashboard.py", label="Dashboard")
-    if auth.can("can_generate"):
-        st.page_link("pages/3_Roster_Import.py", label="Roster Import")
-    if auth.can("can_manage_users"):
-        st.page_link("pages/2_Admin.py", label="Admin")
-    st.markdown("---")
-    _who = st.session_state.get("display_name","") or st.session_state.get("username","")
-    _rl  = st.session_state.get("role","")
-    if _who:
-        st.caption(f"Signed in as **{_who}** · {_rl.title()}")
-    if st.button("Sign Out", key="btn_signout_home", use_container_width=True):
-        auth.logout()
-        st.switch_page("cleaning_scheduler.py")
-
+ui.topnav("My Home")
 def e(s): return _html.escape(str(s) if s is not None else "")
 
 def person_label(info):

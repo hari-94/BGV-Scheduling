@@ -7,6 +7,7 @@ import streamlit as st
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
 import db, auth
+import ui
 
 try:
     import plotly.graph_objects as go
@@ -33,28 +34,6 @@ if not auth.can("can_view_dashboard"):
 if not PLOTLY_OK:
     st.error("Install plotly: `pip install plotly`")
     st.stop()
-
-with st.sidebar:
-    st.markdown("### Navigate")
-    st.page_link("pages/4_My_Home.py", label="My Home")
-    st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
-    st.page_link("pages/1_Dashboard.py", label="Dashboard")
-    if st.session_state.get("role","") in ("admin","rqs"):
-        st.page_link("pages/3_Roster_Import.py", label="Roster Import")
-    if st.session_state.get("role","") == "admin":
-        st.page_link("pages/2_Admin.py", label="Admin")
-    st.markdown("---")
-    _who = st.session_state.get("display_name","") or st.session_state.get("username","")
-    _rl  = st.session_state.get("role","")
-    if _who:
-        st.caption(f"Signed in as **{_who}** · {_rl.title()}")
-    if st.button("Sign Out", key="btn_signout_dash", use_container_width=True):
-        auth.logout()
-        st.switch_page("cleaning_scheduler.py")
-    st.markdown("---")
-    _u = st.session_state.get("display_name","") or st.session_state.get("username","")
-    _r = st.session_state.get("role","")
-    if _u: st.caption(f"Signed in as **{_u}** · {_r.title()}")
 
 # ── Theme (shared with main app via session_state) ─────────────────────────────
 _THEME = "light"   # locked to formal office theme
@@ -278,6 +257,8 @@ if fg:
         pass
 
 log = get_log()
+
+ui.topnav("Dashboard")
 
 st.markdown('<p class="pg-title"> Performance Dashboard</p>', unsafe_allow_html=True)
 st.markdown('<p class="pg-sub">Daily · weekly · monthly metrics</p>', unsafe_allow_html=True)

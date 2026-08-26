@@ -11,6 +11,7 @@ import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, roster_import as ri
+import ui
 
 # After a deploy the server can still hold the previous roster_import in
 # sys.modules while serving the new page file. The first call to a helper added
@@ -110,23 +111,7 @@ section[data-testid="stSidebar"]{background:#fff!important;border-right:1px soli
 }
 </style>""", unsafe_allow_html=True)
 
-with st.sidebar:
-    st.markdown("### Navigate")
-    st.page_link("pages/4_My_Home.py", label="My Home")
-    st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
-    st.page_link("pages/1_Dashboard.py", label="Dashboard")
-    st.page_link("pages/3_Roster_Import.py", label="Roster Import")
-    if auth.can("can_manage_users"):
-        st.page_link("pages/2_Admin.py", label="Admin")
-    st.markdown("---")
-    _who = st.session_state.get("display_name","") or st.session_state.get("username","")
-    _rl  = st.session_state.get("role","")
-    if _who:
-        st.caption(f"Signed in as **{_who}** · {_rl.title()}")
-    if st.button("Sign Out", key="btn_signout_roster", use_container_width=True):
-        auth.logout()
-        st.switch_page("cleaning_scheduler.py")
-
+ui.topnav("Roster Import")
 def e(s): return _html.escape(str(s) if s is not None else "")
 
 def person_label(info):

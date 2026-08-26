@@ -6,6 +6,7 @@ import sys, os
 import html as _html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import db, auth
+import ui
 
 st.set_page_config(page_title="Admin · Cleaning Schedule", page_icon="GC8", layout="wide")
 
@@ -173,27 +174,7 @@ section[data-testid="stSidebar"]{background:rgba(22,22,30,.55)!important;backdro
 cu = auth.current_user()
 
 # ── Manual sidebar navigation (replaces hidden auto-nav) ─────────────────────
-with st.sidebar:
-    st.markdown("### Navigate")
-    st.page_link("pages/4_My_Home.py", label="My Home")
-    st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
-    st.page_link("pages/1_Dashboard.py", label="Dashboard")
-    st.page_link("pages/3_Roster_Import.py", label="Roster Import")
-    st.page_link("pages/2_Admin.py", label="Admin")
-    st.markdown("---")
-    _who = st.session_state.get("display_name","") or st.session_state.get("username","")
-    _rl  = st.session_state.get("role","")
-    if _who:
-        st.caption(f"Signed in as **{_who}** · {_rl.title()}")
-    if st.button("Sign Out", key="btn_signout_admin", use_container_width=True):
-        auth.logout()
-        st.switch_page("cleaning_scheduler.py")
-    st.markdown("---")
-    _cu = st.session_state.get("display_name","") or st.session_state.get("username","")
-    _role = st.session_state.get("role","")
-    if _cu:
-        st.caption(f"Signed in as **{_cu}** · {_role.title()}")
-
+ui.topnav("Admin")
 st.markdown('<p class="pg-title"> Admin Panel</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">Logged in as <strong>{cu["username"]}</strong> · User management & system settings</p>',
             unsafe_allow_html=True)
