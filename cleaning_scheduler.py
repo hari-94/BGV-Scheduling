@@ -91,6 +91,16 @@ SVC_IH = "Full Clean (IH)"
 SVC_DS = "Daily Service"
 SVC_DV = "Dust n Vac"
 
+# Placeholder shown when a chart has no real person on it. Numbered per chart
+# (Need Housekeeper 1, 2, ...) so the manager sees how many bodies are short.
+NEED_HK_PREFIX = "Need Housekeeper"
+NO_HK_LABEL    = "No HK available"
+
+def is_unassigned_hk(name) -> bool:
+    """True for empty / placeholder housekeeper values (not a real person)."""
+    s = str(name or "")
+    return (not s) or s.startswith(NO_HK_LABEL) or s.startswith(NEED_HK_PREFIX)
+
 # RQS assigned to inspect all IH charts.
 IH_RQS = "RQS 2"
 
@@ -852,7 +862,7 @@ def _init_state():
     for k, default in [("groups_data",None),("total_rooms",None),
                         ("inspectors_data",None),("used_hk_set",None),
                         ("last_email",None),("rqs1",""),("rqs2",""),
-                        ("priority_hks",[])]:
+                        ("priority_hks",[]),("ds_team",[])]:
         if k not in st.session_state:
             st.session_state[k] = default
 
@@ -2482,12 +2492,19 @@ def build_all_groups(rooms, priority_hks=None):
 # ══════════════════════════════════════════════════════════════════════════════
 # STAFF ASSIGNMENT
 # ══════════════════════════════════════════════════════════════════════════════
-def assign_hk_building_aware(groups, present_hk, roster):
-    pool = {1:[], 2:[], 3:[]}
+def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
+    # Housekeepers dedicated to Daily Service today. They are RESERVED: only DS
+    # charts draw from them, and they are held out of the general pool so no
+    # Full Clean / IH / Dust n Vac chart can take them. Empty => old behaviour.
+    ds_set = {n for n in (ds_team or []) if n in present_hk}
+
+    pool = {1:[], 2:[], 3:[]}; ds_pool = {1:[], 2:[], 3:[]}
     for n in present_hk:
         b = roster.get(n,{}).get("building",0)
-        if b in pool: pool[b].append(n)
-    available = {1:list(pool[1]), 2:list(pool[2]), 3:list(pool[3])}
+        if b not in pool: continue
+        (ds_pool if n in ds_set else pool)[b].append(n)
+    available    = {b: list(v) for b, v in pool.items()}
+    ds_available = {b: list(v) for b, v in ds_pool.items()}
     assignment = {}; used = set()
     def hk_can_take(hk_bld, group_blds, is_ds=False):
         # Daily Service: housekeepers may wheel carts across all buildings,
@@ -2500,39 +2517,48 @@ def assign_hk_building_aware(groups, present_hk, roster):
     # Which buildings a housekeeper from building X is allowed to cover (FC).
     # Movement rule: B1<->B2 ok, B1<->B3 ok, B2<->B3 blocked.
     ADJ = {1:[1,2,3], 2:[2,1], 3:[3,1]}
-    def find_hk(group_blds, is_ds=False):
+    def find_hk(group_blds, is_ds=False, avail=None):
+        """Pull the best legal housekeeper out of `avail` (default: the general
+        pool). Returns None when that pool cannot cover the chart."""
+        if avail is None: avail = available
         # A Full Clean group spanning BOTH B2 and B3 is structurally impossible
-        # for one housekeeper (B2<->B3 is blocked) — never assign it.
+        # for one housekeeper (B2<->B3 is blocked) -- never assign it.
         if not is_ds and (2 in group_blds and 3 in group_blds):
-            return "No HK available"
+            return None
         primary = min(group_blds) if group_blds else 1
         # 1) Try a housekeeper whose home building IS the group's primary building.
-        for hk in list(available.get(primary,[])):
+        for hk in list(avail.get(primary,[])):
             if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
-                available[primary].remove(hk); return hk
+                avail[primary].remove(hk); return hk
         # 2) Borrow from an ADJACENT allowed building (or any, for DS).
         adj_order = [1,2,3] if is_ds else ADJ.get(primary, [1,2,3])
         for b in adj_order:
-            for hk in list(available.get(b,[])):
+            for hk in list(avail.get(b,[])):
                 if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
-                    available[b].remove(hk); return hk
+                    avail[b].remove(hk); return hk
         # 3) Any remaining present housekeeper who can legally take the group.
         for b in [1,2,3]:
-            for hk in list(available.get(b,[])):
+            for hk in list(avail.get(b,[])):
                 if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
-                    available[b].remove(hk); return hk
+                    avail[b].remove(hk); return hk
         # 3.5) SHORTAGE fallback. When home/adjacent housekeepers are exhausted,
         # a housekeeper may be moved cross-building to cover a group, as long
-        # as the GROUP itself spans only an allowed combination — B1&2 or B1&3
+        # as the GROUP itself spans only an allowed combination -- B1&2 or B1&3
         # (or a single building), NEVER B2&3. This relaxes the per-housekeeper
         # home-building rule on busy days while keeping the hard B2<->B3 block.
         group_spans_b2b3 = (2 in group_blds and 3 in group_blds)
         if not group_spans_b2b3:
             for b in [1,2,3]:
-                if available.get(b):
-                    return available[b].pop(0)
-        # 4) Truly exhausted — leave clearly unassigned (do NOT reuse a name).
-        return "No HK available"
+                if avail.get(b):
+                    return avail[b].pop(0)
+        # 4) Truly exhausted -- caller substitutes a placeholder.
+        return None
+    def drop(name):
+        """Remove a named housekeeper from whichever pool still holds them."""
+        for av in (available, ds_available):
+            for b in [1,2,3]:
+                if name in av.get(b,[]):
+                    av[b].remove(name); return
     # Priority HKs first
     for g in groups:
         if g.get("verify_group"): # never assign verify groups
@@ -2540,10 +2566,23 @@ def assign_hk_building_aware(groups, present_hk, roster):
         phk = g.get("priority_hk","")
         if not phk: continue
         if g.get("dv_rqs2"): assignment[g["label"]]=""; continue # DV -> RQS2 inspector
-        for b in [1,2,3]:
-            if phk in available.get(b,[]):
-                available[b].remove(phk); break
+        drop(phk)
         assignment[g["label"]] = phk; used.add(phk)
+    # Daily Service goes ONLY to the dedicated team when one is selected. Once
+    # the team is exhausted the remaining DS charts get a numbered placeholder
+    # (Need Housekeeper 1, 2, ...) instead of a name, so the gap is visible.
+    if ds_set:
+        need_n = 0
+        for g in groups:
+            if g["label"] in assignment: continue
+            if g.get("service_type") != SVC_DS: continue
+            if g.get("dv_rqs2"): assignment[g["label"]]=""; continue
+            matched = find_hk(g.get("blds",{1}), True, ds_available)
+            if matched:
+                assignment[g["label"]] = matched; used.add(matched)
+            else:
+                need_n += 1
+                assignment[g["label"]] = f"{NEED_HK_PREFIX} {need_n}"
     # Everyone else — assign the most CONSTRAINED groups first so they get the
     # scarce building-specific housekeepers. Order: Full Clean (strict building
     # rule) Dust n Vac Daily Service (flexible, can take any HK).
@@ -2558,9 +2597,9 @@ def assign_hk_building_aware(groups, present_hk, roster):
         # housekeeper field blank here; assign_inspectors puts it on RQS 2.
         if g.get("dv_rqs2"): assignment[g["label"]]=""; continue
         is_ds = (g.get("service_type") == SVC_DS)
-        matched = find_hk(g.get("blds",{1}), is_ds)
+        matched = find_hk(g.get("blds",{1}), is_ds) or NO_HK_LABEL
         assignment[g["label"]] = matched
-        if matched and not matched.startswith("No HK available"): used.add(matched)
+        if not is_unassigned_hk(matched): used.add(matched)
     return assignment, used
 
 def _primary_bld(g): return min(g["blds"]) if g["blds"] else 0
@@ -2871,10 +2910,15 @@ def group_card_html(g, idx):
     ac = c["accent"]; glow = c["glow"]; bar = c["bar"]
 
     hk_raw = g.get("housekeeper","") or ""
+    need_hk = hk_raw.startswith(NEED_HK_PREFIX)
     no_hk = not hk_raw or hk_raw.startswith("No HK available")
     if is_verify:
         unassigned_badge = "" # verify groups intentionally have no HK badge
         hk_raw = ""
+    elif need_hk:
+        # Short-staffed Daily Service: keep the numbered placeholder as the name
+        # so the manager can see exactly how many bodies are missing.
+        unassigned_badge = f'<span style="background:rgba(245,158,11,.2);color:#fcd34d;border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:700;border:1px solid rgba(245,158,11,.4);letter-spacing:.03em"> NEED HK</span>'
     elif no_hk:
         unassigned_badge = f'<span style="background:rgba(244,63,94,.2);color:#fb7185;border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:700;border:1px solid rgba(244,63,94,.35);letter-spacing:.03em"> NO HK</span>'
         hk_raw = hk_raw.replace("No HK available","Unassigned") if hk_raw else "Unassigned"
@@ -3129,6 +3173,7 @@ with st.sidebar:
         rqs1 = st.session_state.get("rqs1","")
         rqs2 = st.session_state.get("rqs2","")
         priority_hks = st.session_state.get("priority_hks",[])
+        ds_team      = st.session_state.get("ds_team",[])
         groups_per_insp = 3
     else:
         st.markdown("## Daily Attendance")
@@ -3343,6 +3388,34 @@ with st.sidebar:
                         f'padding:7px 11px;font-size:.75rem;color:#92400e">'
                         f' <b>{len(priority_hks)}</b> HK(s): {", ".join(priority_hks)}</div>',
                         unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("### Daily Service Team")
+        st.caption("HKs dedicated to Daily Service today. Only they get DS charts — "
+                   "and they are held back from Full Clean / Dust n Vac.")
+        if "ds_team" not in st.session_state: st.session_state["ds_team"] = []
+        saved_ds_team = [n for n in st.session_state["ds_team"] if n in present_hk]
+        if saved_ds_team != st.session_state["ds_team"]: st.session_state["ds_team"] = saved_ds_team
+        st.multiselect("Daily Service Team", options=present_hk, key="ds_team",
+                       label_visibility="collapsed", placeholder="Choose dedicated DS housekeepers…")
+        ds_team = st.session_state["ds_team"]
+        if ds_team:
+            _ds_last = [g for g in (st.session_state.get("groups_data") or [])
+                        if g.get("service_type")==SVC_DS and not g.get("verify_group")]
+            _short   = max(len(_ds_last) - len(ds_team), 0)
+            st.markdown(f'<div style="background:#ccfbf1;border:1px solid #5eead4;border-radius:8px;'
+                        f'padding:7px 11px;font-size:.75rem;color:#115e59">'
+                        f'<b>{len(ds_team)}</b> on Daily Service: {", ".join(ds_team)}</div>',
+                        unsafe_allow_html=True)
+            if _short:
+                st.markdown(f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;'
+                            f'padding:7px 11px;font-size:.75rem;color:#991b1b;margin-top:6px">'
+                            f'Last run was short <b>{_short}</b> — those charts showed '
+                            f'"{NEED_HK_PREFIX} 1…{_short}".</div>',
+                            unsafe_allow_html=True)
+        else:
+            st.caption("None selected — Daily Service is assigned from the full roster as usual.")
+
         st.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:9px 11px;font-size:.77rem;color:#475569;margin-top:8px">'
                     f' <b>{len(present_hk)}</b> HKs &nbsp;·&nbsp; <b>{len(present_insp)}</b> inspectors<br>'
                     f'RQS1: <b>{rqs1 or "—"}</b> &nbsp;·&nbsp; RQS2: <b>{rqs2 or "—"}</b></div>',
@@ -3445,7 +3518,7 @@ def _build_snapshot(fg, total_rooms, inspectors):
     hk_snap = {}
     for g in fg:
         hk = g.get("housekeeper","")
-        if hk and hk != "Manager":
+        if hk and hk != "Manager" and not is_unassigned_hk(hk):
             if hk not in hk_snap:
                 hk_snap[hk] = {"time":0,"rooms":0,"rooms_fc":0,"rooms_ds":0,"rooms_dv":0}
             n = len(g.get("rooms",[]))
@@ -3626,7 +3699,8 @@ if run:
                     for g,lbl in zip(vr2, make_labels("VERIFY",len(vr2))): g["label"]=lbl
                     for g in fg: g["cross_bld"]=len(g["blds"])>1
 
-                    hk_asgn, used_hk_set = assign_hk_building_aware(fg, present_hk, roster)
+                    hk_asgn, used_hk_set = assign_hk_building_aware(
+                        fg, present_hk, roster, ds_team=st.session_state.get("ds_team",[]))
                     for g in fg: g["housekeeper"] = hk_asgn.get(g["label"],"")
                     inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
 
@@ -3683,7 +3757,9 @@ ih_rooms_n = sum(len(g["rooms"]) for g in ih_g)
 ds_rooms_n = sum(len(g["rooms"]) for g in ds_g)
 dv_rooms_n = sum(len(g["rooms"]) for g in dv_g)
 n_free_hk=sum(1 for n in present_hk if n not in used_hk_set)
-n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager" and g["time"]<LOW_MIN)
+n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager"
+              and not is_unassigned_hk(g.get("housekeeper")) and g["time"]<LOW_MIN)
+n_need_hk=sum(1 for g in fg if str(g.get("housekeeper","")).startswith(NEED_HK_PREFIX))
 
 st.markdown(f"""<div class="stat-row">
   <div class="sc hi"><div class="n">{total_rooms}</div><div class="l">Total Rooms</div></div>
@@ -4161,7 +4237,7 @@ td{{transition:background .15s ease}}
             names = [str(x.get("room","")) for x in recs_rooms if x.get("room")]
             return ", ".join(sorted(names))
         for hk, rec in by_hk.items():
-            if hk == "Unassigned": continue
+            if hk == "Unassigned" or is_unassigned_hk(hk): continue
             if rec["time"] and rec["time"] < LOW_MIN:
                 _hk_low.append((hk, f'{rec["time"]}m', "#b45309", len(rec["rooms"]),
                                 _svc_summary(rec["rooms"]), " · ".join(sorted(rec["insp"])),
@@ -4186,6 +4262,11 @@ td{{transition:background .15s ease}}
                                  _room_names(info["rooms"]), info["n"]))
         _rqs_low.sort(key=lambda t:t[-1])
         _rqs_free = sorted(n for n in present_insp if n not in rqs_rooms)
+
+        if n_need_hk:
+            st.error(f"**{n_need_hk}** more housekeeper(s) needed for Daily Service — charts "
+                     f"labelled *{NEED_HK_PREFIX} 1…{n_need_hk}* have nobody on them. "
+                     f"Add more HKs to the Daily Service Team in the sidebar.")
 
         _any = _hk_low or _hk_free or _rqs_low or _rqs_free
         if _any:
@@ -4488,7 +4569,8 @@ td{{transition:background .15s ease}}
                             # Collect all HKs in same inspector batch for swap target
                             batch_hks = sorted(set(
                                 gg.get("housekeeper","") for gg in fg
-                                if gg.get("inspector","") == insp_name and gg.get("housekeeper","")
+                                if gg.get("inspector","") == insp_name
+                                and not is_unassigned_hk(gg.get("housekeeper",""))
                             ))
                             if len(batch_hks) > 1:
                                 st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.62rem;color:#475569;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px"> Swap rooms to:</div>', unsafe_allow_html=True)
