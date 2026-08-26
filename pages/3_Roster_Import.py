@@ -16,7 +16,7 @@ import auth, db, roster_import as ri
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 9:
+if getattr(ri, "__version__", 0) < 10:
     import importlib
     ri = importlib.reload(ri)
 
@@ -193,6 +193,53 @@ if not db.settings_table_ready():
 meta = db.load_staff_meta() or {}
 overrides = db.load_staff_overrides()
 week_keys = db.staff_week_keys()
+
+# ── Backfill the red no-call marks ────────────────────────────────────────────
+# Weeks stored before cell fills were read carry none. The workbook itself is
+# in the database, so re-derive them rather than asking for another upload.
+# Runs once; the marker stops it repeating for everyone who opens the page.
+def _backfill_fills():
+    info = db.staff_file_info()
+    if not info.get("size") or not week_keys:
+        return None
+    stamp = str(info.get("saved_at", "")) + "|" + str(len(week_keys))
+    if (db.load_autoapply() or {}).get("fills_backfilled") == stamp:
+        return None
+    sample = db.load_staff_week(week_keys[-1])
+    if not ri.needs_fill_backfill(sample):
+        return None
+    with st.spinner("Reading the red no-call marks from the stored workbook…"):
+        raw, _i = db.load_staff_file()
+        if not raw:
+            return None
+        import openpyxl
+        parsed = ri.parse_all_weeks(
+            openpyxl.load_workbook(io.BytesIO(raw), data_only=True),
+            openpyxl.load_workbook(io.BytesIO(raw), data_only=False))
+        total = weeks_done = 0
+        for wk in week_keys:
+            stored = db.load_staff_week(wk)
+            if not ri.needs_fill_backfill(stored) or wk not in parsed:
+                continue
+            updated, n = ri.merge_fill_data(stored, parsed[wk])
+            if updated is not None:
+                db.save_staff_week(wk, updated)
+                total += n; weeks_done += 1
+        marker = dict(db.load_autoapply() or {})
+        marker["fills_backfilled"] = stamp
+        db.save_autoapply(marker)
+        st.cache_data.clear()
+    return total, weeks_done
+
+try:
+    _bf = _backfill_fills()
+except Exception as _ex:
+    _bf = None
+    st.warning(f"Could not read the no-call marks from the stored workbook: {_ex}")
+if _bf:
+    st.success(f"Picked up **{_bf[0]}** no-call/no-show marks across "
+               f"**{_bf[1]}** stored weeks, straight from the saved workbook — "
+               f"no re-upload needed.")
 
 st.markdown('<p class="pg-title">Roster Import</p>', unsafe_allow_html=True)
 st.markdown('<p class="pg-sub">The weekly staff schedule — stored, compared week to week, '

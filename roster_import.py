@@ -22,7 +22,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 9
+__version__ = 10
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -543,6 +543,42 @@ def parse_week(ws, ws_styles=None):
             # to re-derive it from a workbook opened without cached values.
             "cols": {d.isoformat(): dates[d] for d in ordered},
             "people": people}
+
+def needs_fill_backfill(week) -> bool:
+    """True for a week stored before cell fills were read.
+
+    A week planned in the app has no sheet behind it and never will, so it is
+    not counted as missing anything.
+    """
+    if not week or week.get("planned"):
+        return False
+    return not any("nocall" in rec for rec in week.get("people", {}).values())
+
+def merge_fill_data(stored, parsed):
+    """Copy the red no-call marks from a fresh parse onto a stored week.
+
+    Only the fill-derived fields are taken. The cells themselves are left
+    exactly as stored, so nothing a manager typed is disturbed, and in-app
+    edits live in a separate overrides record anyway.
+
+    Returns (updated_week, marks_added) or (None, 0) when there is nothing to do.
+    """
+    if not stored or not parsed:
+        return None, 0
+    by_row, by_name = {}, {}
+    for key, rec in parsed.get("people", {}).items():
+        if rec.get("row"):
+            by_row[rec["row"]] = rec
+        by_name[norm_name(rec.get("name", key))] = rec
+    added = 0
+    for key, rec in stored.get("people", {}).items():
+        src = by_row.get(rec.get("row")) or by_name.get(norm_name(rec.get("name", key)))
+        marks = list((src or {}).get("nocall") or [])
+        rec["nocall"] = marks
+        if src is not None and "home" in src and "home" not in rec:
+            rec["home"] = src["home"]
+        added += len(marks)
+    return stored, added
 
 def week_key(week) -> str:
     """Stable id for a week — the ISO date of its first (Sunday) column."""
