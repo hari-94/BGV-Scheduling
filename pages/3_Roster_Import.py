@@ -594,7 +594,7 @@ with tab_plan:
             all_rows = _history(f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}')
             sugg = ri.suggest_week(all_rows, tgt)
             idx_all = ri.people_index(all_rows)
-            draft = ri.suggestion_to_week(idx_all, sugg, tgt, template)
+            draft = ri.suggestion_to_week(idx_all, sugg, tgt, template, rows=all_rows)
 
         dates = draft["dates"]
         filled = sum(1 for rec in draft["people"].values() for d in dates
@@ -631,6 +631,75 @@ with tab_plan:
                                                  for v, w in g["basis"][1:]) or "—"}
                          for pid, iso, g in sorted(low, key=lambda x: x[2]["confidence"])]),
                         use_container_width=True, hide_index=True, height=300)
+
+        _zmoves = draft.get("zone_moves") or []
+        if _zmoves:
+            st.markdown(f'<div style="background:#f5f3ff;border:1px solid #ddd6fe;'
+                        f'border-radius:8px;padding:9px 13px;font-size:.78rem;color:#5b21b6">'
+                        f'Moved <b>{len(_zmoves)}</b> houseperson(s) off a zone another '
+                        f'person already had, onto one nobody was covering.</div>',
+                        unsafe_allow_html=True)
+        cover_rep = ri.zone_coverage(draft)
+        if cover_rep:
+            gaps = sum(len(v["missing"]) for d in cover_rep.values() for v in d.values())
+            dups = sum(len(v["doubled"]) for d in cover_rep.values() for v in d.values())
+            with st.expander(f"Houseperson zone cover — {gaps} gap(s), {dups} doubled"):
+                st.caption("Zones run 1–7 (1 Runner Bld 2, 2 Lobby, 3 Pool Bld 1, "
+                           "4 Runner Bld 1, 5 Runner Bld 3, 6 Pool Bld 3, 7 Plaza Bld 3). "
+                           "Full cover happens on only 39% of real shift-days, so a gap is "
+                           "normal on a short day — a doubled zone usually is not.")
+                st.dataframe(pd.DataFrame(
+                    [{"Shift": sec, "Day": iso,
+                      "Zones with nobody": ", ".join(v["missing"]) or "—",
+                      "Zones doubled": ", ".join(v["doubled"]) or "—"}
+                     for sec, days in cover_rep.items() for iso, v in sorted(days.items())]),
+                    use_container_width=True, hide_index=True, height=260)
+
+        with st.expander("What the patterns actually say"):
+            pc1, pc2 = st.columns(2)
+            with pc1:
+                st.markdown('<div class="mono">HOUSEKEEPERS — BUILDINGS BARELY MOVE</div>',
+                            unsafe_allow_html=True)
+                bsug = ri.suggest_building(_history(
+                    f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}'))
+                moved = [v for v in bsug.values() if v["moved"]]
+                st.markdown(
+                    f'<div style="font-size:.8rem;color:#5b6675;line-height:1.55">'
+                    f'Across the whole workbook only <b>1.5%</b> of week-to-week '
+                    f'transitions are a building change, and <b>106 of 121</b> '
+                    f'housekeepers spend 90%+ of their weeks in one building. A move is '
+                    f'a transfer, not a rotation — so a person\'s building is simply '
+                    f'where they have settled.</div>', unsafe_allow_html=True)
+                if moved:
+                    st.markdown('<div class="mono" style="margin-top:10px">'
+                                'RECENTLY TRANSFERRED</div>', unsafe_allow_html=True)
+                    st.dataframe(pd.DataFrame(
+                        [{"Person": v["person"], "Now": f'Building {v["building"]}',
+                          "Was": f'Building {v["settled"]}',
+                          "Confidence": f'{v["confidence"]*100:.0f}%'} for v in moved]),
+                        use_container_width=True, hide_index=True,
+                        height=min(60 + 33 * len(moved), 200))
+                else:
+                    st.caption("Nobody has changed building recently.")
+            with pc2:
+                st.markdown('<div class="mono">HOUSEPERSONS — ZONES PERSIST, THEN SHIFT</div>',
+                            unsafe_allow_html=True)
+                st.markdown(
+                    '<div style="font-size:.8rem;color:#5b6675;line-height:1.55">'
+                    'Zones do <b>not</b> follow the weekday and they do not cycle. A '
+                    'houseperson holds a zone for a stretch — median <b>2</b> consecutive '
+                    'working days, mean 3.4 — then moves to another. So the best guess is '
+                    'the zone they last worked, which scores <b>54%</b> against <b>36%</b> '
+                    'for a weekday-based guess. Whether they work at all is still a '
+                    'weekday question, so only the zone itself is carried forward.</div>',
+                    unsafe_allow_html=True)
+                if sugg:
+                    nlast = sum(1 for days in sugg.values() for iso, g in days.items()
+                                if iso in dates and g.get("model") == "last zone")
+                    st.markdown(f'<div style="margin-top:10px;font-size:.8rem;color:#5b21b6">'
+                                f'<b>{nlast}</b> cell(s) in this draft came from the '
+                                f'carried-forward zone rather than the weekday pattern.</div>',
+                                unsafe_allow_html=True)
 
         st.markdown('<p class="sec">Draft — change anything before saving</p>',
                     unsafe_allow_html=True)
@@ -956,6 +1025,30 @@ with tab_apply:
         m[1].metric("On Daily Service", len(update["ds_team"]))
         m[2].metric("Inspectors present", n_ins)
         m[3].metric("RQS 1 / RQS 2", f'{update["rqs1"] or "—"} / {update["rqs2"] or "—"}')
+
+        # The sheet is the authority on buildings, but a person sitting under a
+        # different building from the one they have always worked is worth a
+        # second look — it is either a real transfer or a typo in the sheet.
+        _bsug = ri.suggest_building(
+            _history(f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}'))
+        _odd = []
+        for p in people:
+            if p["group"] != "hk" or not p["present"]:
+                continue
+            s = _bsug.get(f'hk|{ri.norm_name(p["name"])}')
+            if s and s["settled"] != p["building"]:
+                _odd.append((p["name"], p["building"], s["settled"], s["history"]))
+        if _odd:
+            rows_odd = "<br>".join(
+                f'&nbsp;&nbsp;<b>{e(n)}</b>: on the sheet in Building {b}, '
+                f'normally Building {s} <span style="opacity:.7">({h})</span>'
+                for n, b, s, h in _odd)
+            st.markdown(f'<div style="background:#f5f3ff;border:1px solid #ddd6fe;'
+                        f'border-radius:8px;padding:10px 13px;font-size:.78rem;'
+                        f'color:#5b21b6;margin-top:8px">'
+                        f'<b>{len(_odd)} against their usual building</b> — the sheet wins, '
+                        f'but check it is a real transfer:<br>{rows_odd}</div>',
+                        unsafe_allow_html=True)
 
         if update.get("cover"):
             rows = "<br>".join(

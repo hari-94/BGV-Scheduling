@@ -499,6 +499,7 @@ def history_rows(weeks, overrides=None, upto=None):
                     # stay separate people.
                     "pid": f'{rec["group"]}|{norm_name(name)}',
                     "key": key, "section": rec["section"], "group": rec["group"],
+                    "building": rec.get("building"),
                     "raw": raw, "kind": kind,
                     "worked": kind in WORKED_KINDS,
                     "daily_service": kind == KIND_DAILY,
@@ -602,6 +603,51 @@ def period_bounds(today=None):
 #: rota change, long enough to see a pattern.
 _DECAY = 0.85
 
+#: A houseperson cell that is purely a zone: "4", "6 + 7", "6+7".
+_ZONE_ONLY_RE = re.compile(r"^[1-7](\s*\+\s*[1-7])*$")
+
+def zone_of(raw):
+    """The zone a houseperson cell names, or None if it is not a zone cell."""
+    s = re.sub(r"\s+", " ", str(raw or "").strip())
+    return s if _ZONE_ONLY_RE.match(s) else None
+
+def suggest_building(rows, recent_weeks=8, today=None):
+    """Which building each housekeeper belongs in.
+
+    Measured over the whole workbook, buildings barely move: only 1.5% of
+    week-to-week transitions are a switch and 106 of 121 housekeepers spend
+    90%+ of their weeks in one building. So the answer is simply where they
+    have settled — but a move, when it happens, is a permanent transfer rather
+    than a rotation, so the recent window wins and the change is flagged.
+    """
+    today = today or _dt.date.today()
+    cut = (today - _dt.timedelta(weeks=recent_weeks)).isoformat()
+    allb, recb, label = {}, {}, {}
+    for r in rows:
+        if r["group"] != "hk" or not r.get("building"):
+            continue
+        b = r["building"]
+        allb.setdefault(r["pid"], {})
+        allb[r["pid"]][b] = allb[r["pid"]].get(b, 0) + 1
+        label[r["pid"]] = r["person"]
+        if r["date"] >= cut:
+            recb.setdefault(r["pid"], {})
+            recb[r["pid"]][b] = recb[r["pid"]].get(b, 0) + 1
+    out = {}
+    for pid, counts in allb.items():
+        settled = max(counts.items(), key=lambda x: x[1])[0]
+        rec = recb.get(pid) or counts
+        recent = max(rec.items(), key=lambda x: x[1])[0]
+        out[pid] = {
+            "person": label[pid],
+            "building": recent,
+            "settled": settled,
+            "moved": recent != settled,
+            "confidence": rec[recent] / sum(rec.values()),
+            "history": dict(sorted(counts.items())),
+        }
+    return out
+
 def suggest_week(rows, target_start, lookback_weeks=16, today=None):
     """Predict a week's cells from each person's own history.
 
@@ -630,6 +676,17 @@ def suggest_week(rows, target_start, lookback_weeks=16, today=None):
         seen.setdefault(r["pid"], {})
         seen[r["pid"]][r["dow"]] = seen[r["pid"]].get(r["dow"], 0) + 1
 
+    # Housepersons are a different problem. Their cell is a ZONE, and zones do
+    # not follow the weekday: predicting from weekday scores 35.9%, while simply
+    # carrying forward the zone they last worked scores 54.4%. They hold a zone
+    # for a stretch (median 2 consecutive working days, mean 3.4) then move to
+    # another, so persistence beats frequency. Whether they work at all is still
+    # a weekday question, so only the zone itself is overridden.
+    last_zone = {}
+    for r in sorted(past, key=lambda x: x["date"]):
+        if "Houseperson" in str(r.get("section", "")) and zone_of(r["raw"]):
+            last_zone[r["pid"]] = r["raw"]
+
     out = {}
     for pid, bydow in tally.items():
         for i in range(7):
@@ -641,15 +698,99 @@ def suggest_week(rows, target_start, lookback_weeks=16, today=None):
             total = sum(counts.values()) or 1.0
             ranked = sorted(counts.items(), key=lambda x: -x[1])
             value, weight = ranked[0]
+            model = "weekday"
+            if zone_of(value) and pid in last_zone:
+                carried = last_zone[pid]
+                if carried != value:
+                    model = "last zone"
+                    value = carried
             out.setdefault(pid, {})[d.isoformat()] = {
                 "value": value,
                 "confidence": weight / total,
                 "n": seen[pid].get(dow, 0),
+                "model": model,
                 "basis": [(v, round(w / total, 3)) for v, w in ranked[:3]],
             }
     return out
 
-def suggestion_to_week(index, suggestions, target_start, template):
+def balance_zones(week, rows):
+    """Stop a draft from putting two housepersons on the same zone.
+
+    Carrying each person's last zone forward independently makes collisions
+    that the real sheet does not have — zones are doubled on only 1% of actual
+    shift-days. Where two people land on one zone, it stays with whoever has
+    worked it most, and the other moves to an uncovered zone, preferring one
+    they have actually worked before.
+
+    Mutates and returns the week. Reports the moves it made.
+    """
+    hist = {}
+    for r in rows:
+        z = zone_of(r["raw"])
+        if z and "Houseperson" in str(r.get("section", "")):
+            hist.setdefault(r["pid"], {})
+            hist[r["pid"]][z] = hist[r["pid"]].get(z, 0) + 1
+    moves = []
+    for section in ("Houseperson AM", "Houseperson PM"):
+        members = [(k, rec) for k, rec in week["people"].items()
+                   if rec.get("section") == section]
+        if not members:
+            continue
+        for iso in week["dates"]:
+            holders = {}
+            for k, rec in members:
+                z = zone_of(rec.get("cells", {}).get(iso, ""))
+                if z:
+                    holders.setdefault(z, []).append((k, rec))
+            taken = set(holders)
+            for z, who in list(holders.items()):
+                if len(who) < 2:
+                    continue
+                pid_of = lambda rec, k: f'{rec["group"]}|{norm_name(rec.get("name", k))}'
+                who.sort(key=lambda kr: -hist.get(pid_of(kr[1], kr[0]), {}).get(z, 0))
+                for k, rec in who[1:]:
+                    free = [c for c in "1234567" if c not in taken]
+                    if not free:
+                        break
+                    pid = pid_of(rec, k)
+                    free.sort(key=lambda c: -hist.get(pid, {}).get(c, 0))
+                    new = free[0]
+                    rec["cells"][iso] = new
+                    taken.add(new)
+                    moves.append({"person": rec.get("name", k), "date": iso,
+                                  "section": section, "from": z, "to": new})
+    week["zone_moves"] = moves
+    return week
+
+def zone_coverage(week):
+    """Zones missing or doubled on each houseperson shift, per day.
+
+    Full 1-7 cover happens on only 39% of shift-days in the real workbook, so
+    this reports rather than enforces — but a doubled zone is rare (1%) and
+    usually a mistake worth seeing.
+    """
+    report = {}
+    for section in ("Houseperson AM", "Houseperson PM"):
+        members = [rec for rec in week["people"].values()
+                   if rec.get("section") == section]
+        if not members:
+            continue
+        for iso in week["dates"]:
+            zones = []
+            for rec in members:
+                z = zone_of(rec.get("cells", {}).get(iso, ""))
+                if z:
+                    zones.extend(p.strip() for p in z.split("+"))
+            if not zones:
+                continue
+            missing = [z for z in "1234567" if z not in zones]
+            dupes = sorted({z for z in zones if zones.count(z) > 1})
+            if missing or dupes:
+                report.setdefault(section, {})[iso] = {"missing": missing,
+                                                       "doubled": dupes}
+    return report
+
+def suggestion_to_week(index, suggestions, target_start, template, rows=None):
     """Build a storable week dict from suggestions.
 
     `template` is the most recent real week — it supplies each person's row
@@ -667,9 +808,10 @@ def suggestion_to_week(index, suggestions, target_start, template):
             if got and got["value"]:
                 cells[iso] = got["value"]
         people[key] = {**rec, "cells": cells}
-    return {"sheet": f"(planned {target_start})", "dates": dates,
+    week = {"sheet": f"(planned {target_start})", "dates": dates,
             "cols": dict(template.get("cols") or {}), "people": people,
             "planned": True, "from_sheet": template.get("sheet", "")}
+    return balance_zones(week, rows) if rows else week
 
 def copy_week(template, target_start):
     """Same shape, same values, shifted onto a new set of dates."""
