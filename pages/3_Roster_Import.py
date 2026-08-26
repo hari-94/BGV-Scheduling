@@ -551,7 +551,15 @@ with tab_att:
             groups2 = ["Everyone", "Housekeepers", "RQS", "Other teams"]
             gsel = st.selectbox("Team", groups2, key="ri_att_grp", label_visibility="collapsed")
 
-        sub = [r for r in rows if start <= r["date"] <= t_iso]
+        # Whole period, not just up to today: on a Wednesday a manager wants the
+        # week a person is down for, not only the days already behind them.
+        end = {"This week": (datetime.date.fromisoformat(wk_s)
+                             + datetime.timedelta(days=6)).isoformat(),
+               "This month": ((today.replace(day=28) + datetime.timedelta(days=4))
+                              .replace(day=1) - datetime.timedelta(days=1)).isoformat(),
+               "This year": today.replace(month=12, day=31).isoformat(),
+               "All stored": "9999-12-31"}[period]
+        sub = [r for r in rows if start <= r["date"] <= end]
         if gsel == "Housekeepers":  sub = [r for r in sub if r["group"] == "hk"]
         elif gsel == "RQS":         sub = [r for r in sub if r["group"] == "rqs"]
         elif gsel == "Other teams": sub = [r for r in sub if r["group"] == "other"]
@@ -563,12 +571,13 @@ with tab_att:
             people = sorted(idx_ppl, key=lambda p: idx_ppl[p]["label"].lower())
             summ = {p: ri.summarise_person(sub, pid=p) for p in people}
             worked_days = sum(s["n_worked"] for s in summ.values())
+            done_days = sum(1 for r in sub if r["worked"] and r["date"] <= t_iso)
             m = st.columns(4)
             m[0].metric("People", len(people))
-            m[1].metric("Days worked", worked_days)
+            m[1].metric("Days in period", worked_days,
+                        delta=f'{done_days} already worked', delta_color="off")
             m[2].metric("Avg days / person", f'{worked_days/max(len(people),1):.1f}')
-            m[3].metric("Covering rooms",
-                        sum(1 for r in sub if r["cover"]))
+            m[3].metric("Covering rooms", sum(1 for r in sub if r["cover"]))
 
             st.markdown('<p class="sec">Who has worked how much</p>', unsafe_allow_html=True)
             st.caption("Sorted by days worked. Use it to see who is due time off "
@@ -577,10 +586,13 @@ with tab_att:
             for p in people:
                 s = summ[p]
                 if not s["rows"]: continue
+                done = sum(1 for r in s["worked"] if r["date"] <= t_iso)
                 tbl.append({
                     "Person": idx_ppl[p]["label"],
                     "Team": idx_ppl[p]["sections"][0],
                     "Worked": s["n_worked"],
+                    "So far": done,
+                    "Ahead": s["n_worked"] - done,
                     "Off": s["off"],
                     "Daily Service": s["shifts"].get("Daily Service", 0),
                     "Room cover": s["shifts"].get("Room cover", 0),

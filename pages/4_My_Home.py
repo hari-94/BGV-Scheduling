@@ -80,6 +80,8 @@ html,body,[class*="css"]{font-family:'DM Sans',sans-serif!important;color:var(--
   line-height:1;font-variant-numeric:tabular-nums}
 .kpi .l{font-family:'DM Mono',monospace;font-size:.58rem;text-transform:uppercase;
   letter-spacing:.12em;color:var(--txt3);margin-top:5px}
+.kpi .s{font-size:.7rem;color:var(--txt2);margin-top:6px;padding-top:6px;
+  border-top:1px solid #f0f3f7}
 
 .bar{display:flex;align-items:center;gap:10px;margin:4px 0}
 .bar .d{width:34px;font-size:.75rem;color:var(--txt2)}
@@ -147,7 +149,9 @@ index = ri.people_index(rows)
 # Sign-in names rarely match the sheet exactly, so try the display name and the
 # username, which often carries digits or dots.
 mine = ri.match_person(index, me_display, me_user)
-can_browse = auth.can("can_generate")
+# Only admins look up other people. RQS and housekeepers see themselves —
+# this page is personal, and the roster pages already cover the whole team.
+can_browse = auth.can("can_manage_users")
 
 if mine is None or can_browse:
     order = sorted(index, key=lambda p: index[p]["label"].lower())
@@ -216,17 +220,34 @@ else:
 strip(this_sun + datetime.timedelta(days=7), "Next week")
 
 # ── Totals ────────────────────────────────────────────────────────────────────
-st.markdown('<p class="sec">What you have worked</p>', unsafe_allow_html=True)
+st.markdown('<p class="sec">Your days</p>', unsafe_allow_html=True)
 wk_s, mo_s, yr_s = ri.period_bounds(today)
-def count(start):
-    return sum(1 for r in s_all["rows"] if start <= r["date"] <= t_iso and r["worked"])
+wk_e = (this_sun + datetime.timedelta(days=6)).isoformat()
+# Last day of this month = day before the first of next month.
+mo_e = ((today.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+        - datetime.timedelta(days=1)).isoformat()
+yr_e = today.replace(month=12, day=31).isoformat()
+
+def tally(start, end):
+    """Whole-period total, and how much of it has already happened.
+
+    The headline is the FULL period: on a Wednesday "days this week" should be
+    the four days you are down for, not the two you have already done.
+    """
+    span = [r for r in s_all["rows"] if start <= r["date"] <= end and r["worked"]]
+    done = [r for r in span if r["date"] <= t_iso]
+    return len(span), len(done), len(span) - len(done)
+
 cols = st.columns(4)
-for col, (n, lbl) in zip(cols, [(count(wk_s), "days this week"),
-                                (count(mo_s), "days this month"),
-                                (count(yr_s), "days this year"),
-                                (s_all["n_worked"], "days on record")]):
-    col.markdown(f'<div class="kpi"><div class="n">{n}</div><div class="l">{lbl}</div></div>',
-                 unsafe_allow_html=True)
+cards = [(*tally(wk_s, wk_e), "days this week"),
+         (*tally(mo_s, mo_e), "days this month"),
+         (*tally(yr_s, yr_e), "days this year"),
+         (s_all["n_worked"], s_all["n_worked"], 0, "days on record")]
+for col, (total, done, ahead, lbl) in zip(cols, cards):
+    sub = (f'<div class="s">{done} so far · {ahead} to come</div>' if ahead else
+           '<div class="s">all complete</div>' if total else '')
+    col.markdown(f'<div class="kpi"><div class="n">{total}</div>'
+                 f'<div class="l">{lbl}</div>{sub}</div>', unsafe_allow_html=True)
 
 c1, c2 = st.columns([3, 2])
 with c1:
