@@ -13,7 +13,7 @@ import auth, db, roster_import as ri
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
 # sys.modules, so reload it rather than dying on a helper it does not have yet.
-if getattr(ri, "__version__", 0) < 11:
+if getattr(ri, "__version__", 0) < 12:
     import importlib
     ri = importlib.reload(ri)
 

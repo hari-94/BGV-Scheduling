@@ -22,7 +22,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 11
+__version__ = 12
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -1074,6 +1074,17 @@ def zone_coverage(week):
                                                        "doubled": dupes}
     return report
 
+def _shift_cols(template, dates):
+    """Re-key a template's column map onto a new week's dates.
+
+    The map is {date: column}. Copied verbatim it still points at the dates it
+    came from, so an exported plan keeps the old week's headers. Columns are
+    positional, so the nth date takes the nth column.
+    """
+    src = template.get("cols") or {}
+    ordered = [src[d] for d in sorted(src)]
+    return {iso: ordered[i] for i, iso in enumerate(dates) if i < len(ordered)}
+
 def suggestion_to_week(index, suggestions, target_start, template, rows=None):
     """Build a storable week dict from suggestions.
 
@@ -1091,9 +1102,9 @@ def suggestion_to_week(index, suggestions, target_start, template, rows=None):
             got = suggestions.get(pid, {}).get(iso)
             if got and got["value"]:
                 cells[iso] = got["value"]
-        people[key] = {**rec, "cells": cells}
+        people[key] = {**rec, "cells": cells, "nocall": []}
     week = {"sheet": f"(planned {target_start})", "dates": dates,
-            "cols": dict(template.get("cols") or {}), "people": people,
+            "cols": _shift_cols(template, dates), "people": people,
             "planned": True, "from_sheet": template.get("sheet", "")}
     return balance_zones(week, rows) if rows else week
 
@@ -1110,9 +1121,10 @@ def copy_week(template, target_start):
                 v = rec.get("cells", {}).get(src[i], "")
                 if v:
                     cells[iso] = v
-        people[key] = {**rec, "cells": cells}
+        # nocall marks belong to the week they happened in, never to a copy.
+        people[key] = {**rec, "cells": cells, "nocall": []}
     return {"sheet": f"(copied to {target_start})", "dates": dates,
-            "cols": dict(template.get("cols") or {}), "people": people,
+            "cols": _shift_cols(template, dates), "people": people,
             "planned": True, "from_sheet": template.get("sheet", "")}
 
 def week_range_text(iso, with_year=None, today=None) -> str:
@@ -1166,6 +1178,84 @@ def next_missing_weeks(week_keys, count=6, today=None):
         if (d - sun).days > 370:
             break
     return out
+
+def export_week_xlsx(raw_bytes, week, title=None):
+    """One week as a workbook in the sheet's own layout.
+
+    Rather than building a sheet from scratch, this keeps the real one: the
+    stored workbook is opened WITHOUT data_only so formulas and formatting
+    survive, every other sheet is dropped, and this week's values are written
+    over the top. A week planned in the app has no sheet of its own, so it
+    borrows the one it was built from and gets its dates rewritten.
+
+    Returns (bytes, sheet_title).
+    """
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    wb = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=False)
+    src = week.get("sheet") if week.get("sheet") in wb.sheetnames else None
+    if src is None:
+        src = week.get("from_sheet")
+    if src not in wb.sheetnames:
+        raise ValueError("The week's sheet is not in the stored workbook.")
+    ws = wb[src]
+    for name in list(wb.sheetnames):
+        if name != src:
+            del wb[name]
+
+    # Cells swallowed by a merge are read-only in openpyxl; only the top-left
+    # anchor can be written. Some rows really do merge days together (one note
+    # spanning Thu-Sat), so those are left exactly as the sheet has them.
+    merged_locked = set()
+    for rng in ws.merged_cells.ranges:
+        for row in ws[rng.coord]:
+            for cell in row:
+                if (cell.row, cell.column) != (rng.min_row, rng.min_col):
+                    merged_locked.add((cell.row, cell.column))
+
+    def writable(r, c):
+        return None if (r, c) in merged_locked else ws.cell(r, c)
+
+    dates = list(week.get("dates") or [])
+    cols = dict(week.get("cols") or {})
+    if not cols and dates:                       # planned week built off a template
+        cols = {iso: 2 + i for i, iso in enumerate(dates)}
+    col_to_iso = {c: iso for iso, c in cols.items()}
+
+    # Rewrite every repeated date header so the sheet reads as this week.
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 220)):
+        for cell in row:
+            if isinstance(cell.value, (_dt.datetime, _dt.date)) and cell.column in col_to_iso:
+                target = writable(cell.row, cell.column)
+                if target is not None:
+                    target.value = _dt.datetime.fromisoformat(col_to_iso[cell.column])
+
+    red = PatternFill("solid", fgColor="FFFF0000")
+    blank = PatternFill(fill_type=None)
+    for key, rec in week.get("people", {}).items():
+        row = rec.get("row")
+        if not row:
+            continue
+        marks = set(rec.get("nocall") or [])
+        for iso, col in cols.items():
+            cell = writable(int(row), int(col))
+            if cell is None:
+                continue
+            cell.value = rec.get("cells", {}).get(iso) or None
+            # Carry the no-call marks, and clear a red left over from the week
+            # this sheet used to hold — otherwise a plan inherits someone
+            # else's absence.
+            if iso in marks:
+                cell.fill = red
+            elif _is_nocall_fill(cell):
+                cell.fill = blank
+
+    if title:
+        ws.title = title[:31]
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), ws.title
 
 def write_overrides_to_workbook(raw_bytes, weeks, overrides):
     """Write in-app edits into a copy of the uploaded workbook.

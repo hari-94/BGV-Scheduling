@@ -16,7 +16,7 @@ import auth, db, roster_import as ri
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 11:
+if getattr(ri, "__version__", 0) < 12:
     import importlib
     ri = importlib.reload(ri)
 
@@ -153,6 +153,34 @@ KIND_LABEL = {ri.KIND_DAILY: "Daily Service", ri.KIND_WORKING: "Working",
               ri.KIND_UNKNOWN: "Unrecognised"}
 #: Must match the Schedule page's RQS selectbox "nobody" option exactly.
 RQS_NONE = "— none —"
+
+XLSX_MIME = ("application/vnd.openxmlformats-officedocument"
+             ".spreadsheetml.sheet")
+
+def week_download(week, wk_key, key_prefix):
+    """Offer this week as an .xlsx in the workbook's own layout."""
+    raw = st.session_state.get("ri_raw_bytes")
+    if not raw:
+        raw, _info = db.load_staff_file()
+    if not raw:
+        st.caption("Upload the workbook once on **Upload & sync** and the "
+                   "Excel download appears here.")
+        return
+    title = ri.week_range_text(wk_key, with_year=False)
+    if st.button("Build Excel file", key=f"{key_prefix}_build"):
+        try:
+            data, sheet = ri.export_week_xlsx(raw, week, title=title)
+            st.session_state[f"{key_prefix}_xlsx"] = (data, sheet)
+        except Exception as ex:
+            st.error(f"Could not build the file: {ex}")
+    got = st.session_state.get(f"{key_prefix}_xlsx")
+    if got:
+        st.download_button(
+            f"Download {got[1]}.xlsx", data=got[0],
+            file_name=f"Schedule_{wk_key}.xlsx", mime=XLSX_MIME,
+            key=f"{key_prefix}_dl")
+        st.caption("Same layout as the source workbook — section headers, "
+                   "formulas and the red no-call marks all intact.")
 
 def human_ago(iso):
     try:
@@ -478,6 +506,9 @@ with tab_week:
               '<span><span class="pill" style="background:#fff;color:#f59e0b;outline:2px solid #f59e0b">&nbsp;&nbsp;</span> changed at last sync</span>'
               '<span><span class="pill" style="background:#fff;box-shadow:inset 3px 0 0 #7c3aed">&nbsp;&nbsp;</span> edited in app</span>'
             + '</div>', unsafe_allow_html=True)
+
+        with st.expander("Download this week as Excel"):
+            week_download(eff, sel_wk, f"wkdl_{sel_wk}")
 
         with st.expander("What the numbers mean (from the workbook's own legend)"):
             lc = st.columns(2)
@@ -877,6 +908,11 @@ with tab_plan:
                            "Week view, My Home and the roster.")
             except Exception as ex:
                 st.error("Could not save: " + str(ex))
+
+        with st.expander("Download this plan as Excel"):
+            st.caption("Uses the sheet it was built from, with the dates "
+                       "rewritten to this week and last week's absences cleared.")
+            week_download(draft, tgt, f"pldl_{tgt}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  ATTENDANCE — how much has each person actually worked
