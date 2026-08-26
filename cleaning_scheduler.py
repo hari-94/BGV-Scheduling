@@ -95,6 +95,9 @@ SVC_DV = "Dust n Vac"
 # (Need Housekeeper 1, 2, ...) so the manager sees how many bodies are short.
 NEED_HK_PREFIX = "Need Housekeeper"
 NO_HK_LABEL    = "No HK available"
+#: "nobody" entry in the RQS selectboxes. Named because the auto-import has to
+#: write this exact value into the widget's state to clear a role.
+RQS_NONE       = "— none —"
 
 def is_unassigned_hk(name) -> bool:
     """True for empty / placeholder housekeeper values (not a real person)."""
@@ -915,10 +918,15 @@ def _auto_apply_today(force=False):
         st.session_state["ds_team"] = [
             n for n in update["ds_team"]
             if st.session_state["hk_roster"].get(n, {}).get("present")]
-        # Stale attendance widgets would otherwise redraw the old values.
-        for _k in [k for k in list(st.session_state)
-                   if k.startswith(("att_", "insp_att_"))] + ["rqs1_sel", "rqs2_sel"]:
+        # Attendance checkboxes redraw from the roster once their keys are gone.
+        for _k in [k for k in list(st.session_state) if k.startswith(("att_", "insp_att_"))]:
             st.session_state.pop(_k, None)
+        # The RQS selectboxes are different: they are keyed widgets that write
+        # rqs1/rqs2 back on every run. Clearing their keys resets them to
+        # "no one" and immediately overwrites what was just set, so point them
+        # at the people the sheet names instead of deleting them.
+        for _sel, _val in (("rqs1_sel", update["rqs1"]), ("rqs2_sel", update["rqs2"])):
+            st.session_state[_sel] = _val if (_val and new_insp.get(_val)) else RQS_NONE
         n_hk = sum(1 for v in st.session_state["hk_roster"].values() if v["present"])
         note = (f"{n_hk} HK · {len(st.session_state['ds_team'])} on daily service · "
                 f"RQS {update['rqs1'] or '—'}/{update['rqs2'] or '—'} (sheet {week['sheet']})")
@@ -3457,11 +3465,11 @@ with st.sidebar:
 
         st.markdown("---")
         st.markdown("### RQS Roles Today")
-        rqs_opts = ["— none —"] + present_insp
+        rqs_opts = [RQS_NONE] + present_insp
         rqs1_sel = st.selectbox("RQS 1 (Dust & Vac)", rqs_opts, key="rqs1_sel")
         rqs2_sel = st.selectbox("RQS 2 (Daily Service)", rqs_opts, key="rqs2_sel")
-        rqs1 = "" if rqs1_sel=="— none —" else rqs1_sel
-        rqs2 = "" if rqs2_sel=="— none —" else rqs2_sel
+        rqs1 = "" if rqs1_sel==RQS_NONE else rqs1_sel
+        rqs2 = "" if rqs2_sel==RQS_NONE else rqs2_sel
         st.session_state["rqs1"] = rqs1; st.session_state["rqs2"] = rqs2
 
         st.markdown("---")

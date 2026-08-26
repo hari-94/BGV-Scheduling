@@ -103,6 +103,8 @@ KIND_STYLE = {
 KIND_LABEL = {ri.KIND_DAILY: "Daily Service", ri.KIND_WORKING: "Working",
               ri.KIND_OFF: "Off", ri.KIND_OTHER: "Other duty",
               ri.KIND_UNKNOWN: "Unrecognised"}
+#: Must match the Schedule page's RQS selectbox "nobody" option exactly.
+RQS_NONE = "— none —"
 
 def human_ago(iso):
     try:
@@ -608,8 +610,11 @@ with tab_apply:
                     del st.session_state[k]
                 st.session_state["rqs1"] = update["rqs1"]
                 st.session_state["rqs2"] = update["rqs2"]
-                for k in ("rqs1_sel", "rqs2_sel"):
-                    st.session_state.pop(k, None)
+                # Point the Schedule page's RQS selectboxes at these people.
+                # Clearing their keys instead would reset them to "no one" and
+                # overwrite rqs1/rqs2 the next time that page runs.
+                for k, v in (("rqs1_sel", update["rqs1"]), ("rqs2_sel", update["rqs2"])):
+                    st.session_state[k] = v if (v and new_insp.get(v)) else RQS_NONE
                 applied_msg.append(f"{sum(1 for v in new_insp.values() if v)} inspectors present")
             if do_ds:
                 roster_now = st.session_state.get("hk_roster", {})
