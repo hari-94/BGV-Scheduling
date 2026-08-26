@@ -481,8 +481,16 @@ def history_rows(weeks, overrides=None, upto=None):
                     continue
                 raw = rec.get("cells", {}).get(iso, "")
                 kind = classify(raw)
+                name = rec.get("name", key)
                 out.append({
-                    "date": iso, "week": wk, "person": rec.get("name", key),
+                    "date": iso, "week": wk, "person": name,
+                    # Identity across weeks. The sheet writes the same person
+                    # several ways -- "Hari" in 39 weeks, "HARI" in 2 -- and an
+                    # exact-key match would split their history in half. Group
+                    # is part of the id so the two different Leonardos (a
+                    # Building 2 housekeeper and someone on the Overnight Team)
+                    # stay separate people.
+                    "pid": f'{rec["group"]}|{norm_name(name)}',
                     "key": key, "section": rec["section"], "group": rec["group"],
                     "raw": raw, "kind": kind,
                     "worked": kind in WORKED_KINDS,
@@ -492,10 +500,63 @@ def history_rows(weeks, overrides=None, upto=None):
                 })
     return out
 
-def summarise_person(rows, person_key=None, person=None):
+def people_index(rows):
+    """{pid: {label, group, sections, n}} — one entry per real person.
+
+    The label is the spelling that appears most often, so a name written in
+    caps a couple of times does not become the display name.
+    """
+    spellings, groups, sections, counts = {}, {}, {}, {}
+    for r in rows:
+        pid = r["pid"]
+        spellings.setdefault(pid, {})
+        spellings[pid][r["person"]] = spellings[pid].get(r["person"], 0) + 1
+        groups[pid] = r["group"]
+        sections.setdefault(pid, set()).add(r["section"])
+        counts[pid] = counts.get(pid, 0) + 1
+    return {pid: {"label": max(sp.items(), key=lambda x: x[1])[0],
+                  "group": groups[pid], "sections": sorted(sections[pid]),
+                  "n": counts[pid]}
+            for pid, sp in spellings.items()}
+
+def match_person(index, *candidates):
+    """Best pid for a sign-in name, or None.
+
+    Tries each candidate whole, then with trailing digits stripped — app
+    usernames look like "hari8059" while the sheet just says "Hari" — then on
+    first name alone.
+    """
+    names = []
+    for c in candidates:
+        # Usernames separate words with dots or underscores where the sheet
+        # uses spaces: "jenny.caicedo" is "Jenny Caicedo".
+        c = norm_name(re.sub(r"[._\-]+", " ", str(c or "")))
+        if not c:
+            continue
+        names.append(c)
+        stripped = re.sub(r"\d+\s*$", "", c).strip()
+        if stripped and stripped != c:
+            names.append(stripped)
+    for want in names:
+        for pid, info in index.items():
+            if norm_name(info["label"]) == want:
+                return pid
+    for want in names:
+        head = want.split(" ")[0]
+        if len(head) < 3:
+            continue
+        for pid, info in index.items():
+            if norm_name(info["label"]).split(" ")[0] == head:
+                return pid
+    return None
+
+def summarise_person(rows, pid=None, person_key=None, person=None):
     """Totals and habits for one person, from history_rows output."""
-    mine = [r for r in rows
-            if (r["key"] == person_key if person_key else r["person"] == person)]
+    if pid is not None:
+        mine = [r for r in rows if r["pid"] == pid]
+    else:
+        mine = [r for r in rows
+                if (r["key"] == person_key if person_key else r["person"] == person)]
     worked = [r for r in mine if r["worked"]]
     dow_counts = {}
     for r in worked:

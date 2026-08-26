@@ -559,8 +559,9 @@ with tab_att:
         if not sub:
             st.info(f"Nothing recorded for **{period.lower()}** yet.")
         else:
-            people = sorted({r["key"] for r in sub})
-            summ = {p: ri.summarise_person(sub, person_key=p) for p in people}
+            idx_ppl = ri.people_index(sub)
+            people = sorted(idx_ppl, key=lambda p: idx_ppl[p]["label"].lower())
+            summ = {p: ri.summarise_person(sub, pid=p) for p in people}
             worked_days = sum(s["n_worked"] for s in summ.values())
             m = st.columns(4)
             m[0].metric("People", len(people))
@@ -576,10 +577,9 @@ with tab_att:
             for p in people:
                 s = summ[p]
                 if not s["rows"]: continue
-                rec0 = s["rows"][0]
                 tbl.append({
-                    "Person": rec0["person"],
-                    "Team": rec0["section"],
+                    "Person": idx_ppl[p]["label"],
+                    "Team": idx_ppl[p]["sections"][0],
                     "Worked": s["n_worked"],
                     "Off": s["off"],
                     "Daily Service": s["shifts"].get("Daily Service", 0),
@@ -598,12 +598,12 @@ with tab_att:
                 })
 
             st.markdown('<p class="sec">One person in detail</p>', unsafe_allow_html=True)
-            pick = st.selectbox("Person", [summ[p]["rows"][0]["person"] for p in people
-                                           if summ[p]["rows"]],
-                                key="ri_att_person", label_visibility="collapsed")
-            pk = next(p for p in people if summ[p]["rows"] and
-                      summ[p]["rows"][0]["person"] == pick)
+            labels = [f'{idx_ppl[p]["label"]}  ·  {idx_ppl[p]["sections"][0]}' for p in people]
+            pick = st.selectbox("Person", labels, key="ri_att_person",
+                                label_visibility="collapsed")
+            pk = people[labels.index(pick)]
             s = summ[pk]
+            pick = idx_ppl[pk]["label"]
             d1, d2 = st.columns([3, 2])
             with d1:
                 st.markdown('<div class="mono" style="margin-bottom:4px">DAYS OF THE WEEK '
