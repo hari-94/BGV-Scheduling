@@ -13,7 +13,7 @@ import auth, db, roster_import as ri
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
 # sys.modules, so reload it rather than dying on a helper it does not have yet.
-if getattr(ri, "__version__", 0) < 6:
+if getattr(ri, "__version__", 0) < 7:
     import importlib
     ri = importlib.reload(ri)
 
@@ -132,6 +132,13 @@ with st.sidebar:
 
 def e(s): return _html.escape(str(s) if s is not None else "")
 
+def person_label(info):
+    """Name for a picker: the person, their team, and their home property if
+    they are visiting from one."""
+    txt = f'{info["label"]}  ·  {info["sections"][0]}'
+    return txt + f'  ·  {info["home"]}' if info.get("home") else txt
+
+
 KIND_STYLE = {
     ri.KIND_DAILY:   ("#ccfbf1", "#0f5c55", "Daily Service"),
     ri.KIND_WORKING: ("#dcfce7", "#166534", "Working"),
@@ -172,7 +179,7 @@ can_browse = auth.can("can_manage_users")
 
 if mine is None or can_browse:
     order = sorted(index, key=lambda p: index[p]["label"].lower())
-    labels = [f'{index[p]["label"]}  ·  {index[p]["sections"][0]}' for p in order]
+    labels = [person_label(index[p]) for p in order]
     default = order.index(mine) if mine in order else 0
     sel = st.selectbox(
         "Whose schedule?" if can_browse else
@@ -190,7 +197,8 @@ greet = info["label"].split()[0].title()
 st.markdown(
     f'<div class="hero"><h1>Hello, {e(greet)}</h1>'
     f'<p>Your schedule, straight from the staff sheet.</p>'
-    f'<span class="role">{e(info["sections"][0])}</span></div>', unsafe_allow_html=True)
+    f'<span class="role">{e(info["sections"][0])}'
+    f'{" · " + e(info["home"]) if info.get("home") else ""}</span></div>', unsafe_allow_html=True)
 
 # ── Week strips ───────────────────────────────────────────────────────────────
 def strip(start: datetime.date, title: str):

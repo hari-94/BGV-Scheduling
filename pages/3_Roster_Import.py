@@ -16,7 +16,7 @@ import auth, db, roster_import as ri
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 6:
+if getattr(ri, "__version__", 0) < 7:
     import importlib
     ri = importlib.reload(ri)
 
@@ -127,6 +127,13 @@ with st.sidebar:
         st.switch_page("cleaning_scheduler.py")
 
 def e(s): return _html.escape(str(s) if s is not None else "")
+
+def person_label(info):
+    """Name for a picker: the person, their team, and their home property if
+    they are visiting from one."""
+    txt = f'{info["label"]}  ·  {info["sections"][0]}'
+    return txt + f'  ·  {info["home"]}' if info.get("home") else txt
+
 
 KIND_STYLE = {
     ri.KIND_DAILY:   ("#ccfbf1", "#115e59"),
@@ -859,6 +866,7 @@ with tab_att:
                 tbl.append({
                     "Person": idx_ppl[p]["label"],
                     "Team": idx_ppl[p]["sections"][0],
+                    "From": idx_ppl[p]["home"] or "—",
                     "Worked": s["n_worked"],
                     "So far": done,
                     "Ahead": s["n_worked"] - done,
@@ -881,7 +889,7 @@ with tab_att:
                 })
 
             st.markdown('<p class="sec">One person in detail</p>', unsafe_allow_html=True)
-            labels = [f'{idx_ppl[p]["label"]}  ·  {idx_ppl[p]["sections"][0]}' for p in people]
+            labels = [person_label(idx_ppl[p]) for p in people]
             pick = st.selectbox("Person", labels, key="ri_att_person",
                                 label_visibility="collapsed")
             pk = people[labels.index(pick)]

@@ -22,7 +22,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 6
+__version__ = 7
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -56,7 +56,38 @@ def _norm(s) -> str:
 #: "Luis R. - B2", "Willy - LEAD 2". Same person, different day. Stripping this
 #: is safe because it is a suffix describing the shift, not part of the name.
 _SUFFIX_RE = re.compile(
-    r"[\s.,\-–]*\b(?:bld|bldg|building|b|lead)\s*[123]\s*$", re.I)
+    r"[\s.,\-–]*\b(?:lead\s+)?(?:bld|bldg|building|b|lead)\s*[123]\s*$", re.I)
+
+#: Column A sometimes holds something that is not a person at all — a stray
+#: backtick, a lone digit, a filename someone pasted. A name needs at least two
+#: letters and must not look like a file.
+_NOT_A_NAME_RE = re.compile(r"\.(xlsx?|csv|pdf|docx?)\s*$", re.I)
+
+#: Staff visiting from a sister property, written either way round:
+#: "PEAK 7 - Adriana", "VICTOR S. - GL7", "Jaritza GL7".
+_PROPERTY_RE = re.compile(r"\b(peak\s*7|gl\s*7)\b", re.I)
+
+def split_property(label):
+    """(person's name, home property). Property is "" for your own staff.
+
+    The marker is stripped from the name so lists show the person, but it is
+    kept alongside — confirmed as a different Cesar from the one in Building 3,
+    so the property has to stay part of who they are.
+    """
+    s = re.sub(r"\s+", " ", str(label or "").strip())
+    m = _PROPERTY_RE.search(s)
+    if not m:
+        return s, ""
+    prop = "Peak 7" if "peak" in m.group(1).lower() else "GL7"
+    bare = _PROPERTY_RE.sub("", s)
+    bare = re.sub(r"\s{2,}", " ", bare).strip(" -–:,").strip()
+    return (bare or s), prop
+
+def looks_like_person(label) -> bool:
+    s = str(label or "").strip()
+    if not s or _NOT_A_NAME_RE.search(s):
+        return False
+    return sum(c.isalpha() for c in s) >= 2
 
 #: Name variants confirmed by the manager as one person. Only what was actually
 #: confirmed goes here — "Jhoselyn A"/"Jhoselyn M" are one person, while the
@@ -371,8 +402,11 @@ def _walk_people_rows(ws):
         # A date row in column A would already have been skipped as non-text.
         if isinstance(label_raw, (_dt.datetime, _dt.date)):
             continue
+        name = re.sub(r"\s+", " ", str(label_raw).strip())
+        if not looks_like_person(name):
+            continue
         kind, bld = section
-        yield r, re.sub(r"\s+", " ", str(label_raw).strip()), kind, bld
+        yield r, name, kind, bld
 
 def _person_record(name, group, bld, raw):
     raw = re.sub(r"\s+", " ", str(raw or "").strip())
@@ -431,6 +465,7 @@ def parse_week(ws, ws_styles=None):
     people = OrderedDict()
     for r, name, group, bld in _walk_people_rows(ws):
         section = {"hk": f"Building {bld}", "rqs": "RQS", "other": bld}[group]
+        name, home = split_property(name)
         # The same first name can appear in two sections — the real sheet has a
         # Leonardo in Building 2 AND a Leonardo on the Overnight Team. Keying on
         # the name alone would merge them and let one person's shift decide the
@@ -439,7 +474,7 @@ def parse_week(ws, ws_styles=None):
         if key in people and people[key]["section"] != section:
             key = f"{name} · {section}"
         rec = people.setdefault(key, {
-            "name": name,
+            "name": name, "home": home,
             "group": group, "building": bld if group == "hk" else None,
             "section": section,
             "row": r, "cells": {}, "nocall": [],
@@ -611,7 +646,8 @@ def history_rows(weeks, overrides=None, upto=None):
                     # one person doing both jobs, so the team is NOT part of the
                     # id. The storage key inside a week still keeps them apart,
                     # which is what stops one row's cells overwriting another's.
-                    "pid": norm_name(name),
+                    "pid": norm_name(name) + (f"@{rec['home']}" if rec.get("home") else ""),
+                    "home": rec.get("home", ""),
                     "key": key, "section": rec["section"], "group": rec["group"],
                     "building": rec.get("building"),
                     "raw": raw, "kind": kind,
@@ -654,9 +690,10 @@ def people_index(rows):
     The label is the spelling that appears most often, so a name written in
     caps a couple of times does not become the display name.
     """
-    spellings, groups, sections, counts = {}, {}, {}, {}
+    spellings, groups, sections, counts, homes = {}, {}, {}, {}, {}
     for r in rows:
         pid = r["pid"]
+        homes[pid] = r.get("home", "")
         spellings.setdefault(pid, {})
         spellings[pid][r["person"]] = spellings[pid].get(r["person"], 0) + 1
         groups[pid] = r["group"]
@@ -664,7 +701,7 @@ def people_index(rows):
         counts[pid] = counts.get(pid, 0) + 1
     return {pid: {"label": max(sp.items(), key=lambda x: x[1])[0],
                   "group": groups[pid], "sections": sorted(sections[pid]),
-                  "n": counts[pid]}
+                  "home": homes.get(pid, ""), "n": counts[pid]}
             for pid, sp in spellings.items()}
 
 def match_person(index, *candidates):
