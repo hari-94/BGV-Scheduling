@@ -268,12 +268,12 @@ with tab_sync:
         if d["new_weeks"]:
             st.markdown(f'<div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;'
                         f'padding:9px 13px;font-size:.79rem;color:#065f46">'
-                        f'<b>New week(s):</b> {e(", ".join(d["new_weeks"]))}</div>',
+                        f'<b>New week(s):</b> {e(", ".join(ri.week_label(w) for w in d["new_weeks"]))}</div>',
                         unsafe_allow_html=True)
         if d["gone_weeks"]:
             st.markdown(f'<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;'
                         f'padding:9px 13px;font-size:.79rem;color:#991b1b;margin-top:6px">'
-                        f'<b>Stored but not in this file:</b> {e(", ".join(d["gone_weeks"]))} — '
+                        f'<b>Stored but not in this file:</b> {e(", ".join(ri.week_range_text(w) for w in d["gone_weeks"]))} — '
                         f'these are kept, not deleted.</div>', unsafe_allow_html=True)
 
         if d["changed_weeks"]:
@@ -281,13 +281,13 @@ with tab_sync:
             rows = []
             for wk, dd in sorted(d["changed_weeks"].items()):
                 for ch in dd["changed"]:
-                    rows.append({"Week": wk, "Person": ch["name"], "Date": ch["date"],
+                    rows.append({"Week": ri.week_range_text(wk), "Person": ch["name"], "Date": ch["date"],
                                  "Was": ch["old"] or "—", "Now": ch["new"] or "—"})
                 for n in dd["added_people"]:
-                    rows.append({"Week": wk, "Person": n, "Date": "—",
+                    rows.append({"Week": ri.week_range_text(wk), "Person": n, "Date": "—",
                                  "Was": "not on sheet", "Now": "added"})
                 for n in dd["removed_people"]:
-                    rows.append({"Week": wk, "Person": n, "Date": "—",
+                    rows.append({"Week": ri.week_range_text(wk), "Person": n, "Date": "—",
                                  "Was": "on sheet", "Now": "removed"})
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True,
                          height=min(60 + 35 * len(rows), 420))
@@ -362,11 +362,14 @@ with tab_week:
     else:
         today_iso = datetime.date.today().isoformat()
         default_wk = max([w for w in week_keys if w <= today_iso], default=week_keys[-1])
+        # Newest first: the weeks people actually open sit at the top instead of
+        # at the bottom of a two-year list.
+        wk_order = sorted(week_keys, reverse=True)
         cc = st.columns([2, 2, 3])
         with cc[0]:
-            sel_wk = st.selectbox("Week", week_keys,
-                                  index=week_keys.index(default_wk), key="ri_wk",
-                                  format_func=lambda w: f"Week of {w}")
+            sel_wk = st.selectbox("Week", wk_order,
+                                  index=wk_order.index(default_wk), key="ri_wk",
+                                  format_func=lambda w: ri.week_label(w))
         week = db.load_staff_week(sel_wk)
         if not week:
             st.error(f"Could not load week {sel_wk}.")
@@ -553,9 +556,9 @@ with tab_plan:
             choices = missing + [w for w in sorted(week_keys, reverse=True)[:6]]
             tgt = st.selectbox(
                 "Week to plan", choices, key="pl_week",
-                format_func=lambda w: ("Week of " + w +
-                                       ("  ·  not created yet" if w in missing
-                                        else "  ·  already stored, will overwrite")))
+                format_func=lambda w: ri.week_label(
+                    w, note="not created yet" if w in missing
+                       else "already stored, will overwrite"))
         with p2:
             basis = st.radio("Start from", ["Suggest from past patterns",
                                             "Copy the previous week", "Blank week"],
@@ -566,8 +569,9 @@ with tab_plan:
             st.error("Could not load week " + prev_key + " to build from.")
             st.stop()
 
-        st.caption("Built on **" + template["sheet"] + "** (week of " + prev_key +
-                   ") for its list of people, buildings and row positions.")
+        st.caption("Built on **" + template["sheet"] + "** (" +
+                   ri.week_label(prev_key) + ") for its list of people, buildings "
+                   "and row positions.")
 
         idx_all = {}
         if basis == "Copy the previous week":
@@ -658,7 +662,7 @@ with tab_plan:
                        for c in cols_lbl}}))
 
         st.caption("Sections you do not open are saved exactly as drafted above.")
-        if st.button("Save week of " + tgt, type="primary", key="pl_save"):
+        if st.button("Save week " + ri.week_range_text(tgt), type="primary", key="pl_save"):
             edited_by_name = {}
             for ed in pl_editors:
                 for _, row in ed.iterrows():
@@ -679,7 +683,7 @@ with tab_plan:
                 n_fill = sum(1 for r in out["people"].values()
                              for v in r["cells"].values() if v)
                 st.cache_data.clear()
-                st.success("Saved week of " + tgt + " — " + str(len(out["people"])) +
+                st.success("Saved week " + ri.week_range_text(tgt) + " — " + str(len(out["people"])) +
                            " people, " + str(n_fill) + " cells filled. It now shows in "
                            "Week view, My Home and the roster.")
             except Exception as ex:
@@ -836,12 +840,12 @@ with tab_changes:
         if last_diff.get("new_weeks"):
             st.markdown(f'<div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;'
                         f'padding:9px 13px;font-size:.79rem;color:#065f46">'
-                        f'<b>New:</b> {e(", ".join(last_diff["new_weeks"]))}</div>',
+                        f'<b>New:</b> {e(", ".join(ri.week_label(w) for w in last_diff["new_weeks"]))}</div>',
                         unsafe_allow_html=True)
         ch = last_diff.get("changed", [])
         if ch:
             st.markdown('<p class="sec">Cell changes</p>', unsafe_allow_html=True)
-            st.dataframe(pd.DataFrame([{"Week": x.get("week", ""), "Person": x.get("name", ""),
+            st.dataframe(pd.DataFrame([{"Week": ri.week_range_text(x["week"]) if x.get("week") else "", "Person": x.get("name", ""),
                                         "Date": x.get("date", ""), "Was": x.get("old") or "—",
                                         "Now": x.get("new") or "—"} for x in ch]),
                          use_container_width=True, hide_index=True,
@@ -858,7 +862,7 @@ with tab_changes:
             for k, v in sorted(overrides.items()):
                 try: wk, name, dt = k.split("|", 2)
                 except ValueError: continue
-                orows.append({"Week": wk, "Person": name, "Date": dt,
+                orows.append({"Week": ri.week_range_text(wk), "Person": name, "Date": dt,
                               "Set to": v.get("value") or "(cleared)",
                               "By": v.get("by", ""), "When": str(v.get("at", ""))[:16].replace("T", " ")})
             st.dataframe(pd.DataFrame(orows), use_container_width=True, hide_index=True,
@@ -934,7 +938,7 @@ with tab_apply:
         update = ri.build_roster_update(people, st.session_state.get("hk_roster", {}))
         with c2:
             st.markdown(f'<div style="padding-top:26px;font-size:.79rem;color:#5b6675">'
-                        f'From sheet <b>{e(week["sheet"])}</b> · week of {e(wk_for)}</div>',
+                        f'From sheet <b>{e(week["sheet"])}</b> · {e(ri.week_label(wk_for))}</div>',
                         unsafe_allow_html=True)
 
         n_hk = sum(1 for v in update["hk_roster"].values() if v["present"])

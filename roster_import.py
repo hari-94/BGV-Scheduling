@@ -682,6 +682,43 @@ def copy_week(template, target_start):
             "cols": dict(template.get("cols") or {}), "people": people,
             "planned": True, "from_sheet": template.get("sheet", "")}
 
+def week_range_text(iso, with_year=None, today=None) -> str:
+    """'Aug 23 – 29', or 'Aug 30 – Sep 5' when the week straddles a month.
+
+    The year is appended only when it is not the current one, so the common
+    case stays short.
+    """
+    start = _dt.date.fromisoformat(iso)
+    end = start + _dt.timedelta(days=6)
+    today = today or _dt.date.today()
+    if start.month == end.month:
+        text = f"{start:%b} {start.day} – {end.day}"
+    else:
+        text = f"{start:%b} {start.day} – {end:%b} {end.day}"
+    show_year = with_year if with_year is not None else (start.year != today.year)
+    return f"{text}, {start.year}" if show_year else text
+
+def week_label(iso, today=None, note="") -> str:
+    """Human label for a week key: 'This week · Aug 23 – 29'.
+
+    Weeks near today get named rather than dated, because that is how people
+    actually refer to them; anything further out falls back to the date range,
+    which stays unambiguous.
+    """
+    today = today or _dt.date.today()
+    this_sun = today - _dt.timedelta(days=(today.weekday() + 1) % 7)
+    start = _dt.date.fromisoformat(iso)
+    delta = (start - this_sun).days // 7
+    rel = {0: "This week", 1: "Next week", -1: "Last week"}.get(delta)
+    if rel is None:
+        if 2 <= delta <= 5:
+            rel = f"In {delta} weeks"
+        elif -5 <= delta <= -2:
+            rel = f"{-delta} weeks ago"
+    body = week_range_text(iso, today=today)
+    label = f"{rel} · {body}" if rel else body
+    return f"{label} · {note}" if note else label
+
 def next_missing_weeks(week_keys, count=6, today=None):
     """Upcoming Sundays with no stored week yet."""
     today = today or _dt.date.today()

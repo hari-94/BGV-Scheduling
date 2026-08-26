@@ -208,7 +208,7 @@ def strip(start: datetime.date, title: str):
         cards += f'<div class="{cls}">{head}{body}</div>'
     st.markdown(f'<p class="sec">{e(title)} '
                 f'<span style="color:#8a93a1;letter-spacing:0;text-transform:none">'
-                f'&nbsp;{start:%b %d} – {start + datetime.timedelta(days=6):%b %d}</span></p>',
+                f'&nbsp;{e(ri.week_range_text(start.isoformat()))}</span></p>',
                 unsafe_allow_html=True)
     st.markdown(f'<div class="dayrow">{cards}</div>', unsafe_allow_html=True)
 
