@@ -52,12 +52,14 @@ def norm_name(s) -> str:
 # ── Cell status vocabulary ────────────────────────────────────────────────────
 # Explicitly not at work.
 _OFF_RE = re.compile(
-    r"\b(r\s*/?\s*off|off\s*/?\s*granted|off|sick|fmla|vto|vacation|no\s*show|call\s*out)\b")
+    r"\b(r\s*[/-]?\s*off|off\s*/?\s*grant?ed|off|sick|fmla|fmlo|vto|vacation|"
+    r"no\s*show|call\s*out|p\s*-?\s*loa|ploa|loa)\b")
 # At work, but not cleaning guest rooms — so not available to the scheduler.
 _OTHER_RE = re.compile(
     r"\b(hsp|keystone|ullr|garages?|projects?|food|maps|stripping\s+linen|rollaways|"
-    r"lavar\s+botes|cleaning\s+(windows|carpets)|breck\s*in|training|firc|"
-    r"help\s+with\s+party|safety\s+meeting|stairs\s*only|baseboards)\b")
+    r"lavar\s+botes|cleaning\s+(windows|carpets)|breck\s*in|training|firc|eng|"
+    r"help\s+with\s+party|safety\s+meeting|stairs\s*only|baseboards|"
+    r"listening\s+session|conference|meeting)\b")
 # Inspector role codes.
 _RQS_RE = re.compile(r"^(rqs?\s*[12]|rq\s*[12])\b")
 # A leading number is the person's chart/zone load — they are working.
@@ -100,6 +102,55 @@ def classify(raw) -> str:
     if "lead" in low:
         return KIND_WORKING
     return KIND_UNKNOWN
+
+# ── Controlled vocabulary for editing ─────────────────────────────────────────
+# One canonical option list per role, ordered by how often each value actually
+# appears in the workbook. Picking from these instead of typing is what stops
+# the drift already in the data — "Daily service" / "Daily Service" /
+# "Daily services" are three spellings of one thing, and "6 + 7" / "6+7" /
+# "6 +7" three of another.
+BLANK_LABEL = "— off / blank —"
+
+_COMMON_OFF = ["R/OFF", "OFF GRANTED", "SICK", "FMLA", "PLOA", "VTO"]
+
+ROLE_OPTIONS = {
+    "hk": ["3", "Daily Service", "ON", "3 + VTO"] + _COMMON_OFF +
+          ["HSP AM", "HSP PM", "KEYSTONE", "GARAGES", "PROJECTS", "BRECK IN",
+           "FOOD", "ULLR", "Stripping linen"],
+    "rqs": ["ON", "RQS 1", "RQS 2", "RQ2 + dust and vac inspect", "RQS 1 + RQS 2"]
+           + _COMMON_OFF +
+           ["ENG", "ULLR", "KEYSTONE", "Rollaways 8-9am and then, Cleaning carpets"],
+    "Houseperson AM": ["1", "2", "3", "4", "5", "6", "7", "6 + 7"] + _COMMON_OFF +
+                      ["Stripping linen", "Rollaways 8-9am and then, Cleaning carpets",
+                       "KEYSTONE"],
+    "Houseperson PM": ["1", "2", "3", "4", "5", "6", "7", "6 + 7"] + _COMMON_OFF +
+                      ["Stripping linen", "KEYSTONE"],
+    "Managers":       ["ON", "ON AM", "ON PM"] + _COMMON_OFF + ["Conference"],
+    "AM Lead":        ["Lead", "Lead AM", "2 Lead -8:30 am"] + _COMMON_OFF,
+    "PM Leads":       ["Lead", "Lead AM", "Lead - PM", "Lead PM"] + _COMMON_OFF,
+    "Sales / Spa":    ["ON"] + _COMMON_OFF,
+    "Overnight Team": ["ON"] + _COMMON_OFF,
+    "ULLR - Ice Rink":["ON", "ULLR"] + _COMMON_OFF,
+}
+
+def role_key(rec) -> str:
+    """Which option list a person's row uses."""
+    g = rec.get("group")
+    return "hk" if g == "hk" else ("rqs" if g == "rqs" else rec.get("section", ""))
+
+def options_for(rec, present_values=()) -> list:
+    """Dropdown choices for one person's row.
+
+    Anything already in the sheet is appended so an existing one-off never
+    disappears when its cell is opened — the curated values simply come first.
+    """
+    opts = list(ROLE_OPTIONS.get(role_key(rec), []))
+    seen = {o.casefold() for o in opts}
+    for v in present_values:
+        v = str(v or "").strip()
+        if v and v.casefold() not in seen:
+            opts.append(v); seen.add(v.casefold())
+    return [BLANK_LABEL] + opts
 
 def rqs_role(raw):
     """Return 1 or 2 when a cell names an explicit RQS role, else None."""

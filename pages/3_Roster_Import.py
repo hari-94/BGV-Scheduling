@@ -394,41 +394,71 @@ with tab_week:
 
         # ── editing ───────────────────────────────────────────────────────────
         st.markdown('<p class="sec">Edit this week</p>', unsafe_allow_html=True)
-        st.caption("Change any cell and press Save. Edits are kept as overrides — they "
-                   "survive re-uploading the workbook, and the grid marks them in purple. "
-                   "Clear a cell to mark that person off.")
+        st.caption("Every cell is a dropdown, with the choices that fit that role. "
+                   "Pick and press Save. Edits are kept as overrides — they survive "
+                   "re-uploading the workbook, and the grid marks them in purple.")
         cols_lbl = [f'{datetime.date.fromisoformat(dt).strftime("%a")} {dt[5:]}' for dt in dates]
-        rows = [{"Name": n, **{cols_lbl[i]: rec["cells"].get(dt, "")
-                               for i, dt in enumerate(dates)}}
-                for n, rec in eff["people"].items() if wanted(rec)]
-        base = pd.DataFrame(rows, columns=["Name"] + cols_lbl)
-        edited = st.data_editor(
-            base, hide_index=True, use_container_width=True, key=f"ri_ed_{sel_wk}_{sel_grp}",
-            height=min(120 + 35 * len(base), 520), num_rows="fixed",
-            column_config={"Name": st.column_config.TextColumn("Name", disabled=True, width="medium")},
-        )
+
+        def to_cell(v):     return v if str(v or "").strip() else ri.BLANK_LABEL
+        def from_cell(v):   return "" if str(v) == ri.BLANK_LABEL else str(v or "").strip()
+
+        # One editor per section: st.data_editor applies column_config per COLUMN,
+        # so a single grid could not give housekeepers and housepersons different
+        # choices. Splitting by section is what makes the options role-specific.
+        sections, order = {}, []
+        for name, rec in eff["people"].items():
+            if not wanted(rec): continue
+            sections.setdefault(rec["section"], []).append((name, rec))
+            if rec["section"] not in order: order.append(rec["section"])
+
+        editors = []
+        for section in order:
+            members = sections[section]
+            # Union of the curated list and everything this section already uses,
+            # so no existing one-off vanishes when its cell is opened.
+            present = {rec["cells"].get(dt, "") for _n, rec in members for dt in dates}
+            opts = ri.options_for(members[0][1], sorted(v for v in present if v))
+            rows = [{"Name": n, **{cols_lbl[i]: to_cell(rec["cells"].get(dt, ""))
+                                   for i, dt in enumerate(dates)}}
+                    for n, rec in members]
+            base = pd.DataFrame(rows, columns=["Name"] + cols_lbl)
+            st.markdown(f'<div class="sec" style="margin:.9rem 0 .3rem">{e(section)} '
+                        f'<span style="color:#8a93a1;text-transform:none;letter-spacing:0">'
+                        f'· {len(opts)-1} choices</span></div>', unsafe_allow_html=True)
+            ed = st.data_editor(
+                base, hide_index=True, use_container_width=True,
+                key=f"ri_ed_{sel_wk}_{section}", num_rows="fixed",
+                height=min(90 + 35 * len(base), 460),
+                column_config={
+                    "Name": st.column_config.TextColumn("Name", disabled=True, width="medium"),
+                    **{c: st.column_config.SelectboxColumn(c, options=opts, required=False,
+                                                           width="medium") for c in cols_lbl},
+                })
+            editors.append(ed)
+
         b1, b2, _ = st.columns([1, 1, 3])
         with b1:
             if st.button("Save edits", type="primary", key="ri_save_ed"):
                 new_ov = dict(overrides)
                 added = removed = 0
-                for _, row in edited.iterrows():
-                    name = row["Name"]
-                    src = week["people"].get(name, {}).get("cells", {})
-                    for i, dt in enumerate(dates):
-                        val = str(row[cols_lbl[i]] or "").strip()
-                        excel_val = str(src.get(dt, "") or "")
-                        key = ri.override_key(sel_wk, name, dt)
-                        if val == excel_val:
-                            # Back to what the workbook says — drop the override
-                            # instead of storing a no-op.
-                            if key in new_ov: del new_ov[key]; removed += 1
-                        elif new_ov.get(key, {}).get("value", None) != val:
-                            new_ov[key] = {
-                                "value": val,
-                                "by": st.session_state.get("username", "unknown"),
-                                "at": datetime.datetime.now().isoformat(timespec="seconds")}
-                            added += 1
+                for ed in editors:
+                    for _, row in ed.iterrows():
+                        name = row["Name"]
+                        src = week["people"].get(name, {}).get("cells", {})
+                        for i, dt in enumerate(dates):
+                            val = from_cell(row[cols_lbl[i]])
+                            excel_val = str(src.get(dt, "") or "")
+                            key = ri.override_key(sel_wk, name, dt)
+                            if val == excel_val:
+                                # Back to what the workbook says — drop the override
+                                # instead of storing a no-op.
+                                if key in new_ov: del new_ov[key]; removed += 1
+                            elif new_ov.get(key, {}).get("value", None) != val:
+                                new_ov[key] = {
+                                    "value": val,
+                                    "by": st.session_state.get("username", "unknown"),
+                                    "at": datetime.datetime.now().isoformat(timespec="seconds")}
+                                added += 1
                 if not added and not removed:
                     st.info("No changes to save.")
                 else:
