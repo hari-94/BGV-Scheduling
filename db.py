@@ -134,6 +134,107 @@ def load_roster() -> dict | None:
         print(f"[db] load_roster error: {ex}")
         return None
 
+# ════════════════════════════════════════════════════════════════════════════
+#  STAFF SCHEDULE  (the weekly Schedule.xlsx, parsed and stored week by week)
+# ════════════════════════════════════════════════════════════════════════════
+# Stored in schedule_full under reserved text keys, the same trick save_roster
+# uses — no schema change needed. One row per week keeps each write small and
+# lets a re-upload touch only the weeks that actually changed.
+STAFF_META_KEY      = "staffsched_meta"
+STAFF_OVERRIDE_KEY  = "staffsched_overrides"
+STAFF_WEEK_PREFIX   = "staffweek_"
+
+def _upsert_key(key: str, obj) -> None:
+    _client().table("schedule_full").upsert(
+        {"date": key, "payload": json.dumps(obj, default=str)},
+        on_conflict="date"
+    ).execute()
+
+def _load_key(key: str):
+    r = (_client().table("schedule_full").select("*")
+         .eq("date", key).limit(1).execute())
+    rows = r.data or []
+    if not rows:
+        return None
+    payload = rows[0]["payload"]
+    return json.loads(payload) if isinstance(payload, str) else payload
+
+def save_staff_meta(meta: dict) -> None:
+    """Record who uploaded the workbook and when — drives the header stamp."""
+    try:
+        _upsert_key(STAFF_META_KEY, meta)
+    except Exception as ex:
+        print(f"[db] save_staff_meta error: {ex}")
+        raise
+
+def load_staff_meta() -> dict | None:
+    try:
+        return _load_key(STAFF_META_KEY)
+    except Exception as ex:
+        print(f"[db] load_staff_meta error: {ex}")
+        return None
+
+def save_staff_week(week_key: str, week: dict) -> None:
+    try:
+        _upsert_key(STAFF_WEEK_PREFIX + week_key, week)
+    except Exception as ex:
+        print(f"[db] save_staff_week error: {ex}")
+        raise
+
+def load_staff_week(week_key: str) -> dict | None:
+    try:
+        return _load_key(STAFF_WEEK_PREFIX + week_key)
+    except Exception as ex:
+        print(f"[db] load_staff_week error: {ex}")
+        return None
+
+def load_staff_weeks() -> dict:
+    """Every stored week, keyed by its Sunday ISO date."""
+    try:
+        r = (_client().table("schedule_full").select("*")
+             .like("date", STAFF_WEEK_PREFIX + "%").execute())
+        out = {}
+        for row in (r.data or []):
+            payload = row["payload"]
+            out[row["date"][len(STAFF_WEEK_PREFIX):]] = (
+                json.loads(payload) if isinstance(payload, str) else payload)
+        return out
+    except Exception as ex:
+        print(f"[db] load_staff_weeks error: {ex}")
+        return {}
+
+def staff_week_keys() -> list:
+    """Just the stored week ids — cheaper than pulling every payload."""
+    try:
+        r = (_client().table("schedule_full").select("date")
+             .like("date", STAFF_WEEK_PREFIX + "%").execute())
+        return sorted(row["date"][len(STAFF_WEEK_PREFIX):] for row in (r.data or []))
+    except Exception as ex:
+        print(f"[db] staff_week_keys error: {ex}")
+        return []
+
+def delete_staff_week(week_key: str) -> None:
+    try:
+        _client().table("schedule_full").delete().eq(
+            "date", STAFF_WEEK_PREFIX + week_key).execute()
+    except Exception as ex:
+        print(f"[db] delete_staff_week error: {ex}")
+
+def save_staff_overrides(overrides: dict) -> None:
+    """In-app cell edits, keyed 'week|name|date'. These outrank the workbook."""
+    try:
+        _upsert_key(STAFF_OVERRIDE_KEY, overrides)
+    except Exception as ex:
+        print(f"[db] save_staff_overrides error: {ex}")
+        raise
+
+def load_staff_overrides() -> dict:
+    try:
+        return _load_key(STAFF_OVERRIDE_KEY) or {}
+    except Exception as ex:
+        print(f"[db] load_staff_overrides error: {ex}")
+        return {}
+
 def load_full_schedule(date_str: str = None) -> dict | None:
     """
     Load the full schedule for a given date (defaults to today).

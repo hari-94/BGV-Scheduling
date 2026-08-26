@@ -12,6 +12,7 @@ so a day is located by the DATES INSIDE each sheet, never by the sheet name.
 
 Nothing here imports streamlit, so it can be unit-tested on its own.
 """
+import io
 import re
 import datetime as _dt
 from collections import OrderedDict
@@ -134,13 +135,12 @@ def index_workbook(wb):
 def available_dates(wb):
     return sorted(index_workbook(wb).keys())
 
-def parse_day(ws, col):
-    """Read one day column and return the people found, by section.
+def _walk_people_rows(ws):
+    """Yield (row, name, group, building_or_label) for every person row.
 
-    Returns a list of dicts: name, section, building (housekeepers only),
-    raw cell text, kind, present, daily_service.
+    Column A carries both section headers and names, so the current section is
+    tracked as we descend. Shared by the single-day and whole-week readers.
     """
-    people = []
     section = None          # ("hk", 1|2|3) | ("rqs", None) | ("other", label) | None
     for r in range(1, ws.max_row + 1):
         label_raw = ws.cell(r, 1).value
@@ -161,21 +161,173 @@ def parse_day(ws, col):
         # A date row in column A would already have been skipped as non-text.
         if isinstance(label_raw, (_dt.datetime, _dt.date)):
             continue
-        raw = ws.cell(r, col).value
-        raw = re.sub(r"\s+", " ", str(raw or "").strip())
-        kind = classify(raw)
-        kindsec, bld = section
-        people.append({
-            "name":     re.sub(r"\s+", " ", str(label_raw).strip()),
-            "section":  {"hk": f"Building {bld}", "rqs": "RQS", "other": bld}[kindsec],
-            "group":    kindsec,
-            "building": bld if kindsec == "hk" else None,
-            "raw":      raw,
-            "kind":     kind,
-            "present":  kind in PRESENT_KINDS,
-            "daily_service": kind == KIND_DAILY,
+        kind, bld = section
+        yield r, re.sub(r"\s+", " ", str(label_raw).strip()), kind, bld
+
+def _person_record(name, group, bld, raw):
+    raw = re.sub(r"\s+", " ", str(raw or "").strip())
+    kind = classify(raw)
+    return {
+        "name":     name,
+        "section":  {"hk": f"Building {bld}", "rqs": "RQS", "other": bld}[group],
+        "group":    group,
+        "building": bld if group == "hk" else None,
+        "raw":      raw,
+        "kind":     kind,
+        "present":  kind in PRESENT_KINDS,
+        "daily_service": kind == KIND_DAILY,
+    }
+
+def parse_day(ws, col):
+    """Read one day column and return the people found, by section.
+
+    Returns a list of dicts: name, section, building (housekeepers only),
+    raw cell text, kind, present, daily_service.
+    """
+    return [_person_record(name, group, bld, ws.cell(r, col).value)
+            for r, name, group, bld in _walk_people_rows(ws)]
+
+def parse_week(ws):
+    """Read a whole sheet in one pass.
+
+    Returns {"sheet", "dates": [iso...], "people": {name: {...,"cells": {iso: raw}}}}
+    — the compact shape that gets stored, diffed and rendered as a week grid.
+    """
+    dates = sheet_dates(ws)
+    if not dates:
+        return None
+    ordered = sorted(dates)
+    people = OrderedDict()
+    for r, name, group, bld in _walk_people_rows(ws):
+        rec = people.setdefault(name, {
+            "group": group, "building": bld if group == "hk" else None,
+            "section": {"hk": f"Building {bld}", "rqs": "RQS", "other": bld}[group],
+            "row": r, "cells": {},
         })
-    return people
+        for d in ordered:
+            raw = re.sub(r"\s+", " ", str(ws.cell(r, dates[d]).value or "").strip())
+            if raw:
+                rec["cells"][d.isoformat()] = raw
+    return {"sheet": ws.title,
+            "dates": [d.isoformat() for d in ordered],
+            # Column index per date, captured now so writing edits back never has
+            # to re-derive it from a workbook opened without cached values.
+            "cols": {d.isoformat(): dates[d] for d in ordered},
+            "people": people}
+
+def week_key(week) -> str:
+    """Stable id for a week — the ISO date of its first (Sunday) column."""
+    return week["dates"][0]
+
+def parse_all_weeks(wb):
+    """Parse every dated sheet. Later sheets win a duplicated week key."""
+    out = {}
+    for ws in wb.worksheets:
+        wk = parse_week(ws)
+        if wk:
+            out[week_key(wk)] = wk
+    return out
+
+# ── Comparing an upload against what is already stored ────────────────────────
+def diff_week(old, new):
+    """Cell-level differences between two parses of the same week."""
+    changed, added_people, removed_people = [], [], []
+    o_people = (old or {}).get("people", {})
+    n_people = new.get("people", {})
+    for name, rec in n_people.items():
+        if name not in o_people:
+            added_people.append(name); continue
+        o_cells, n_cells = o_people[name].get("cells", {}), rec.get("cells", {})
+        for iso in sorted(set(o_cells) | set(n_cells)):
+            ov, nv = o_cells.get(iso, ""), n_cells.get(iso, "")
+            if ov != nv:
+                changed.append({"name": name, "date": iso, "old": ov, "new": nv})
+    removed_people = [n for n in o_people if n not in n_people]
+    return {"changed": changed, "added_people": added_people,
+            "removed_people": removed_people}
+
+def diff_all(stored, incoming):
+    """Compare a whole upload against the stored weeks."""
+    new_weeks = [k for k in incoming if k not in stored]
+    gone_weeks = [k for k in stored if k not in incoming]
+    per_week = {}
+    for k in incoming:
+        if k in stored:
+            d = diff_week(stored[k], incoming[k])
+            if d["changed"] or d["added_people"] or d["removed_people"]:
+                per_week[k] = d
+    return {"new_weeks": sorted(new_weeks), "gone_weeks": sorted(gone_weeks),
+            "changed_weeks": per_week,
+            "n_changed_cells": sum(len(d["changed"]) for d in per_week.values())}
+
+# ── In-app edits ──────────────────────────────────────────────────────────────
+def override_key(wk: str, name: str, iso: str) -> str:
+    return f"{wk}|{name}|{iso}"
+
+def apply_overrides(week, overrides, wk=None):
+    """Overlay in-app edits onto a parsed week.
+
+    Returns (week_copy, {(name, iso): {"value","excel"}}). The Excel value is
+    kept alongside so the grid can show what was replaced and offer a revert.
+    """
+    wk = wk or week_key(week)
+    out = {"sheet": week["sheet"], "dates": list(week["dates"]),
+           "people": OrderedDict()}
+    applied = {}
+    for name, rec in week["people"].items():
+        cells = dict(rec.get("cells", {}))
+        for iso in week["dates"]:
+            ov = overrides.get(override_key(wk, name, iso))
+            if ov is None:
+                continue
+            excel_val = cells.get(iso, "")
+            new_val = str(ov.get("value", "") or "")
+            if new_val:
+                cells[iso] = new_val
+            else:
+                cells.pop(iso, None)
+            applied[(name, iso)] = {"value": new_val, "excel": excel_val,
+                                    "by": ov.get("by", ""), "at": ov.get("at", "")}
+        out["people"][name] = {**rec, "cells": cells}
+    return out, applied
+
+def write_overrides_to_workbook(raw_bytes, weeks, overrides):
+    """Write in-app edits into a copy of the uploaded workbook.
+
+    Loaded WITHOUT data_only so the sheet's own formulas (HSKP Needed, Extras
+    Hskp, ...) survive the round trip — opening with cached values and saving
+    would replace every formula with a frozen number.
+
+    Returns (new_bytes, written_count, skipped_keys).
+    """
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=False)
+    written, skipped = 0, []
+    for key, ov in (overrides or {}).items():
+        try:
+            wk, name, iso = key.split("|", 2)
+        except ValueError:
+            skipped.append(key); continue
+        week = (weeks or {}).get(wk)
+        if not week or week.get("sheet") not in wb.sheetnames:
+            skipped.append(key); continue
+        rec = week.get("people", {}).get(name)
+        col = (week.get("cols") or {}).get(iso)
+        if not rec or not rec.get("row") or not col:
+            skipped.append(key); continue
+        ws = wb[week["sheet"]]
+        ws.cell(int(rec["row"]), int(col)).value = (ov.get("value") or None)
+        written += 1
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), written, skipped
+
+def week_to_people(week, iso):
+    """Materialise one day out of a week dict, in parse_day's shape."""
+    return [_person_record(name, rec["group"],
+                           rec["building"] if rec["group"] == "hk" else rec["section"],
+                           rec.get("cells", {}).get(iso, ""))
+            for name, rec in week["people"].items()]
 
 #: Weekly summary rows near the top of every sheet, keyed by their column-A label.
 METRIC_LABELS = OrderedDict([

@@ -3441,6 +3441,50 @@ _welcome_msg = auth.get_welcome_msg(_cu["role"])
 st.markdown(f'<p class="pg-title">Good morning, {_first_name}! </p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">{_welcome_msg}</p>', unsafe_allow_html=True)
 
+# ── Staff schedule stamp: when Schedule.xlsx was last loaded into the app ─────
+@st.cache_data(ttl=120, show_spinner=False)
+def _staff_stamp():
+    """Cached so the header does not hit the database on every rerun."""
+    try:
+        return db.load_staff_meta() or {}
+    except Exception:
+        return {}
+
+def _ago(iso):
+    try:
+        _t = _datetime.fromisoformat(str(iso))
+    except Exception:
+        return ""
+    _n = _datetime.now(_t.tzinfo) if _t.tzinfo else _datetime.now()
+    _s = (_n - _t).total_seconds()
+    if _s < 90:     return "just now"
+    if _s < 5400:   return f"{int(_s//60)} min ago"
+    if _s < 172800: return f"{int(_s//3600)} hours ago"
+    return f"{int(_s//86400)} days ago"
+
+_stamp = _staff_stamp()
+if _stamp.get("uploaded_at"):
+    _sw = str(_stamp["uploaded_at"])[:16].replace("T", " ")
+    _stale = _ago(_stamp["uploaded_at"]).endswith("days ago") and \
+             int(_ago(_stamp["uploaded_at"]).split()[0] or 0) >= 8
+    _c = ("#b45309", "#fffbeb", "#fcd34d") if _stale else ("#5b6675", "#f8fafc", "#e2e5ea")
+    st.markdown(
+        f'<div style="display:inline-flex;align-items:center;gap:9px;background:{_c[1]};'
+        f'border:1px solid {_c[2]};border-radius:8px;padding:5px 12px;margin:-4px 0 10px;'
+        f'font-size:.74rem;color:{_c[0]}">'
+        f'<span style="font-family:\'DM Mono\',monospace;font-size:.6rem;'
+        f'text-transform:uppercase;letter-spacing:.11em;opacity:.75">Staff schedule loaded</span>'
+        f'<b>{_sw}</b><span style="opacity:.7">({_ago(_stamp["uploaded_at"])})</span>'
+        f'<span style="opacity:.55">· {e(_stamp.get("file_name",""))}'
+        f' · {_stamp.get("n_weeks","?")} weeks</span>'
+        f'{" · <b>update due</b>" if _stale else ""}</div>', unsafe_allow_html=True)
+elif auth.can("can_edit_roster"):
+    st.markdown(
+        '<div style="display:inline-flex;align-items:center;gap:8px;background:#fffbeb;'
+        'border:1px solid #fcd34d;border-radius:8px;padding:5px 12px;margin:-4px 0 10px;'
+        'font-size:.74rem;color:#b45309">No staff schedule loaded yet — '
+        'import it from the <b>Roster Import</b> page.</div>', unsafe_allow_html=True)
+
 st.markdown("---")
 # Once a schedule has been generated, collapse the upload/paste inputs so the
 # dashboard (metrics + table) is front and center. The section can be reopened
