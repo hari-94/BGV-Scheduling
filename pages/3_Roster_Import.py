@@ -16,7 +16,7 @@ import auth, db, roster_import as ri
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 5:
+if getattr(ri, "__version__", 0) < 6:
     import importlib
     ri = importlib.reload(ri)
 
@@ -1068,7 +1068,7 @@ with tab_apply:
         for p in people:
             if p["group"] != "hk" or not p["present"]:
                 continue
-            s = _bsug.get(f'hk|{ri.norm_name(p["name"])}')
+            s = _bsug.get(ri.norm_name(p['name']))
             if s and s["settled"] != p["building"]:
                 _odd.append((p["name"], p["building"], s["settled"], s["history"]))
         if _odd:

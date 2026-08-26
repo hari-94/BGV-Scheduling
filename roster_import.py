@@ -22,7 +22,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 5
+__version__ = 6
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -58,6 +58,25 @@ def _norm(s) -> str:
 _SUFFIX_RE = re.compile(
     r"[\s.,\-–]*\b(?:bld|bldg|building|b|lead)\s*[123]\s*$", re.I)
 
+#: Name variants confirmed by the manager as one person. Only what was actually
+#: confirmed goes here — "Jhoselyn A"/"Jhoselyn M" are one person, while the
+#: Daniels ("Daniela G", "Daniel T", "Daniel R", "Daniel Rdgz") are NOT and are
+#: deliberately absent.
+NAME_ALIASES = {
+    "liz":               "liz salazar",
+    "rigoberto":         "rigo garcia",
+    "rigo g":            "rigo garcia",
+    "josseling":         "josselin",
+    "jenny caicedo":     "jenni caicedo",
+    "jennifer c":        "jenni caicedo",
+    "cecilia":           "cecilia angeles",
+    "cecilia a":         "cecilia angeles",
+    "elibeth":           "elibeth herrera",
+    "elibeth h":         "elibeth herrera",
+    "jhoselyn a":        "jhoselyn",
+    "jhoselyn m":        "jhoselyn",
+}
+
 def norm_name(s) -> str:
     """Key used to match a sheet name against an existing roster name."""
     n = _norm(s).rstrip(".").strip()
@@ -65,7 +84,7 @@ def norm_name(s) -> str:
     while prev != n:                      # "Willy - LEAD 2 BLD 1" needs two passes
         prev = n
         n = _SUFFIX_RE.sub("", n).strip(" .,-–")
-    return n
+    return NAME_ALIASES.get(n, n)
 
 # ── Cell status vocabulary ────────────────────────────────────────────────────
 # Genuinely not at work. Note VTO is deliberately NOT here: it is paid, and a
@@ -587,11 +606,12 @@ def history_rows(weeks, overrides=None, upto=None):
                     "date": iso, "week": wk, "person": name,
                     # Identity across weeks. The sheet writes the same person
                     # several ways -- "Hari" in 39 weeks, "HARI" in 2 -- and an
-                    # exact-key match would split their history in half. Group
-                    # is part of the id so the two different Leonardos (a
-                    # Building 2 housekeeper and someone on the Overnight Team)
-                    # stay separate people.
-                    "pid": f'{rec["group"]}|{norm_name(name)}',
+                    # exact-key match would split their history in half.
+                    # Confirmed by the manager: a name appearing in two teams is
+                    # one person doing both jobs, so the team is NOT part of the
+                    # id. The storage key inside a week still keeps them apart,
+                    # which is what stops one row's cells overwriting another's.
+                    "pid": norm_name(name),
                     "key": key, "section": rec["section"], "group": rec["group"],
                     "building": rec.get("building"),
                     "raw": raw, "kind": kind,
@@ -870,7 +890,7 @@ def balance_zones(week, rows):
             for z, who in list(holders.items()):
                 if len(who) < 2:
                     continue
-                pid_of = lambda rec, k: f'{rec["group"]}|{norm_name(rec.get("name", k))}'
+                pid_of = lambda rec, k: norm_name(rec.get("name", k))
                 who.sort(key=lambda kr: -hist.get(pid_of(kr[1], kr[0]), {}).get(z, 0))
                 for k, rec in who[1:]:
                     free = [c for c in "1234567" if c not in taken]
@@ -925,7 +945,7 @@ def suggestion_to_week(index, suggestions, target_start, template, rows=None):
     dates = [(start + _dt.timedelta(days=i)).isoformat() for i in range(7)]
     people = OrderedDict()
     for key, rec in template["people"].items():
-        pid = f'{rec["group"]}|{norm_name(rec.get("name", key))}'
+        pid = norm_name(rec.get("name", key))
         cells = {}
         for iso in dates:
             got = suggestions.get(pid, {}).get(iso)
