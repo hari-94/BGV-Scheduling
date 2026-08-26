@@ -22,7 +22,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 8
+__version__ = 9
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -88,6 +88,22 @@ def looks_like_person(label) -> bool:
     if not s or _NOT_A_NAME_RE.search(s):
         return False
     return sum(c.isalpha() for c in s) >= 2
+
+def read_person(key, rec):
+    """(name, home) for a stored person record, or (None, None) to skip it.
+
+    Weeks saved by an earlier version kept the raw column-A text as the name
+    and had no home property, so the same cleaning is applied on the way OUT of
+    storage as on the way in. Without this, junk like a lone backtick keeps
+    appearing in every list until someone re-uploads the workbook.
+    """
+    name = rec.get("name", key)
+    if not looks_like_person(name):
+        return None, None
+    home = rec.get("home")
+    if home is None:
+        name, home = split_property(name)
+    return name, home
 
 #: Name variants confirmed by the manager as one person. Only what was actually
 #: confirmed goes here — "Jhoselyn A"/"Jhoselyn M" are one person, while the
@@ -595,6 +611,8 @@ def apply_overrides(week, overrides, wk=None):
            "people": OrderedDict()}
     applied = {}
     for name, rec in week["people"].items():
+        if read_person(name, rec)[0] is None:
+            continue                      # junk row from an older parse
         cells = dict(rec.get("cells", {}))
         for iso in week["dates"]:
             ov = overrides.get(override_key(wk, name, iso))
@@ -663,6 +681,9 @@ def history_rows(weeks, overrides=None, upto=None):
         week = weeks[wk]
         eff, _applied = apply_overrides(week, overrides, wk)
         for key, rec in eff["people"].items():
+            name, home = read_person(key, rec)
+            if name is None:
+                continue
             for iso in eff["dates"]:
                 if upto and iso > upto:
                     continue
@@ -672,7 +693,6 @@ def history_rows(weeks, overrides=None, upto=None):
                 # which is how most of them look.
                 if iso in (rec.get("nocall") or []):
                     kind, known = KIND_NOCALL, True
-                name = rec.get("name", key)
                 out.append({
                     "date": iso, "week": wk, "person": name,
                     # Identity across weeks. The sheet writes the same person
@@ -682,8 +702,8 @@ def history_rows(weeks, overrides=None, upto=None):
                     # one person doing both jobs, so the team is NOT part of the
                     # id. The storage key inside a week still keeps them apart,
                     # which is what stops one row's cells overwriting another's.
-                    "pid": norm_name(name) + (f"@{rec['home']}" if rec.get("home") else ""),
-                    "home": rec.get("home", ""),
+                    "pid": norm_name(name) + (f"@{home}" if home else ""),
+                    "home": home or "",
                     "key": key, "section": rec["section"], "group": rec["group"],
                     "building": rec.get("building"),
                     "raw": raw, "kind": kind,
@@ -1138,10 +1158,16 @@ def week_to_people(week, iso):
     Uses each entry's real name, not its (possibly disambiguated) storage key,
     so roster matching sees the name as the sheet writes it.
     """
-    return [_person_record(rec.get("name", key), rec["group"],
-                           rec["building"] if rec["group"] == "hk" else rec["section"],
-                           rec.get("cells", {}).get(iso, ""))
-            for key, rec in week["people"].items()]
+    out = []
+    for key, rec in week["people"].items():
+        name, _home = read_person(key, rec)
+        if name is None:
+            continue
+        out.append(_person_record(
+            name, rec["group"],
+            rec["building"] if rec["group"] == "hk" else rec["section"],
+            rec.get("cells", {}).get(iso, "")))
+    return out
 
 #: Weekly summary rows near the top of every sheet, keyed by their column-A label.
 METRIC_LABELS = OrderedDict([
