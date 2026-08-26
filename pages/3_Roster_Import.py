@@ -16,7 +16,7 @@ import auth, db, roster_import as ri
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 3:
+if getattr(ri, "__version__", 0) < 4:
     import importlib
     ri = importlib.reload(ri)
 
@@ -133,10 +133,13 @@ KIND_STYLE = {
     ri.KIND_WORKING: ("#dcfce7", "#15803d"),
     ri.KIND_OFF:     ("#f8fafc", "#94a3b8"),
     ri.KIND_OTHER:   ("#fef3c7", "#92400e"),
-    ri.KIND_UNKNOWN: ("#fee2e2", "#991b1b"),
+    ri.KIND_NOCALL:  ("#fee2e2", "#991b1b"),
+    ri.KIND_VTO:     ("#e0e7ff", "#3730a3"),
+    ri.KIND_UNKNOWN: ("#faf5ff", "#7e22ce"),
 }
 KIND_LABEL = {ri.KIND_DAILY: "Daily Service", ri.KIND_WORKING: "Working",
-              ri.KIND_OFF: "Off", ri.KIND_OTHER: "Other duty",
+              ri.KIND_OFF: "Off", ri.KIND_OTHER: "Other duty (counts as worked)",
+              ri.KIND_NOCALL: "No call / no show", ri.KIND_VTO: "VTO — paid",
               ri.KIND_UNKNOWN: "Unrecognised"}
 #: Must match the Schedule page's RQS selectbox "nobody" option exactly.
 RQS_NONE = "— none —"
@@ -251,7 +254,13 @@ with tab_sync:
         def _parse(raw_bytes: bytes):
             import openpyxl
             wb = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=True)
-            return ri.parse_all_weeks(wb), len(wb.worksheets)
+            # Second open without data_only: openpyxl gives cached values OR
+            # styles, never both, and the red no-call fills are styles.
+            try:
+                wbs = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=False)
+            except Exception:
+                wbs = None
+            return ri.parse_all_weeks(wb, wbs), len(wb.worksheets)
 
         try:
             incoming, n_sheets = _parse(raw)
@@ -693,6 +702,18 @@ with tab_plan:
                     'for a weekday-based guess. Whether they work at all is still a '
                     'weekday question, so only the zone itself is carried forward.</div>',
                     unsafe_allow_html=True)
+                dups = ri.duplicate_candidates(idx_all) if idx_all else []
+                if dups:
+                    st.markdown('<div class="mono" style="margin-top:12px">'
+                                'POSSIBLE DUPLICATE NAMES</div>', unsafe_allow_html=True)
+                    st.caption("Building suffixes like \"Jose M - BLD 1\" are merged "
+                               "automatically. These look similar but are NOT merged — "
+                               "some are genuinely different people.")
+                    st.dataframe(pd.DataFrame(
+                        [{"Name": a, "Looks like": b, "Similarity": f"{r*100:.0f}%",
+                          "Days A": na, "Days B": nb} for a, b, r, na, nb in dups[:12]]),
+                        use_container_width=True, hide_index=True,
+                        height=min(60 + 33 * len(dups[:12]), 260))
                 if sugg:
                     nlast = sum(1 for days in sugg.values() for iso, g in days.items()
                                 if iso in dates and g.get("model") == "last zone")
@@ -815,7 +836,17 @@ with tab_att:
             m[1].metric("Days in period", worked_days,
                         delta=f'{done_days} already worked', delta_color="off")
             m[2].metric("Avg days / person", f'{worked_days/max(len(people),1):.1f}')
-            m[3].metric("Covering rooms", sum(1 for r in sub if r["cover"]))
+            m[3].metric("No call / no show", sum(1 for r in sub if r.get("no_call")),
+                        delta=f'{sum(1 for r in sub if r.get("paid_off"))} VTO days',
+                        delta_color="off")
+
+            # Fills are only read on upload, so weeks stored before this release
+            # carry no no-call marks. Say so rather than implying nobody has any.
+            if not any(r.get("no_call") for r in rows):
+                st.info("No no-call/no-show marks found. These come from the **red "
+                        "cells** in the workbook, which are only read when the file is "
+                        "uploaded — re-upload on **Upload & sync** to pick them up for "
+                        "the weeks already stored.")
 
             st.markdown('<p class="sec">Who has worked how much</p>', unsafe_allow_html=True)
             st.caption("Sorted by days worked. Use it to see who is due time off "
@@ -832,6 +863,8 @@ with tab_att:
                     "So far": done,
                     "Ahead": s["n_worked"] - done,
                     "Off": s["off"],
+                    "No call": s["n_no_call"],
+                    "VTO (paid)": s["n_paid_off"],
                     "Daily Service": s["shifts"].get("Daily Service", 0),
                     "Room cover": s["shifts"].get("Room cover", 0),
                     "Other duty": s["shifts"].get("Other duty", 0),

@@ -22,7 +22,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 3
+__version__ = 4
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -52,9 +52,20 @@ def _norm(s) -> str:
     """Collapse whitespace and lowercase — for matching labels and names."""
     return re.sub(r"\s+", " ", str(s or "").strip()).lower()
 
+#: Lead rows carry the building in the name — "Jose M -BLD 1", "Willy bld 2",
+#: "Luis R. - B2", "Willy - LEAD 2". Same person, different day. Stripping this
+#: is safe because it is a suffix describing the shift, not part of the name.
+_SUFFIX_RE = re.compile(
+    r"[\s.,\-–]*\b(?:bld|bldg|building|b|lead)\s*[123]\s*$", re.I)
+
 def norm_name(s) -> str:
     """Key used to match a sheet name against an existing roster name."""
-    return _norm(s).rstrip(".").strip()
+    n = _norm(s).rstrip(".").strip()
+    prev = None
+    while prev != n:                      # "Willy - LEAD 2 BLD 1" needs two passes
+        prev = n
+        n = _SUFFIX_RE.sub("", n).strip(" .,-–")
+    return n
 
 # ── Cell status vocabulary ────────────────────────────────────────────────────
 # Explicitly not at work.
@@ -76,9 +87,28 @@ KIND_WORKING = "working"
 KIND_DAILY   = "daily_service"
 KIND_OFF     = "off"
 KIND_OTHER   = "other_duty"
+KIND_VTO     = "vto"
+KIND_NOCALL  = "no_call"
 KIND_UNKNOWN = "unknown"
 
+#: Available to be given guest rooms today.
 PRESENT_KINDS = (KIND_WORKING, KIND_DAILY)
+
+#: On the clock. Projects, garages, HSP cover and the like are a working day —
+#: the person is at work and paid for it, they are simply not on guest rooms.
+WORKED_KINDS = (KIND_WORKING, KIND_DAILY, KIND_OTHER)
+
+#: Paid, but not a worked day. VTO is volunteered time off: still paid, and
+#: deliberately counted apart from cleaning and other duty.
+PAID_OFF_KINDS = (KIND_VTO,)
+
+#: Cell text that says a no-call/no-show outright, independent of the red fill.
+_NOCALL_RE = re.compile(r"\bn[c/\s-]*n[s/\s-]*h?\b|\bno\s*call\b|\bno\s*show\b", re.I)
+
+#: Voluntary time off, when that is the whole story for the day. A cell that
+#: leads with hours worked ("3 + VTO") is a worked day that ended early, and
+#: "VTO - KEYSTONE" is time off spent at another property.
+_VTO_ONLY_RE = re.compile(r"^\s*(vto|v\.t\.o\.?)\s*$", re.I)
 
 def classify(raw) -> str:
     """Map one schedule cell to a status kind.
@@ -91,6 +121,10 @@ def classify(raw) -> str:
     if not s:
         return KIND_OFF
     low = s.lower()
+    if _NOCALL_RE.search(low) or "call sick" in low:
+        return KIND_NOCALL
+    if _VTO_ONLY_RE.match(s):
+        return KIND_VTO
     if "daily service" in low:
         return KIND_DAILY
     # What the cell LEADS with decides it. "3 + VTO" is a shift that ends early,
@@ -315,11 +349,30 @@ def parse_day(ws, col):
     return [_person_record(name, group, bld, ws.cell(r, col).value)
             for r, name, group, bld in _walk_people_rows(ws)]
 
-def parse_week(ws):
+#: Pure red fill on a person's cell means they called off at the last minute
+#: without notice. Confirmed against the workbook: of 454 such cells, 392 are
+#: blank and the rest spell it out — "NC/NS", "NC/NSH", "call sick". The pale
+#: pink FFF4CCCC is NOT this; it is how Lead rows are shaded.
+NOCALL_FILLS = {"FFFF0000", "FFCC0000", "FFE06666"}
+
+def _is_nocall_fill(cell) -> bool:
+    try:
+        fill = cell.fill
+        if not fill or fill.patternType is None:
+            return False
+        rgb = getattr(fill.fgColor, "rgb", None)
+        return isinstance(rgb, str) and rgb.upper() in NOCALL_FILLS
+    except Exception:
+        return False
+
+def parse_week(ws, ws_styles=None):
     """Read a whole sheet in one pass.
 
     Returns {"sheet", "dates": [iso...], "people": {name: {...,"cells": {iso: raw}}}}
     — the compact shape that gets stored, diffed and rendered as a week grid.
+
+    `ws_styles` is the same sheet from a workbook opened WITHOUT data_only, so
+    cell fills are readable; openpyxl gives values or styles, never both.
     """
     dates = sheet_dates(ws)
     if not dates:
@@ -339,12 +392,14 @@ def parse_week(ws):
             "name": name,
             "group": group, "building": bld if group == "hk" else None,
             "section": section,
-            "row": r, "cells": {},
+            "row": r, "cells": {}, "nocall": [],
         })
         for d in ordered:
             raw = re.sub(r"\s+", " ", str(ws.cell(r, dates[d]).value or "").strip())
             if raw:
                 rec["cells"][d.isoformat()] = raw
+            if ws_styles is not None and _is_nocall_fill(ws_styles.cell(r, dates[d])):
+                rec["nocall"].append(d.isoformat())
     return {"sheet": ws.title,
             "dates": [d.isoformat() for d in ordered],
             # Column index per date, captured now so writing edits back never has
@@ -356,11 +411,18 @@ def week_key(week) -> str:
     """Stable id for a week — the ISO date of its first (Sunday) column."""
     return week["dates"][0]
 
-def parse_all_weeks(wb):
-    """Parse every dated sheet. Later sheets win a duplicated week key."""
+def parse_all_weeks(wb, wb_styles=None):
+    """Parse every dated sheet. Later sheets win a duplicated week key.
+
+    `wb_styles` is the same workbook opened without data_only, used only to
+    read the red no-call fills.
+    """
     out = {}
     for ws in wb.worksheets:
-        wk = parse_week(ws)
+        styled = None
+        if wb_styles is not None and ws.title in wb_styles.sheetnames:
+            styled = wb_styles[ws.title]
+        wk = parse_week(ws, styled)
         if wk:
             out[week_key(wk)] = wk
     return out
@@ -467,9 +529,6 @@ def merge_roster(update, existing_roster, keep_missing=True):
     return new_roster
 
 # ── Attendance history ────────────────────────────────────────────────────────
-#: A worked day, for counting purposes: on the clock in any capacity.
-WORKED_KINDS = (KIND_WORKING, KIND_DAILY, KIND_OTHER)
-
 def history_rows(weeks, overrides=None, upto=None):
     """Flatten every stored week into one row per person per dated day.
 
@@ -488,6 +547,10 @@ def history_rows(weeks, overrides=None, upto=None):
                     continue
                 raw = rec.get("cells", {}).get(iso, "")
                 kind = classify(raw)
+                # A red cell is a no-call even when the cell itself is blank,
+                # which is how most of them look.
+                if iso in (rec.get("nocall") or []):
+                    kind = KIND_NOCALL
                 name = rec.get("name", key)
                 out.append({
                     "date": iso, "week": wk, "person": name,
@@ -502,11 +565,36 @@ def history_rows(weeks, overrides=None, upto=None):
                     "building": rec.get("building"),
                     "raw": raw, "kind": kind,
                     "worked": kind in WORKED_KINDS,
+                    "paid_off": kind in PAID_OFF_KINDS,
+                    "no_call": kind == KIND_NOCALL,
                     "daily_service": kind == KIND_DAILY,
                     "cover": rec["group"] != "hk" and is_room_cover(raw),
                     "dow": _dt.date.fromisoformat(iso).strftime("%a"),
                 })
     return out
+
+def duplicate_candidates(index, threshold=0.86):
+    """Names that look like the same person but are not merged.
+
+    Building suffixes are handled in norm_name, so what is left needs a human:
+    "Jhoselyn A" and "Jhoselyn M" are 90% similar and are two different people,
+    while "JENNI CAICEDO" and "Jenny Caicedo" are one. This reports; it never
+    merges on its own.
+    """
+    import difflib
+    by_group = {}
+    for pid, info in index.items():
+        by_group.setdefault(info["group"], []).append((info["label"], info["n"]))
+    out = []
+    for items in by_group.values():
+        items.sort()
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                (a, na), (b, nb) = items[i], items[j]
+                ratio = difflib.SequenceMatcher(None, norm_name(a), norm_name(b)).ratio()
+                if ratio >= threshold:
+                    out.append((a, b, round(ratio, 3), na, nb))
+    return sorted(out, key=lambda x: -x[2])
 
 def people_index(rows):
     """{pid: {label, group, sections, n}} — one entry per real person.
@@ -566,6 +654,8 @@ def summarise_person(rows, pid=None, person_key=None, person=None):
         mine = [r for r in rows
                 if (r["key"] == person_key if person_key else r["person"] == person)]
     worked = [r for r in mine if r["worked"]]
+    no_calls = [r for r in mine if r.get("no_call")]
+    paid_off = [r for r in mine if r.get("paid_off")]
     dow_counts = {}
     for r in worked:
         dow_counts[r["dow"]] = dow_counts.get(r["dow"], 0) + 1
@@ -581,6 +671,8 @@ def summarise_person(rows, pid=None, person_key=None, person=None):
         "rows": mine, "worked": worked,
         "n_worked": len(worked), "n_days": len(mine),
         "off": len([r for r in mine if r["kind"] == KIND_OFF]),
+        "no_calls": no_calls, "n_no_call": len(no_calls),
+        "paid_off": paid_off, "n_paid_off": len(paid_off),
         "by_dow": {d: dow_counts.get(d, 0) for d in order},
         "roles": dict(sorted(roles.items(), key=lambda x: -x[1])),
         "shifts": dict(sorted(shifts.items(), key=lambda x: -x[1])),

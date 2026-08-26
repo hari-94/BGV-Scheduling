@@ -13,7 +13,7 @@ import auth, db, roster_import as ri
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
 # sys.modules, so reload it rather than dying on a helper it does not have yet.
-if getattr(ri, "__version__", 0) < 3:
+if getattr(ri, "__version__", 0) < 4:
     import importlib
     ri = importlib.reload(ri)
 
@@ -137,7 +137,10 @@ KIND_STYLE = {
     ri.KIND_WORKING: ("#dcfce7", "#166534", "Working"),
     ri.KIND_OFF:     ("#f1f5f9", "#94a3b8", "Off"),
     ri.KIND_OTHER:   ("#fef3c7", "#92400e", "Other duty"),
-    ri.KIND_UNKNOWN: ("#fee2e2", "#991b1b", "Check with your lead"),
+    # Red is reserved for the thing the workbook paints red: a no-call/no-show.
+    ri.KIND_NOCALL:  ("#fee2e2", "#991b1b", "No call / no show"),
+    ri.KIND_VTO:     ("#e0e7ff", "#3730a3", "VTO — paid"),
+    ri.KIND_UNKNOWN: ("#faf5ff", "#7e22ce", "Check with your lead"),
 }
 
 cu = auth.current_user()
@@ -289,6 +292,12 @@ with c2:
                   "Room cover": ("#ede9fe", "#5b21b6"),
                   "Other duty": ("#fef3c7", "#92400e")}.get(k2, ("#dcfce7", "#166534"))
         chips += f'<span class="pill" style="background:{bg};color:{fg}">{e(k2)} · {v2}</span>'
+    if s_all["n_no_call"]:
+        chips += (f'<span class="pill" style="background:#fee2e2;color:#991b1b">'
+                  f'No call · {s_all["n_no_call"]}</span>')
+    if s_all["n_paid_off"]:
+        chips += (f'<span class="pill" style="background:#e0e7ff;color:#3730a3">'
+                  f'VTO · {s_all["n_paid_off"]}</span>')
     st.markdown(chips or '<span style="color:#8a93a1">—</span>', unsafe_allow_html=True)
     pctw = 100 * s_all["n_worked"] / max(s_all["n_days"], 1)
     st.markdown(f'<div style="margin-top:10px;font-size:.8rem;color:#5b6675">'
