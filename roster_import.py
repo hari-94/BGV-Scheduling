@@ -589,6 +589,114 @@ def period_bounds(today=None):
             today.replace(day=1).isoformat(),
             today.replace(month=1, day=1).isoformat())
 
+# ── Planning a week that does not exist yet ───────────────────────────────────
+#: How fast older weeks stop mattering. 0.85 per week back means a month ago
+#: carries about half the weight of last week — recent enough to follow a
+#: rota change, long enough to see a pattern.
+_DECAY = 0.85
+
+def suggest_week(rows, target_start, lookback_weeks=16, today=None):
+    """Predict a week's cells from each person's own history.
+
+    For every person and weekday, the values they have had on that weekday are
+    tallied with an exponential recency weight; the heaviest wins. This models
+    the thing that actually drives the sheet — people work the same days and do
+    the same job on them — and it explains itself, which a language model
+    guessing at names could not.
+
+    Returns {pid: {iso: {"value", "confidence", "basis", "n"}}}.
+    """
+    start = _dt.date.fromisoformat(target_start)
+    cutoff = (start - _dt.timedelta(weeks=lookback_weeks)).isoformat()
+    horizon = (today or _dt.date.today()).isoformat()
+    # Only learn from days that have actually happened and predate the target.
+    past = [r for r in rows
+            if cutoff <= r["date"] < target_start and r["date"] <= horizon]
+
+    tally = {}          # pid -> dow -> value -> weight
+    seen = {}           # pid -> dow -> observation count
+    for r in past:
+        weeks_back = max((start - _dt.date.fromisoformat(r["date"])).days, 0) / 7.0
+        w = _DECAY ** weeks_back
+        d = tally.setdefault(r["pid"], {}).setdefault(r["dow"], {})
+        d[r["raw"]] = d.get(r["raw"], 0.0) + w
+        seen.setdefault(r["pid"], {})
+        seen[r["pid"]][r["dow"]] = seen[r["pid"]].get(r["dow"], 0) + 1
+
+    out = {}
+    for pid, bydow in tally.items():
+        for i in range(7):
+            d = start + _dt.timedelta(days=i)
+            dow = d.strftime("%a")
+            counts = bydow.get(dow)
+            if not counts:
+                continue
+            total = sum(counts.values()) or 1.0
+            ranked = sorted(counts.items(), key=lambda x: -x[1])
+            value, weight = ranked[0]
+            out.setdefault(pid, {})[d.isoformat()] = {
+                "value": value,
+                "confidence": weight / total,
+                "n": seen[pid].get(dow, 0),
+                "basis": [(v, round(w / total, 3)) for v, w in ranked[:3]],
+            }
+    return out
+
+def suggestion_to_week(index, suggestions, target_start, template):
+    """Build a storable week dict from suggestions.
+
+    `template` is the most recent real week — it supplies each person's row
+    number, section and building so the result looks like a parsed sheet and
+    can still be written back to Excel.
+    """
+    start = _dt.date.fromisoformat(target_start)
+    dates = [(start + _dt.timedelta(days=i)).isoformat() for i in range(7)]
+    people = OrderedDict()
+    for key, rec in template["people"].items():
+        pid = f'{rec["group"]}|{norm_name(rec.get("name", key))}'
+        cells = {}
+        for iso in dates:
+            got = suggestions.get(pid, {}).get(iso)
+            if got and got["value"]:
+                cells[iso] = got["value"]
+        people[key] = {**rec, "cells": cells}
+    return {"sheet": f"(planned {target_start})", "dates": dates,
+            "cols": dict(template.get("cols") or {}), "people": people,
+            "planned": True, "from_sheet": template.get("sheet", "")}
+
+def copy_week(template, target_start):
+    """Same shape, same values, shifted onto a new set of dates."""
+    start = _dt.date.fromisoformat(target_start)
+    dates = [(start + _dt.timedelta(days=i)).isoformat() for i in range(7)]
+    src = list(template["dates"])
+    people = OrderedDict()
+    for key, rec in template["people"].items():
+        cells = {}
+        for i, iso in enumerate(dates):
+            if i < len(src):
+                v = rec.get("cells", {}).get(src[i], "")
+                if v:
+                    cells[iso] = v
+        people[key] = {**rec, "cells": cells}
+    return {"sheet": f"(copied to {target_start})", "dates": dates,
+            "cols": dict(template.get("cols") or {}), "people": people,
+            "planned": True, "from_sheet": template.get("sheet", "")}
+
+def next_missing_weeks(week_keys, count=6, today=None):
+    """Upcoming Sundays with no stored week yet."""
+    today = today or _dt.date.today()
+    sun = today - _dt.timedelta(days=(today.weekday() + 1) % 7)
+    have = set(week_keys)
+    out, d = [], sun
+    while len(out) < count:
+        iso = d.isoformat()
+        if iso not in have and iso >= sun.isoformat():
+            out.append(iso)
+        d += _dt.timedelta(days=7)
+        if (d - sun).days > 370:
+            break
+    return out
+
 def write_overrides_to_workbook(raw_bytes, weeks, overrides):
     """Write in-app edits into a copy of the uploaded workbook.
 

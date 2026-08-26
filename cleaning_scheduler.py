@@ -1067,7 +1067,12 @@ footer{visibility:hidden!important;}
                                  _user.get("role",""))
                 except Exception:
                     pass
-                st.rerun()
+                # Everyone lands on their own schedule first. Managers navigate
+                # on to the scheduler from there.
+                try:
+                    st.switch_page("pages/4_My_Home.py")
+                except Exception:
+                    st.rerun()
             else:
                 st.error("Invalid username or password.")
 

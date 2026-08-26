@@ -115,6 +115,14 @@ with st.sidebar:
         st.page_link("pages/3_Roster_Import.py", label="Roster Import")
     if auth.can("can_manage_users"):
         st.page_link("pages/2_Admin.py", label="Admin")
+    st.markdown("---")
+    _who = st.session_state.get("display_name","") or st.session_state.get("username","")
+    _rl  = st.session_state.get("role","")
+    if _who:
+        st.caption(f"Signed in as **{_who}** · {_rl.title()}")
+    if st.button("Sign Out", key="btn_signout_home", use_container_width=True):
+        auth.logout()
+        st.switch_page("cleaning_scheduler.py")
 
 def e(s): return _html.escape(str(s) if s is not None else "")
 
