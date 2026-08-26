@@ -325,12 +325,25 @@ def _walk_people_rows(ws):
         label = _norm(label_raw)
         if label in SKIP_LABELS or label.startswith("schedule subject to change"):
             continue
-        if label.startswith("please, assign to each"):
-            continue
         if label in HK_SECTIONS:
             section = ("hk", HK_SECTIONS[label]); continue
         if label == RQS_SECTION:
             section = ("rqs", None); continue
+        # Sheet "Nov 2 - 8" has no "Room Quality Supervisors" header at all, so
+        # every inspector fell under Building 3 and showed up as a duplicate of
+        # themselves. This note only ever sits at the top of the RQS block, so
+        # it doubles as a fallback marker; where the real header exists this
+        # changes nothing.
+        if label.startswith("please, assign to each"):
+            if section != ("rqs", None):
+                section = ("rqs", None)
+            continue
+        # A long sentence with no days against it is a note someone typed into
+        # the name column, not a person -- e.g. "Stripping linen or HSKP
+        # (cleaning Rooms)" sitting in column A of that same sheet.
+        if len(label) > 30 and " " in label and all(
+                ws.cell(r, c).value in (None, "") for c in range(2, 9)):
+            continue
         matched_other = next((v for k, v in OTHER_SECTIONS.items() if label.startswith(k)), None)
         if matched_other:
             section = ("other", matched_other); continue
