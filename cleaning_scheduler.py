@@ -866,8 +866,80 @@ def _init_state():
         if k not in st.session_state:
             st.session_state[k] = default
 
+def _auto_apply_today(force=False):
+    """Set today's attendance from the stored staff schedule, once per day.
+
+    Without this the roster keeps whatever presence flags were last applied, so
+    a new day opens showing yesterday's crew. Guarded by a marker in the
+    database rather than session state, so it happens once for the property —
+    not once per person who opens the app, which would wipe out any manual
+    correction made after the first run.
+
+    Returns a short note describing what happened, or None if it did nothing.
+    """
+    import roster_import as _ri
+    # Property-local date, NOT the server's. On a UTC host date.today() rolls
+    # over around 5-6pm Mountain, which would pull tomorrow's crew mid-shift.
+    today = _datetime.now(_MTN_TZ).date().isoformat()
+    if not force and st.session_state.get("_autoapply_done") == today:
+        return None
+    try:
+        marker = db.load_autoapply() or {}
+        if not force and marker.get("date") == today:
+            st.session_state["_autoapply_done"] = today
+            st.session_state["_autoapply_note"] = marker.get("note", "")
+            return None
+        wk = _ri.find_week_key(db.staff_week_keys(), today)
+        if not wk:
+            st.session_state["_autoapply_done"] = today   # nothing to do; don't retry
+            return None
+        week = db.load_staff_week(wk)
+        if not week:
+            st.session_state["_autoapply_done"] = today
+            return None
+        update = _ri.day_roster(week, db.load_staff_overrides(), wk, today,
+                                st.session_state.get("hk_roster", {}))
+        if not update:
+            st.session_state["_autoapply_done"] = today
+            return None
+        # keep_missing: anyone not on the sheet stays on the roster, marked
+        # absent, so nobody silently disappears when this runs unattended.
+        st.session_state["hk_roster"] = _ri.merge_roster(
+            update, st.session_state.get("hk_roster", {}), keep_missing=True)
+        new_insp = dict(update["insp_roster"])
+        for name in st.session_state.get("insp_roster", {}):
+            new_insp.setdefault(name, False)
+        st.session_state["insp_roster"] = new_insp
+        st.session_state["rqs1"] = update["rqs1"]
+        st.session_state["rqs2"] = update["rqs2"]
+        st.session_state["ds_team"] = [
+            n for n in update["ds_team"]
+            if st.session_state["hk_roster"].get(n, {}).get("present")]
+        # Stale attendance widgets would otherwise redraw the old values.
+        for _k in [k for k in list(st.session_state)
+                   if k.startswith(("att_", "insp_att_"))] + ["rqs1_sel", "rqs2_sel"]:
+            st.session_state.pop(_k, None)
+        n_hk = sum(1 for v in st.session_state["hk_roster"].values() if v["present"])
+        note = (f"{n_hk} HK · {len(st.session_state['ds_team'])} on daily service · "
+                f"RQS {update['rqs1'] or '—'}/{update['rqs2'] or '—'} (sheet {week['sheet']})")
+        try:
+            db.save_roster(st.session_state["hk_roster"], st.session_state["insp_roster"])
+        except Exception:
+            pass
+        db.save_autoapply({"date": today, "note": note, "week": wk,
+                           "at": _datetime.now().isoformat(timespec="seconds")})
+        st.session_state["_autoapply_done"] = today
+        st.session_state["_autoapply_note"] = note
+        return note
+    except Exception as _ex:
+        print(f"[app] auto-apply failed: {_ex}")
+        st.session_state["_autoapply_done"] = today
+        return None
+
 _init_state()
 auth.init_auth()
+if st.session_state.get("logged_in"):
+    _auto_apply_today()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LOGIN GATE
@@ -3186,6 +3258,18 @@ with st.sidebar:
             st.markdown(f'<div style="background:#eff6ff;border:1px solid #bfdbfe;'
                         f'border-radius:8px;padding:6px 10px;font-size:.72rem;color:#1e40af">'
                         f'Imported {_html.escape(str(_ri_note))}</div>', unsafe_allow_html=True)
+        # Today is pulled from the staff schedule automatically, once per day.
+        # This re-runs it after a mid-day re-upload or an accidental change.
+        if st.button("↻ Reload today from schedule", key="btn_reload_sched",
+                     use_container_width=True,
+                     help="Re-applies today's attendance, buildings, RQS roles and "
+                          "daily-service team from the stored staff schedule."):
+            _n = _auto_apply_today(force=True)
+            if _n:
+                st.success(f"Reloaded — {_n}")
+                st.rerun()
+            else:
+                st.warning("No stored staff schedule covers today.")
         st.markdown("---")
         with st.expander("Add / Remove Housekeeper"):
             col_a, col_b = st.columns([2,1])
@@ -3484,6 +3568,16 @@ elif auth.can("can_edit_roster"):
         'border:1px solid #fcd34d;border-radius:8px;padding:5px 12px;margin:-4px 0 10px;'
         'font-size:.74rem;color:#b45309">No staff schedule loaded yet — '
         'import it from the <b>Roster Import</b> page.</div>', unsafe_allow_html=True)
+
+_aa_note = st.session_state.get("_autoapply_note")
+if _aa_note:
+    st.markdown(
+        f'<div style="display:inline-flex;align-items:center;gap:9px;background:#ecfdf5;'
+        f'border:1px solid #a7f3d0;border-radius:8px;padding:5px 12px;margin:-4px 0 10px;'
+        f'font-size:.74rem;color:#065f46">'
+        f'<span style="font-family:\'DM Mono\',monospace;font-size:.6rem;text-transform:uppercase;'
+        f'letter-spacing:.11em;opacity:.75">Today loaded automatically</span>'
+        f'{e(_aa_note)}</div>', unsafe_allow_html=True)
 
 st.markdown("---")
 # Once a schedule has been generated, collapse the upload/paste inputs so the

@@ -199,9 +199,18 @@ def parse_week(ws):
     ordered = sorted(dates)
     people = OrderedDict()
     for r, name, group, bld in _walk_people_rows(ws):
-        rec = people.setdefault(name, {
+        section = {"hk": f"Building {bld}", "rqs": "RQS", "other": bld}[group]
+        # The same first name can appear in two sections — the real sheet has a
+        # Leonardo in Building 2 AND a Leonardo on the Overnight Team. Keying on
+        # the name alone would merge them and let one person's shift decide the
+        # other's attendance, so a repeat in a DIFFERENT section gets its own id.
+        key = name
+        if key in people and people[key]["section"] != section:
+            key = f"{name} · {section}"
+        rec = people.setdefault(key, {
+            "name": name,
             "group": group, "building": bld if group == "hk" else None,
-            "section": {"hk": f"Building {bld}", "rqs": "RQS", "other": bld}[group],
+            "section": section,
             "row": r, "cells": {},
         })
         for d in ordered:
@@ -291,6 +300,44 @@ def apply_overrides(week, overrides, wk=None):
         out["people"][name] = {**rec, "cells": cells}
     return out, applied
 
+def find_week_key(week_keys, iso):
+    """The stored week containing this date, or None.
+
+    A week key is its Sunday; a date belongs to it only if it lands inside the
+    seven days that follow — otherwise a gap in the stored weeks would silently
+    resolve to a much earlier week.
+    """
+    earlier = [w for w in sorted(week_keys) if w <= iso]
+    if not earlier:
+        return None
+    wk = earlier[-1]
+    try:
+        delta = (_dt.date.fromisoformat(iso) - _dt.date.fromisoformat(wk)).days
+    except ValueError:
+        return None
+    return wk if 0 <= delta <= 6 else None
+
+def day_roster(week, overrides, wk, iso, existing_roster=None):
+    """Everything the scheduler needs for one date, in-app edits included."""
+    eff, _applied = apply_overrides(week, overrides or {}, wk)
+    if iso not in eff["dates"]:
+        return None
+    return build_roster_update(week_to_people(eff, iso), existing_roster)
+
+def merge_roster(update, existing_roster, keep_missing=True):
+    """Combine a parsed day with the standing roster.
+
+    keep_missing leaves anyone absent from the sheet on the roster, marked not
+    present, rather than deleting them — the safe choice when this runs
+    automatically and nobody is watching.
+    """
+    new_roster = dict(update["hk_roster"])
+    if keep_missing:
+        for name, v in (existing_roster or {}).items():
+            if name not in new_roster:
+                new_roster[name] = {"building": v.get("building", 1), "present": False}
+    return new_roster
+
 def write_overrides_to_workbook(raw_bytes, weeks, overrides):
     """Write in-app edits into a copy of the uploaded workbook.
 
@@ -323,11 +370,15 @@ def write_overrides_to_workbook(raw_bytes, weeks, overrides):
     return buf.getvalue(), written, skipped
 
 def week_to_people(week, iso):
-    """Materialise one day out of a week dict, in parse_day's shape."""
-    return [_person_record(name, rec["group"],
+    """Materialise one day out of a week dict, in parse_day's shape.
+
+    Uses each entry's real name, not its (possibly disambiguated) storage key,
+    so roster matching sees the name as the sheet writes it.
+    """
+    return [_person_record(rec.get("name", key), rec["group"],
                            rec["building"] if rec["group"] == "hk" else rec["section"],
                            rec.get("cells", {}).get(iso, ""))
-            for name, rec in week["people"].items()]
+            for key, rec in week["people"].items()]
 
 #: Weekly summary rows near the top of every sheet, keyed by their column-A label.
 METRIC_LABELS = OrderedDict([

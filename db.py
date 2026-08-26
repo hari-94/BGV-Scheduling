@@ -142,6 +142,8 @@ def load_roster() -> dict | None:
 # lets a re-upload touch only the weeks that actually changed.
 STAFF_META_KEY      = "staffsched_meta"
 STAFF_OVERRIDE_KEY  = "staffsched_overrides"
+STAFF_FILE_KEY      = "staffsched_file"
+STAFF_AUTO_KEY      = "staffsched_autoapply"
 STAFF_WEEK_PREFIX   = "staffweek_"
 
 def _upsert_key(key: str, obj) -> None:
@@ -234,6 +236,61 @@ def load_staff_overrides() -> dict:
     except Exception as ex:
         print(f"[db] load_staff_overrides error: {ex}")
         return {}
+
+def save_staff_file(data: bytes, file_name: str = "") -> None:
+    """Keep the uploaded workbook itself, so exporting edits back to Excel never
+    depends on someone having re-uploaded the file in this session.
+
+    Base64 inside the JSON payload — the table only stores text. Read on demand
+    (export only), never on page load, so the size costs nothing day to day.
+    """
+    import base64
+    try:
+        _upsert_key(STAFF_FILE_KEY, {
+            "file_name": file_name,
+            "size": len(data),
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "b64": base64.b64encode(data).decode("ascii"),
+        })
+    except Exception as ex:
+        print(f"[db] save_staff_file error: {ex}")
+        raise
+
+def load_staff_file() -> tuple[bytes, dict] | tuple[None, dict]:
+    """Return (workbook_bytes, info). Bytes are None when nothing is stored."""
+    import base64
+    try:
+        rec = _load_key(STAFF_FILE_KEY)
+        if not rec or not rec.get("b64"):
+            return None, {}
+        info = {k: v for k, v in rec.items() if k != "b64"}
+        return base64.b64decode(rec["b64"]), info
+    except Exception as ex:
+        print(f"[db] load_staff_file error: {ex}")
+        return None, {}
+
+def staff_file_info() -> dict:
+    """Just the metadata about the stored workbook — avoids pulling the blob."""
+    try:
+        rec = _load_key(STAFF_FILE_KEY) or {}
+        return {k: v for k, v in rec.items() if k != "b64"}
+    except Exception as ex:
+        print(f"[db] staff_file_info error: {ex}")
+        return {}
+
+def load_autoapply() -> dict:
+    """Which date's roster has already been auto-applied from the schedule."""
+    try:
+        return _load_key(STAFF_AUTO_KEY) or {}
+    except Exception as ex:
+        print(f"[db] load_autoapply error: {ex}")
+        return {}
+
+def save_autoapply(info: dict) -> None:
+    try:
+        _upsert_key(STAFF_AUTO_KEY, info)
+    except Exception as ex:
+        print(f"[db] save_autoapply error: {ex}")
 
 def load_full_schedule(date_str: str = None) -> dict | None:
     """

@@ -139,6 +139,14 @@ if meta.get("uploaded_at"):
     ]
     if overrides:
         fields.append(("In-app edits", f'<span style="color:#7c3aed">{len(overrides)}</span>'))
+    _fi = db.staff_file_info()
+    fields.append(("Workbook stored",
+                   f'<span style="color:#15803d">yes · {_fi["size"]/1024/1024:.1f} MB</span>'
+                   if _fi.get("size") else '<span style="color:#b45309">no</span>'))
+    _aa = db.load_autoapply() or {}
+    fields.append(("Today auto-loaded",
+                   f'<span style="color:#15803d">{e(_aa.get("date",""))}</span>'
+                   if _aa.get("date") else '<span style="color:#8a93a1">not yet</span>'))
     st.markdown('<div class="stamp">' + "".join(
         f'<div><span class="k">{k}</span><span class="v">{v}</span></div>' for k, v in fields
     ) + '</div>', unsafe_allow_html=True)
@@ -264,6 +272,17 @@ with tab_sync:
                     })
                 except Exception as ex:
                     failed.append(f"meta: {ex}")
+                # Keep the workbook itself so the Excel export works any day,
+                # not only in a session where someone happened to upload it.
+                try:
+                    db.save_staff_file(raw, st.session_state.get("ri_file_name", ""))
+                except Exception as ex:
+                    failed.append(f"workbook: {ex}")
+                # A fresh upload supersedes today's auto-apply, so let it re-run.
+                try:
+                    db.save_autoapply({})
+                except Exception:
+                    pass
             if failed:
                 st.error("Some writes failed:\n\n" + "\n\n".join(f"- {f}" for f in failed))
             else:
@@ -450,18 +469,27 @@ with tab_changes:
 
         # ── export ────────────────────────────────────────────────────────────
         st.markdown('<p class="sec">Export back to Excel</p>', unsafe_allow_html=True)
-        raw = st.session_state.get("ri_raw_bytes")
+        file_info = db.staff_file_info()
         if not overrides:
             st.caption("No in-app edits to write back yet.")
-        elif not raw:
-            st.info("Upload the workbook on the **Upload & sync** tab first — the export "
-                    "writes your edits into a copy of that file, so it needs the file itself.")
+        elif not (st.session_state.get("ri_raw_bytes") or file_info.get("size")):
+            st.info("No workbook stored yet — upload it on the **Upload & sync** tab.")
         else:
-            st.caption("Writes every in-app edit into a copy of the uploaded workbook. "
-                       "Formulas and cell comments are preserved. Download it and put it "
-                       "back on OneDrive to bring Excel in line with the app.")
+            src = ("this session's upload" if st.session_state.get("ri_raw_bytes")
+                   else f'the stored copy ({e(file_info.get("file_name","")) or "workbook"}, '
+                        f'saved {str(file_info.get("saved_at",""))[:16].replace("T"," ")})')
+            st.caption(f"Writes every in-app edit into a copy of {src}. Formulas and cell "
+                       f"comments are preserved. Download it and put it back on OneDrive "
+                       f"to bring Excel in line with the app.")
             if st.button("Build updated workbook", key="ri_export"):
                 try:
+                    raw = st.session_state.get("ri_raw_bytes")
+                    if not raw:
+                        with st.spinner("Fetching the stored workbook…"):
+                            raw, _fi = db.load_staff_file()
+                    if not raw:
+                        st.error("The stored workbook could not be read.")
+                        st.stop()
                     stored_weeks = db.load_staff_weeks()
                     out, n, skipped = ri.write_overrides_to_workbook(raw, stored_weeks, overrides)
                     st.session_state["ri_export_bytes"] = out
