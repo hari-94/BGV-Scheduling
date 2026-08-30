@@ -18,7 +18,6 @@ st.set_page_config(
 
 # Import local modules after set_page_config
 import auth, db
-import ui
 
 # ── Hide Streamlit's auto-generated page navigation IMMEDIATELY ───────────────
 # This must be the first markdown call so the nav never flashes. We use every
@@ -91,19 +90,6 @@ SVC_FC = "Full Clean"
 SVC_IH = "Full Clean (IH)"
 SVC_DS = "Daily Service"
 SVC_DV = "Dust n Vac"
-
-# Placeholder shown when a chart has no real person on it. Numbered per chart
-# (Need Housekeeper 1, 2, ...) so the manager sees how many bodies are short.
-NEED_HK_PREFIX = "Need Housekeeper"
-NO_HK_LABEL    = "No HK available"
-#: "nobody" entry in the RQS selectboxes. Named because the auto-import has to
-#: write this exact value into the widget's state to clear a role.
-RQS_NONE       = "— none —"
-
-def is_unassigned_hk(name) -> bool:
-    """True for empty / placeholder housekeeper values (not a real person)."""
-    s = str(name or "")
-    return (not s) or s.startswith(NO_HK_LABEL) or s.startswith(NEED_HK_PREFIX)
 
 # RQS assigned to inspect all IH charts.
 IH_RQS = "RQS 2"
@@ -866,93 +852,12 @@ def _init_state():
     for k, default in [("groups_data",None),("total_rooms",None),
                         ("inspectors_data",None),("used_hk_set",None),
                         ("last_email",None),("rqs1",""),("rqs2",""),
-                        ("priority_hks",[]),("ds_team",[])]:
+                        ("priority_hks",[])]:
         if k not in st.session_state:
             st.session_state[k] = default
 
-def _auto_apply_today(force=False):
-    """Set today's attendance from the stored staff schedule, once per day.
-
-    Without this the roster keeps whatever presence flags were last applied, so
-    a new day opens showing yesterday's crew. Guarded by a marker in the
-    database rather than session state, so it happens once for the property —
-    not once per person who opens the app, which would wipe out any manual
-    correction made after the first run.
-
-    Returns a short note describing what happened, or None if it did nothing.
-    """
-    import roster_import as _ri
-    # A deploy can leave the previous copy in sys.modules; reload if it is old.
-    if getattr(_ri, "__version__", 0) < 12:
-        import importlib
-        _ri = importlib.reload(_ri)
-    # Property-local date, NOT the server's. On a UTC host date.today() rolls
-    # over around 5-6pm Mountain, which would pull tomorrow's crew mid-shift.
-    today = _datetime.now(_MTN_TZ).date().isoformat()
-    if not force and st.session_state.get("_autoapply_done") == today:
-        return None
-    try:
-        marker = db.load_autoapply() or {}
-        if not force and marker.get("date") == today:
-            st.session_state["_autoapply_done"] = today
-            st.session_state["_autoapply_note"] = marker.get("note", "")
-            return None
-        wk = _ri.find_week_key(db.staff_week_keys(), today)
-        if not wk:
-            st.session_state["_autoapply_done"] = today   # nothing to do; don't retry
-            return None
-        week = db.load_staff_week(wk)
-        if not week:
-            st.session_state["_autoapply_done"] = today
-            return None
-        update = _ri.day_roster(week, db.load_staff_overrides(), wk, today,
-                                st.session_state.get("hk_roster", {}))
-        if not update:
-            st.session_state["_autoapply_done"] = today
-            return None
-        # keep_missing: anyone not on the sheet stays on the roster, marked
-        # absent, so nobody silently disappears when this runs unattended.
-        st.session_state["hk_roster"] = _ri.merge_roster(
-            update, st.session_state.get("hk_roster", {}), keep_missing=True)
-        new_insp = dict(update["insp_roster"])
-        for name in st.session_state.get("insp_roster", {}):
-            new_insp.setdefault(name, False)
-        st.session_state["insp_roster"] = new_insp
-        st.session_state["rqs1"] = update["rqs1"]
-        st.session_state["rqs2"] = update["rqs2"]
-        st.session_state["ds_team"] = [
-            n for n in update["ds_team"]
-            if st.session_state["hk_roster"].get(n, {}).get("present")]
-        # Attendance checkboxes redraw from the roster once their keys are gone.
-        for _k in [k for k in list(st.session_state) if k.startswith(("att_", "insp_att_"))]:
-            st.session_state.pop(_k, None)
-        # The RQS selectboxes are different: they are keyed widgets that write
-        # rqs1/rqs2 back on every run. Clearing their keys resets them to
-        # "no one" and immediately overwrites what was just set, so point them
-        # at the people the sheet names instead of deleting them.
-        for _sel, _val in (("rqs1_sel", update["rqs1"]), ("rqs2_sel", update["rqs2"])):
-            st.session_state[_sel] = _val if (_val and new_insp.get(_val)) else RQS_NONE
-        n_hk = sum(1 for v in st.session_state["hk_roster"].values() if v["present"])
-        note = (f"{n_hk} HK · {len(st.session_state['ds_team'])} on daily service · "
-                f"RQS {update['rqs1'] or '—'}/{update['rqs2'] or '—'} (sheet {week['sheet']})")
-        try:
-            db.save_roster(st.session_state["hk_roster"], st.session_state["insp_roster"])
-        except Exception:
-            pass
-        db.save_autoapply({"date": today, "note": note, "week": wk,
-                           "at": _datetime.now().isoformat(timespec="seconds")})
-        st.session_state["_autoapply_done"] = today
-        st.session_state["_autoapply_note"] = note
-        return note
-    except Exception as _ex:
-        print(f"[app] auto-apply failed: {_ex}")
-        st.session_state["_autoapply_done"] = today
-        return None
-
 _init_state()
 auth.init_auth()
-if st.session_state.get("logged_in"):
-    _auto_apply_today()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LOGIN GATE
@@ -1072,12 +977,7 @@ footer{visibility:hidden!important;}
                                  _user.get("role",""))
                 except Exception:
                     pass
-                # Everyone lands on their own schedule first. Managers navigate
-                # on to the scheduler from there.
-                try:
-                    st.switch_page("pages/4_My_Home.py")
-                except Exception:
-                    st.rerun()
+                st.rerun()
             else:
                 st.error("Invalid username or password.")
 
@@ -2084,18 +1984,125 @@ def _unpack_units(charts):
         out.append(rooms)
     return out
 
-def solve_full_clean(fc_rooms, seed=20240601, restarts=16):
+def _fc_count_building_aware(units, rng):
+    """Option B — building-aware count minimization.
+
+    Instead of packing all units together and repairing cross-building charts
+    afterward, solve each BUILDING independently first (so no chart can straddle
+    buildings), then consider bridging leftover B1 rooms into B2/B3 only when it
+    genuinely lowers the housekeeper count. This mirrors how the manual scheduler
+    works and avoids stranding lone rooms across the bridge.
+
+    Returns a list of charts (lists of units)."""
+    BLD = {3:0, 1:1, 2:2}
+    by_bld = {1: [], 2: [], 3: []}
+    for u in units:
+        by_bld.setdefault(_bld(u), []).append(u)
+
+    def _solve_one_building(bunits):
+        """Min-count best-fit for a single building's units, tried under several
+        orders; keep the fewest-charts, tidiest result."""
+        if not bunits: return []
+        orders = [
+            sorted(bunits, key=lambda r: -r["time"]),
+            sorted(bunits, key=lambda r: (-(r["time"]==140), -(r["time"]==120), -r["time"])),
+            sorted(bunits, key=lambda r: (_flr(r), -r["time"], _rnum(r))),
+            sorted(bunits, key=lambda r: (_flr(r), _rnum(r))),
+        ]
+        cands = [_fc_bestfit(o) for o in orders]
+        for _ in range(8):
+            rr = list(bunits); rng.shuffle(rr); cands.append(_fc_bestfit(rr))
+        best = None
+        for c in cands:
+            r = _fc_ls_count(c, 1200, rng, avoid_xb=True)
+            r = [x for x in r if x]
+            key = (len(r), _charts_spread(r))
+            if best is None or key < best[0]: best = (key, r)
+        return best[1]
+
+    charts = []
+    for b in (3, 1, 2):
+        charts.extend(_solve_one_building(by_bld.get(b, [])))
+
+    # Bridge step: B1 is the physical bridge to both B2 and B3. If a B1 chart is
+    # light (< LOW_MIN) AND a B2/B3 chart is also light, and merging them fits the
+    # cap and rules, do it — this removes a housekeeper the way the manual would by
+    # walking a light B1 load over the bridge. Only merges that REDUCE the count.
+    def _t(c): return _unit_time_sum(c)
+    improved = True
+    while improved:
+        improved = False
+        # candidate light B1 charts
+        light_b1 = [i for i,c in enumerate(charts)
+                    if all(_bld(u)==1 for u in c) and _t(c) < LOW_MIN]
+        for i in light_b1:
+            best_j = None; best_slack = None
+            for j,c in enumerate(charts):
+                if j == i or not c: continue
+                # target must be in B2 or B3 (bridge) and also benefit
+                tb = set(_bld(u) for u in c)
+                if tb == {1}: continue          # both B1 -> normal merge handled elsewhere
+                if 2 in tb and 3 in tb: continue
+                merged = charts[i] + c
+                if not _chart_feasible(merged): continue
+                if _t(merged) > MAX_FC: continue
+                # prefer the merge that best fills toward the cap
+                slack = MAX_FC - _t(merged)
+                if best_slack is None or slack < best_slack:
+                    best_slack = slack; best_j = j
+            if best_j is not None:
+                charts[best_j] = charts[i] + charts[best_j]
+                charts[i] = []
+                charts = [c for c in charts if c]
+                improved = True
+                break
+    return [c for c in charts if c]
+
+
+def solve_full_clean(fc_rooms, seed=20240601, restarts=16, building_aware=True):
     """Tidy-first, min-count Full Clean solver. Priority: (1) fewest housekeepers,
     (2) tidiest charts (single-building, contiguous) within that count. Adjacent
     same-guest rooms (same building+floor+room#) are locked together as one unit
     and never split. Returns a list of charts (each a list of room dicts).
-    Deterministic (fixed seed)."""
+    Deterministic (fixed seed).
+
+    building_aware=True uses the per-building count solver (Option B), which keeps
+    each chart inside one building from the start and only bridges B1 loads when it
+    saves a housekeeper. Set False to use the legacy global packer."""
     if not fc_rooms: return []
     import random as _rnd
     rng = _rnd.Random(seed)
     # HARD adjacency rule: bundle adjacent same-guest rooms, then pack bundles.
     bundles = _cluster_adjacent_same_guest(fc_rooms)
     units = [_bundle_to_unit(b) for b in bundles]
+
+    if building_aware:
+        charts = _fc_count_building_aware(units, rng)
+        # Run the fill + tidy passes PER BUILDING so nothing re-crosses buildings.
+        # Charts the bridge step intentionally made cross-building (B1<->B2/B3) are
+        # kept aside and only lightly tidied, so the bridge decision is preserved.
+        pure = {1: [], 2: [], 3: []}
+        bridged = []
+        for c in charts:
+            blds = set(_bld(u) for u in c)
+            if len(blds) == 1:
+                pure[next(iter(blds))].append(c)
+            else:
+                bridged.append(c)
+        out = []
+        for b in (3, 1, 2):
+            grp = pure[b]
+            if not grp: continue
+            grp = _fc_greedy_finish(grp)
+            grp = _fc_ls_tidy(grp, 8000, rng)
+            grp = _fc_floor_consolidate(grp)
+            grp = _fc_ls_tidy(grp, 3000, rng)
+            grp = _fc_topup_light(grp)
+            out.extend(grp)
+        out.extend(bridged)                # keep intentional bridges as-is
+        out = _fc_reduce_easy_330(out)
+        return _unpack_units(out)
+
     BLD = {3:0, 1:1, 2:2}
     orders = [
         sorted(units, key=lambda r: -r["time"]),
@@ -2284,6 +2291,10 @@ def _fc_greedy_finish(charts):
             # Only step onto a NEW floor if this chart is still under the 330 floor
             # (i.e. it genuinely needs more work to avoid being light). Once at/above
             # 330 we stop reaching to other floors — keeping travel minimal.
+            # Once the chart clears LOW_MIN we stop reaching to other floors to
+            # keep travel minimal — EXCEPT a same-building floor is still allowed a
+            # little, because the manual will spread within a building rather than
+            # leave a room stranded. Cross-building is only allowed while still light.
             allow_new_floor = cur < LOW_MIN
             best_j = None; best_key = None
             for j, u in enumerate(avail):
@@ -2291,24 +2302,31 @@ def _fc_greedy_finish(charts):
                 ut = _unit_time_sum([u])
                 if ut > gap or not _chart_feasible(chart + [u]): continue
                 same_floor = (_bld(u), _flr(u)) in cur_flrs
+                same_bld   = any(_bld(u) == _bld(x) for x in chart)
+                # gating: off-floor allowed if chart still light; but a cross-building
+                # room is only ever considered while light AND never preferred over a
+                # same-building option (handled by the ranking key below).
                 if not same_floor and not allow_new_floor:
-                    continue                      # don't wander off-floor once full enough
-                # Primary: stay on the current floor. Secondary: for off-floor
-                # options, pick the physically nearest floor (small vertical gap).
-                # Tertiary: bigger fill. This keeps each housekeeper on as few
-                # floors as possible while still reaching the target band.
+                    continue
+                # Ranking priority (learned from the manual scheduler):
+                #   1. SAME BUILDING above everything — the manual never bridges a
+                #      room into another building to keep a chart on one floor; it
+                #      will take a room on a different FLOOR of the same building
+                #      first. So building-consolidation outranks floor-tightness.
+                #   2. Within the same building, prefer staying on the current floor,
+                #      then the nearest floor (small vertical gap).
+                #   3. Bigger fill.
                 if same_floor:
                     floor_pen = 0
                 else:
-                    # distance to the nearest floor already in the chart. Crossing
-                    # into a DIFFERENT building is treated as much more expensive
-                    # than moving floors within the same building, so the fill only
-                    # crosses buildings when there is genuinely no same-building
-                    # room left to reach LOW_MIN — this stops a lone B1 room from
-                    # being stranded onto an otherwise-B3 chart (and vice-versa).
+                    # vertical distance to the nearest floor already in the chart;
+                    # crossing buildings still adds a large penalty so a genuine
+                    # bridge is only ever a last resort.
                     floor_pen = min(abs(_flr(u)-_flr(x)) + (0 if _bld(u)==_bld(x) else 100)
                                     for x in chart)
-                key = (0 if same_floor else 1, floor_pen, -ut)   # lower is better
+                key = (0 if same_bld else 1,           # building first
+                       0 if same_floor else 1,          # then same floor
+                       floor_pen, -ut)                  # then nearest floor, bigger fill
                 if best_key is None or key < best_key:
                     best_key = key; best_j = j
             if best_j is None: break
@@ -2582,19 +2600,12 @@ def build_all_groups(rooms, priority_hks=None):
 # ══════════════════════════════════════════════════════════════════════════════
 # STAFF ASSIGNMENT
 # ══════════════════════════════════════════════════════════════════════════════
-def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
-    # Housekeepers dedicated to Daily Service today. They are RESERVED: only DS
-    # charts draw from them, and they are held out of the general pool so no
-    # Full Clean / IH / Dust n Vac chart can take them. Empty => old behaviour.
-    ds_set = {n for n in (ds_team or []) if n in present_hk}
-
-    pool = {1:[], 2:[], 3:[]}; ds_pool = {1:[], 2:[], 3:[]}
+def assign_hk_building_aware(groups, present_hk, roster):
+    pool = {1:[], 2:[], 3:[]}
     for n in present_hk:
         b = roster.get(n,{}).get("building",0)
-        if b not in pool: continue
-        (ds_pool if n in ds_set else pool)[b].append(n)
-    available    = {b: list(v) for b, v in pool.items()}
-    ds_available = {b: list(v) for b, v in ds_pool.items()}
+        if b in pool: pool[b].append(n)
+    available = {1:list(pool[1]), 2:list(pool[2]), 3:list(pool[3])}
     assignment = {}; used = set()
     def hk_can_take(hk_bld, group_blds, is_ds=False):
         # Daily Service: housekeepers may wheel carts across all buildings,
@@ -2607,48 +2618,39 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
     # Which buildings a housekeeper from building X is allowed to cover (FC).
     # Movement rule: B1<->B2 ok, B1<->B3 ok, B2<->B3 blocked.
     ADJ = {1:[1,2,3], 2:[2,1], 3:[3,1]}
-    def find_hk(group_blds, is_ds=False, avail=None):
-        """Pull the best legal housekeeper out of `avail` (default: the general
-        pool). Returns None when that pool cannot cover the chart."""
-        if avail is None: avail = available
+    def find_hk(group_blds, is_ds=False):
         # A Full Clean group spanning BOTH B2 and B3 is structurally impossible
-        # for one housekeeper (B2<->B3 is blocked) -- never assign it.
+        # for one housekeeper (B2<->B3 is blocked) — never assign it.
         if not is_ds and (2 in group_blds and 3 in group_blds):
-            return None
+            return "No HK available"
         primary = min(group_blds) if group_blds else 1
         # 1) Try a housekeeper whose home building IS the group's primary building.
-        for hk in list(avail.get(primary,[])):
+        for hk in list(available.get(primary,[])):
             if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
-                avail[primary].remove(hk); return hk
+                available[primary].remove(hk); return hk
         # 2) Borrow from an ADJACENT allowed building (or any, for DS).
         adj_order = [1,2,3] if is_ds else ADJ.get(primary, [1,2,3])
         for b in adj_order:
-            for hk in list(avail.get(b,[])):
+            for hk in list(available.get(b,[])):
                 if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
-                    avail[b].remove(hk); return hk
+                    available[b].remove(hk); return hk
         # 3) Any remaining present housekeeper who can legally take the group.
         for b in [1,2,3]:
-            for hk in list(avail.get(b,[])):
+            for hk in list(available.get(b,[])):
                 if hk_can_take(roster.get(hk,{}).get("building",0), group_blds, is_ds):
-                    avail[b].remove(hk); return hk
+                    available[b].remove(hk); return hk
         # 3.5) SHORTAGE fallback. When home/adjacent housekeepers are exhausted,
         # a housekeeper may be moved cross-building to cover a group, as long
-        # as the GROUP itself spans only an allowed combination -- B1&2 or B1&3
+        # as the GROUP itself spans only an allowed combination — B1&2 or B1&3
         # (or a single building), NEVER B2&3. This relaxes the per-housekeeper
         # home-building rule on busy days while keeping the hard B2<->B3 block.
         group_spans_b2b3 = (2 in group_blds and 3 in group_blds)
         if not group_spans_b2b3:
             for b in [1,2,3]:
-                if avail.get(b):
-                    return avail[b].pop(0)
-        # 4) Truly exhausted -- caller substitutes a placeholder.
-        return None
-    def drop(name):
-        """Remove a named housekeeper from whichever pool still holds them."""
-        for av in (available, ds_available):
-            for b in [1,2,3]:
-                if name in av.get(b,[]):
-                    av[b].remove(name); return
+                if available.get(b):
+                    return available[b].pop(0)
+        # 4) Truly exhausted — leave clearly unassigned (do NOT reuse a name).
+        return "No HK available"
     # Priority HKs first
     for g in groups:
         if g.get("verify_group"): # never assign verify groups
@@ -2656,23 +2658,10 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
         phk = g.get("priority_hk","")
         if not phk: continue
         if g.get("dv_rqs2"): assignment[g["label"]]=""; continue # DV -> RQS2 inspector
-        drop(phk)
+        for b in [1,2,3]:
+            if phk in available.get(b,[]):
+                available[b].remove(phk); break
         assignment[g["label"]] = phk; used.add(phk)
-    # Daily Service goes ONLY to the dedicated team when one is selected. Once
-    # the team is exhausted the remaining DS charts get a numbered placeholder
-    # (Need Housekeeper 1, 2, ...) instead of a name, so the gap is visible.
-    if ds_set:
-        need_n = 0
-        for g in groups:
-            if g["label"] in assignment: continue
-            if g.get("service_type") != SVC_DS: continue
-            if g.get("dv_rqs2"): assignment[g["label"]]=""; continue
-            matched = find_hk(g.get("blds",{1}), True, ds_available)
-            if matched:
-                assignment[g["label"]] = matched; used.add(matched)
-            else:
-                need_n += 1
-                assignment[g["label"]] = f"{NEED_HK_PREFIX} {need_n}"
     # Everyone else — assign the most CONSTRAINED groups first so they get the
     # scarce building-specific housekeepers. Order: Full Clean (strict building
     # rule) Dust n Vac Daily Service (flexible, can take any HK).
@@ -2687,9 +2676,9 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
         # housekeeper field blank here; assign_inspectors puts it on RQS 2.
         if g.get("dv_rqs2"): assignment[g["label"]]=""; continue
         is_ds = (g.get("service_type") == SVC_DS)
-        matched = find_hk(g.get("blds",{1}), is_ds) or NO_HK_LABEL
+        matched = find_hk(g.get("blds",{1}), is_ds)
         assignment[g["label"]] = matched
-        if not is_unassigned_hk(matched): used.add(matched)
+        if matched and not matched.startswith("No HK available"): used.add(matched)
     return assignment, used
 
 def _primary_bld(g): return min(g["blds"]) if g["blds"] else 0
@@ -3000,15 +2989,10 @@ def group_card_html(g, idx):
     ac = c["accent"]; glow = c["glow"]; bar = c["bar"]
 
     hk_raw = g.get("housekeeper","") or ""
-    need_hk = hk_raw.startswith(NEED_HK_PREFIX)
     no_hk = not hk_raw or hk_raw.startswith("No HK available")
     if is_verify:
         unassigned_badge = "" # verify groups intentionally have no HK badge
         hk_raw = ""
-    elif need_hk:
-        # Short-staffed Daily Service: keep the numbered placeholder as the name
-        # so the manager can see exactly how many bodies are missing.
-        unassigned_badge = f'<span style="background:rgba(245,158,11,.2);color:#fcd34d;border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:700;border:1px solid rgba(245,158,11,.4);letter-spacing:.03em"> NEED HK</span>'
     elif no_hk:
         unassigned_badge = f'<span style="background:rgba(244,63,94,.2);color:#fb7185;border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:700;border:1px solid rgba(244,63,94,.35);letter-spacing:.03em"> NO HK</span>'
         hk_raw = hk_raw.replace("No HK available","Unassigned") if hk_raw else "Unassigned"
@@ -3232,13 +3216,27 @@ with st.sidebar:
   </div>
   <span style="font-size:1.3rem;opacity:.8">{"" if _cu["role"]=="admin" else "" if _cu["role"]=="rqs" else ""}</span>
 </div>""", unsafe_allow_html=True)
-    # Sign out lives in the top bar now, the same place as on every page.
+    if st.button("Sign Out", key="btn_logout", use_container_width=True):
+        auth.logout(); st.rerun()
 
     # ── Role-based navigation ──────────────────────────────────────────────
     # admin Schedule + Dashboard + Admin
     # rqs Schedule + Dashboard
     # hk nothing (just name/role/signout above)
     _role = _cu["role"]
+    if _role in ("admin","rqs"):
+        st.markdown("---")
+        st.markdown("### Navigate")
+        st.page_link("cleaning_scheduler.py", label="Cleaning Schedule")
+        try:
+            st.page_link("pages/1_Dashboard.py", label="Dashboard")
+        except Exception:
+            pass
+        if _role == "admin":
+            try:
+                st.page_link("pages/2_Admin.py", label="Admin")
+            except Exception:
+                pass
 
     # ── Housekeepers: NO attendance/config sidebar ─────────────────────────
     # They only see their name, role, and sign-out above. Everything below
@@ -3249,27 +3247,9 @@ with st.sidebar:
         rqs1 = st.session_state.get("rqs1","")
         rqs2 = st.session_state.get("rqs2","")
         priority_hks = st.session_state.get("priority_hks",[])
-        ds_team      = st.session_state.get("ds_team",[])
         groups_per_insp = 3
     else:
         st.markdown("## Daily Attendance")
-        _ri_note = st.session_state.get("roster_import_note")
-        if _ri_note:
-            st.markdown(f'<div style="background:#eff6ff;border:1px solid #bfdbfe;'
-                        f'border-radius:8px;padding:6px 10px;font-size:.72rem;color:#1e40af">'
-                        f'Imported {_html.escape(str(_ri_note))}</div>', unsafe_allow_html=True)
-        # Today is pulled from the staff schedule automatically, once per day.
-        # This re-runs it after a mid-day re-upload or an accidental change.
-        if st.button("↻ Reload today from schedule", key="btn_reload_sched",
-                     use_container_width=True,
-                     help="Re-applies today's attendance, buildings, RQS roles and "
-                          "daily-service team from the stored staff schedule."):
-            _n = _auto_apply_today(force=True)
-            if _n:
-                st.success(f"Reloaded — {_n}")
-                st.rerun()
-            else:
-                st.warning("No stored staff schedule covers today.")
         st.markdown("---")
         with st.expander("Add / Remove Housekeeper"):
             col_a, col_b = st.columns([2,1])
@@ -3457,11 +3437,11 @@ with st.sidebar:
 
         st.markdown("---")
         st.markdown("### RQS Roles Today")
-        rqs_opts = [RQS_NONE] + present_insp
+        rqs_opts = ["— none —"] + present_insp
         rqs1_sel = st.selectbox("RQS 1 (Dust & Vac)", rqs_opts, key="rqs1_sel")
         rqs2_sel = st.selectbox("RQS 2 (Daily Service)", rqs_opts, key="rqs2_sel")
-        rqs1 = "" if rqs1_sel==RQS_NONE else rqs1_sel
-        rqs2 = "" if rqs2_sel==RQS_NONE else rqs2_sel
+        rqs1 = "" if rqs1_sel=="— none —" else rqs1_sel
+        rqs2 = "" if rqs2_sel=="— none —" else rqs2_sel
         st.session_state["rqs1"] = rqs1; st.session_state["rqs2"] = rqs2
 
         st.markdown("---")
@@ -3481,34 +3461,6 @@ with st.sidebar:
                         f'padding:7px 11px;font-size:.75rem;color:#92400e">'
                         f' <b>{len(priority_hks)}</b> HK(s): {", ".join(priority_hks)}</div>',
                         unsafe_allow_html=True)
-
-        st.markdown("---")
-        st.markdown("### Daily Service Team")
-        st.caption("HKs dedicated to Daily Service today. Only they get DS charts — "
-                   "and they are held back from Full Clean / Dust n Vac.")
-        if "ds_team" not in st.session_state: st.session_state["ds_team"] = []
-        saved_ds_team = [n for n in st.session_state["ds_team"] if n in present_hk]
-        if saved_ds_team != st.session_state["ds_team"]: st.session_state["ds_team"] = saved_ds_team
-        st.multiselect("Daily Service Team", options=present_hk, key="ds_team",
-                       label_visibility="collapsed", placeholder="Choose dedicated DS housekeepers…")
-        ds_team = st.session_state["ds_team"]
-        if ds_team:
-            _ds_last = [g for g in (st.session_state.get("groups_data") or [])
-                        if g.get("service_type")==SVC_DS and not g.get("verify_group")]
-            _short   = max(len(_ds_last) - len(ds_team), 0)
-            st.markdown(f'<div style="background:#ccfbf1;border:1px solid #5eead4;border-radius:8px;'
-                        f'padding:7px 11px;font-size:.75rem;color:#115e59">'
-                        f'<b>{len(ds_team)}</b> on Daily Service: {", ".join(ds_team)}</div>',
-                        unsafe_allow_html=True)
-            if _short:
-                st.markdown(f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;'
-                            f'padding:7px 11px;font-size:.75rem;color:#991b1b;margin-top:6px">'
-                            f'Last run was short <b>{_short}</b> — those charts showed '
-                            f'"{NEED_HK_PREFIX} 1…{_short}".</div>',
-                            unsafe_allow_html=True)
-        else:
-            st.caption("None selected — Daily Service is assigned from the full roster as usual.")
-
         st.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:9px 11px;font-size:.77rem;color:#475569;margin-top:8px">'
                     f' <b>{len(present_hk)}</b> HKs &nbsp;·&nbsp; <b>{len(present_insp)}</b> inspectors<br>'
                     f'RQS1: <b>{rqs1 or "—"}</b> &nbsp;·&nbsp; RQS2: <b>{rqs2 or "—"}</b></div>',
@@ -3522,64 +3474,8 @@ _disp_name = _cu.get("display_name") or _cu.get("username","")
 _first_name = _disp_name.split()[0].title() if _disp_name else "there"
 _welcome_msg = auth.get_welcome_msg(_cu["role"])
 
-ui.topnav("Schedule", hide_sidebar=False)
-
 st.markdown(f'<p class="pg-title">Good morning, {_first_name}! </p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">{_welcome_msg}</p>', unsafe_allow_html=True)
-
-# ── Staff schedule stamp: when Schedule.xlsx was last loaded into the app ─────
-@st.cache_data(ttl=120, show_spinner=False)
-def _staff_stamp():
-    """Cached so the header does not hit the database on every rerun."""
-    try:
-        return db.load_staff_meta() or {}
-    except Exception:
-        return {}
-
-def _ago(iso):
-    try:
-        _t = _datetime.fromisoformat(str(iso))
-    except Exception:
-        return ""
-    _n = _datetime.now(_t.tzinfo) if _t.tzinfo else _datetime.now()
-    _s = (_n - _t).total_seconds()
-    if _s < 90:     return "just now"
-    if _s < 5400:   return f"{int(_s//60)} min ago"
-    if _s < 172800: return f"{int(_s//3600)} hours ago"
-    return f"{int(_s//86400)} days ago"
-
-_stamp = _staff_stamp()
-if _stamp.get("uploaded_at"):
-    _sw = str(_stamp["uploaded_at"])[:16].replace("T", " ")
-    _stale = _ago(_stamp["uploaded_at"]).endswith("days ago") and \
-             int(_ago(_stamp["uploaded_at"]).split()[0] or 0) >= 8
-    _c = ("#b45309", "#fffbeb", "#fcd34d") if _stale else ("#5b6675", "#f8fafc", "#e2e5ea")
-    st.markdown(
-        f'<div style="display:inline-flex;align-items:center;gap:9px;background:{_c[1]};'
-        f'border:1px solid {_c[2]};border-radius:8px;padding:5px 12px;margin:-4px 0 10px;'
-        f'font-size:.74rem;color:{_c[0]}">'
-        f'<span style="font-family:\'DM Mono\',monospace;font-size:.6rem;'
-        f'text-transform:uppercase;letter-spacing:.11em;opacity:.75">Staff schedule loaded</span>'
-        f'<b>{_sw}</b><span style="opacity:.7">({_ago(_stamp["uploaded_at"])})</span>'
-        f'<span style="opacity:.55">· {e(_stamp.get("file_name",""))}'
-        f' · {_stamp.get("n_weeks","?")} weeks</span>'
-        f'{" · <b>update due</b>" if _stale else ""}</div>', unsafe_allow_html=True)
-elif auth.can("can_edit_roster"):
-    st.markdown(
-        '<div style="display:inline-flex;align-items:center;gap:8px;background:#fffbeb;'
-        'border:1px solid #fcd34d;border-radius:8px;padding:5px 12px;margin:-4px 0 10px;'
-        'font-size:.74rem;color:#b45309">No staff schedule loaded yet — '
-        'import it from the <b>Roster Import</b> page.</div>', unsafe_allow_html=True)
-
-_aa_note = st.session_state.get("_autoapply_note")
-if _aa_note:
-    st.markdown(
-        f'<div style="display:inline-flex;align-items:center;gap:9px;background:#ecfdf5;'
-        f'border:1px solid #a7f3d0;border-radius:8px;padding:5px 12px;margin:-4px 0 10px;'
-        f'font-size:.74rem;color:#065f46">'
-        f'<span style="font-family:\'DM Mono\',monospace;font-size:.6rem;text-transform:uppercase;'
-        f'letter-spacing:.11em;opacity:.75">Today loaded automatically</span>'
-        f'{e(_aa_note)}</div>', unsafe_allow_html=True)
 
 st.markdown("---")
 # Once a schedule has been generated, collapse the upload/paste inputs so the
@@ -3667,7 +3563,7 @@ def _build_snapshot(fg, total_rooms, inspectors):
     hk_snap = {}
     for g in fg:
         hk = g.get("housekeeper","")
-        if hk and hk != "Manager" and not is_unassigned_hk(hk):
+        if hk and hk != "Manager":
             if hk not in hk_snap:
                 hk_snap[hk] = {"time":0,"rooms":0,"rooms_fc":0,"rooms_ds":0,"rooms_dv":0}
             n = len(g.get("rooms",[]))
@@ -3848,8 +3744,7 @@ if run:
                     for g,lbl in zip(vr2, make_labels("VERIFY",len(vr2))): g["label"]=lbl
                     for g in fg: g["cross_bld"]=len(g["blds"])>1
 
-                    hk_asgn, used_hk_set = assign_hk_building_aware(
-                        fg, present_hk, roster, ds_team=st.session_state.get("ds_team",[]))
+                    hk_asgn, used_hk_set = assign_hk_building_aware(fg, present_hk, roster)
                     for g in fg: g["housekeeper"] = hk_asgn.get(g["label"],"")
                     inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
 
@@ -3906,9 +3801,7 @@ ih_rooms_n = sum(len(g["rooms"]) for g in ih_g)
 ds_rooms_n = sum(len(g["rooms"]) for g in ds_g)
 dv_rooms_n = sum(len(g["rooms"]) for g in dv_g)
 n_free_hk=sum(1 for n in present_hk if n not in used_hk_set)
-n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager"
-              and not is_unassigned_hk(g.get("housekeeper")) and g["time"]<LOW_MIN)
-n_need_hk=sum(1 for g in fg if str(g.get("housekeeper","")).startswith(NEED_HK_PREFIX))
+n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager" and g["time"]<LOW_MIN)
 
 st.markdown(f"""<div class="stat-row">
   <div class="sc hi"><div class="n">{total_rooms}</div><div class="l">Total Rooms</div></div>
@@ -4386,7 +4279,7 @@ td{{transition:background .15s ease}}
             names = [str(x.get("room","")) for x in recs_rooms if x.get("room")]
             return ", ".join(sorted(names))
         for hk, rec in by_hk.items():
-            if hk == "Unassigned" or is_unassigned_hk(hk): continue
+            if hk == "Unassigned": continue
             if rec["time"] and rec["time"] < LOW_MIN:
                 _hk_low.append((hk, f'{rec["time"]}m', "#b45309", len(rec["rooms"]),
                                 _svc_summary(rec["rooms"]), " · ".join(sorted(rec["insp"])),
@@ -4411,11 +4304,6 @@ td{{transition:background .15s ease}}
                                  _room_names(info["rooms"]), info["n"]))
         _rqs_low.sort(key=lambda t:t[-1])
         _rqs_free = sorted(n for n in present_insp if n not in rqs_rooms)
-
-        if n_need_hk:
-            st.error(f"**{n_need_hk}** more housekeeper(s) needed for Daily Service — charts "
-                     f"labelled *{NEED_HK_PREFIX} 1…{n_need_hk}* have nobody on them. "
-                     f"Add more HKs to the Daily Service Team in the sidebar.")
 
         _any = _hk_low or _hk_free or _rqs_low or _rqs_free
         if _any:
@@ -4718,8 +4606,7 @@ td{{transition:background .15s ease}}
                             # Collect all HKs in same inspector batch for swap target
                             batch_hks = sorted(set(
                                 gg.get("housekeeper","") for gg in fg
-                                if gg.get("inspector","") == insp_name
-                                and not is_unassigned_hk(gg.get("housekeeper",""))
+                                if gg.get("inspector","") == insp_name and gg.get("housekeeper","")
                             ))
                             if len(batch_hks) > 1:
                                 st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.62rem;color:#475569;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px"> Swap rooms to:</div>', unsafe_allow_html=True)
