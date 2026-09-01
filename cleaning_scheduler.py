@@ -2,6 +2,7 @@
 Cleaning Schedule Grouper v10
 """
 import re, html as _html
+import hashlib as _hashlib
 import pandas as pd
 import sys as _sys2, os as _os2
 _sys2.path.insert(0, _os2.path.dirname(__file__))
@@ -4675,6 +4676,20 @@ td{{transition:background .15s ease}}
             containers.append({"header": _col_header(name, hks), "items": items})
         header_to_name = {c["header"]: n for c, n in zip(containers, board.keys())}
 
+        def _board_key(prefix, conts):
+            """A widget key that changes only when the board's contents do.
+
+            streamlit-sortables seeds its React state from the items prop on
+            mount and never syncs it again, so a board re-rendered with new
+            data keeps showing the old cards -- a room moved away downstairs
+            still appeared under its old housekeeper up here. Folding the
+            contents into the key remounts the component when, and only when,
+            the charts actually changed. Dragging alone leaves the charts
+            untouched, so a drag in progress is not thrown away.
+            """
+            sig = repr([(c["header"], c["items"]) for c in conts]).encode("utf-8")
+            return f"{prefix}_{_hashlib.sha1(sig).hexdigest()[:10]}"
+
         KANBAN_CSS = """
         /* The component only ships a flex layout for its "vertical" variant —
            the horizontal one has no layout rule at all, so the columns fall
@@ -4722,7 +4737,7 @@ td{{transition:background .15s ease}}
             from streamlit_sortables import sort_items
             after = sort_items(containers, multi_containers=True,
                                direction="horizontal", custom_style=KANBAN_CSS,
-                               key="reassign_board")
+                               key=_board_key("reassign_board", containers))
             moved = {header_to_name.get(c["header"], c["header"]): c["items"]
                      for c in after}
         except Exception as _ex:
@@ -4942,14 +4957,17 @@ td{{transition:background .15s ease}}
             r_moved = None
             try:
                 from streamlit_sortables import sort_items
+                _room_conts = [{"header": _room_header(hk, v), "items": v}
+                               for hk, v in room_home.items()]
                 r_after = sort_items(
-                    [{"header": _room_header(hk, v), "items": v}
-                     for hk, v in room_home.items()],
+                    _room_conts,
                     multi_containers=True, direction="horizontal",
                     custom_style=ROOM_CSS,
-                    # Keyed on the column set, so changing the filter starts a
-                    # fresh board rather than replaying stale positions.
-                    key="room_board_" + str(abs(hash(tuple(room_home)))))
+                    # Keyed on the contents, not merely the column set: two
+                    # housekeepers that both keep rooms leave the columns
+                    # unchanged, and the board would otherwise not notice the
+                    # room that moved between them.
+                    key=_board_key("room_board", _room_conts))
                 r_moved = {c["header"].split("\n")[0]: c["items"] for c in r_after}
             except Exception as _ex:
                 st.info(f"Drag-and-drop unavailable: {_ex}")

@@ -11,3 +11,6 @@ __pycache__/
 # Staff schedule workbooks (contain employee names)
 Schedule.xlsx
 *.xlsx
+
+# graphify output
+graphify-out/
