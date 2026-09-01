@@ -4586,8 +4586,13 @@ td{{transition:background .15s ease}}
             lines = []
             for g in sorted(gs, key=lambda x: x.get("label", "")):
                 svc = g.get("service_type", "")
+                # Rooms get their own line. Appended to the bar they wrapped
+                # awkwardly beneath it and the card lost its shape.
                 lines.append(f"{_bar(g['time'], svc)} {SVC_SHORT.get(svc, '?')} "
-                             f"{g['time']}m · {_rooms_of(g)}")
+                             f"{g['time']}m")
+                rooms_txt = _rooms_of(g)
+                if rooms_txt:
+                    lines.append(f"   {rooms_txt}")
             return head + "\n" + "\n".join(lines)
 
         def _col_header(name, hks):
@@ -4648,12 +4653,19 @@ td{{transition:background .15s ease}}
             border-radius:12px;height:auto !important;
             padding:10px 12px !important;margin:0 0 8px !important;
             font-size:.74rem;line-height:1.55;
-            color:#26313f;text-align:left;white-space:pre-line;font-weight:500;
+            color:#26313f !important;text-align:left;white-space:pre-line;
+            font-weight:500;
             box-shadow:0 1px 2px rgba(16,26,42,.05);cursor:grab;width:100%;
             transition:box-shadow .15s ease,border-color .15s ease,transform .1s ease}
         .sortable-item:first-line{font-weight:800;font-size:.86rem;color:#16202e}
-        .sortable-item:hover{border-color:#9fc0e0;transform:translateY(-2px);
+        /* The component paints .sortable-item AND .sortable-item:hover with
+           color:#fff. Without !important the card text turns white on hover
+           and disappears against the white card, leaving only the emoji bar. */
+        .sortable-item:hover{background:#fff !important;color:#26313f !important;
+            border-color:#9fc0e0;transform:translateY(-2px);
             box-shadow:0 8px 20px rgba(37,99,168,.16)}
+        .sortable-item:active,.sortable-item.dragging{
+            background:#fff !important;color:#26313f !important}
         .sortable-item.dragging{opacity:.9;cursor:grabbing;
             box-shadow:0 14px 30px rgba(16,26,42,.22);border-color:#2d72b8}
         """
