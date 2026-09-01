@@ -941,15 +941,22 @@ def _auto_apply_today(force=False):
         wk = _ri.find_week_key(db.staff_week_keys(), today)
         if not wk:
             st.session_state["_autoapply_done"] = today   # nothing to do; don't retry
+            st.session_state["_autoapply_why"] = (
+                "No uploaded week covers today. Import the staff schedule first.")
             return None
         week = db.load_staff_week(wk)
         if not week:
             st.session_state["_autoapply_done"] = today
+            st.session_state["_autoapply_why"] = (
+                f"The week {wk} is listed but its sheet could not be read.")
             return None
         update = _ri.day_roster(week, db.load_staff_overrides(), wk, today,
                                 st.session_state.get("hk_roster", {}))
         if not update:
             st.session_state["_autoapply_done"] = today
+            st.session_state["_autoapply_why"] = (
+                f"Sheet {week.get('sheet', wk)} has no entry for "
+                f"{today}. Check that the day's column is filled in.")
             return None
         # keep_missing: anyone not on the sheet stays on the roster, marked
         # absent, so nobody silently disappears when this runs unattended.
@@ -988,6 +995,7 @@ def _auto_apply_today(force=False):
     except Exception as _ex:
         print(f"[app] auto-apply failed: {_ex}")
         st.session_state["_autoapply_done"] = today
+        st.session_state["_autoapply_why"] = f"Could not read the schedule: {_ex}"
         return None
 
 _init_state()
@@ -3312,12 +3320,31 @@ with st.sidebar:
                      use_container_width=True,
                      help="Re-applies today's attendance, buildings, RQS roles and "
                           "daily-service team from the stored staff schedule."):
+            _before = (dict(st.session_state.get("insp_roster") or {}),
+                       st.session_state.get("rqs1"), st.session_state.get("rqs2"),
+                       {k: v.get("present") for k, v in
+                        (st.session_state.get("hk_roster") or {}).items()})
+            st.session_state.pop("_autoapply_why", None)
             _n = _auto_apply_today(force=True)
-            if _n:
-                st.success(f"Reloaded — {_n}")
-                st.rerun()
+            _after = (dict(st.session_state.get("insp_roster") or {}),
+                      st.session_state.get("rqs1"), st.session_state.get("rqs2"),
+                      {k: v.get("present") for k, v in
+                       (st.session_state.get("hk_roster") or {}).items()})
+            # The message has to outlive the rerun below, or the click looks
+            # like it did nothing at all -- which is exactly how it looked.
+            if _n and _before != _after:
+                st.session_state["_reload_msg"] = ("ok", f"Reloaded — {_n}")
+            elif _n:
+                st.session_state["_reload_msg"] = (
+                    "info", f"Already matches today's sheet — {_n}")
             else:
-                st.warning("No stored staff schedule covers today.")
+                st.session_state["_reload_msg"] = (
+                    "warn", st.session_state.get("_autoapply_why")
+                    or "No stored staff schedule covers today.")
+            st.rerun()
+        _rmsg = st.session_state.pop("_reload_msg", None)
+        if _rmsg:
+            {"ok": st.success, "info": st.info, "warn": st.warning}[_rmsg[0]](_rmsg[1])
         st.markdown("---")
         with st.expander("Add / Remove Housekeeper"):
             col_a, col_b = st.columns([2,1])
@@ -4541,6 +4568,10 @@ td{{transition:background .15s ease}}
                             if b is not None})
         _all_svcs = sorted({g.get("service_type", "") for g in fg
                             if g.get("service_type")})
+        # The cards are built further down; the names are needed up here.
+        _board_hks = sorted({g.get("housekeeper", "") for g in fg
+                             if g.get("housekeeper") and g.get("housekeeper") != "Manager"
+                             and not is_unassigned_hk(g.get("housekeeper", ""))})
         _sc1, _sc2, _sc3, _sc4 = st.columns([2, 2, 2, 2])
         with _sc1:
             kb_sort = st.selectbox("Sort housekeepers by", KB_SORTS,
@@ -4552,8 +4583,11 @@ td{{transition:background .15s ease}}
             kb_f_svc = st.multiselect("Service", _all_svcs, key="kb_f_svc",
                                       placeholder="All services")
         with _sc4:
-            kb_find = st.text_input("Find a housekeeper", key="kb_find",
-                                    placeholder="Type part of a name")
+            # A picker rather than a text box: typing filters the list, so the
+            # names are offered instead of having to be spelled right.
+            kb_find = st.multiselect("Find a housekeeper", _board_hks,
+                                     key="kb_find",
+                                     placeholder="Start typing a name")
         st.caption("One column per inspector, always in the same order. Sorting "
                    "reorders the cards inside each column, not the columns. "
                    "Filters only change what you can see. Dragging a card takes "
@@ -4711,7 +4745,7 @@ td{{transition:background .15s ease}}
                 return False
             if kb_f_svc and not any(g.get("service_type") in kb_f_svc for g in gs):
                 return False
-            if kb_find and kb_find.strip().lower() not in str(hk).lower():
+            if kb_find and hk not in kb_find:
                 return False
             return True
 
