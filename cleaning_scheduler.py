@@ -4521,6 +4521,11 @@ td{{transition:background .15s ease}}
     with tab_reassign:
         st.markdown('<p class="sec">Board — drag a housekeeper to another RQS</p>',
                     unsafe_allow_html=True)
+        _sc1, _sc2 = st.columns([2, 3])
+        with _sc1:
+            kb_sort = st.selectbox(
+                "Sort", ["Workload — heaviest first", "RQS name", "Building"],
+                key="kb_sort")
         st.caption("One column per inspector. Each card is a housekeeper with everything "
                    "needed to judge the move. Dragging takes all of their charts. "
                    "Nothing is saved until you press Apply.")
@@ -4615,9 +4620,41 @@ td{{transition:background .15s ease}}
             here = hk_insp.get(_hk) or {}
             home_of[_hk] = max(here, key=here.get) if here else UNASSIGNED
 
+        def _hk_mins(hk):
+            return sum(g["time"] for g in hk_charts.get(hk, []))
+
+        def _hk_bld(hk):
+            blds = sorted({b for g in hk_charts.get(hk, []) for b in g.get("blds") or set()})
+            return blds[0] if blds else 99
+
+        def _card_order(hks):
+            if kb_sort == "Building":
+                return sorted(hks, key=lambda h: (_hk_bld(h), h.lower()))
+            if kb_sort == "RQS name":
+                return sorted(hks, key=str.lower)
+            return sorted(hks, key=lambda h: (-_hk_mins(h), h.lower()))
+
+        def _col_order(names):
+            # The no-RQS column stays last wherever it lands; it is a holding
+            # pen, not an inspector to be ranked among the others.
+            real = [n for n in names if n != UNASSIGNED]
+            if kb_sort == "RQS name":
+                real = sorted(real, key=str.lower)
+            elif kb_sort == "Building":
+                def _cb(n):
+                    bs = sorted({b for hk, h in home_of.items() if h == n
+                                 for g in hk_charts.get(hk, [])
+                                 for b in g.get("blds") or set()})
+                    return (bs[0] if bs else 99, n.lower())
+                real = sorted(real, key=_cb)
+            else:
+                real = sorted(real, key=lambda n: (
+                    -sum(_hk_mins(hk) for hk, h in home_of.items() if h == n), n.lower()))
+            return real + [UNASSIGNED]
+
         board, card_to_hk = {}, {}
-        for name in _rqs_names + [UNASSIGNED]:
-            board[name] = sorted(hk for hk, h in home_of.items() if h == name)
+        for name in _col_order(_rqs_names + [UNASSIGNED]):
+            board[name] = _card_order([hk for hk, h in home_of.items() if h == name])
         containers = []
         for name, hks in board.items():
             items = []
@@ -4728,6 +4765,114 @@ td{{transition:background .15s ease}}
                 st.rerun()
         else:
             st.caption("No moves pending.")
+
+        # ── Rooms between housekeepers ────────────────────────────────────────
+        st.markdown('<p class="sec">Move single rooms</p>', unsafe_allow_html=True)
+        st.caption("Pick an inspector, then drag a room from one housekeeper to "
+                   "another. Times, buildings and floors are recalculated for both.")
+
+        def _rechart(g):
+            """Recompute a chart's totals after its rooms changed."""
+            g["time"] = sum(r.get("time", 0) for r in g["rooms"])
+            g["blds"] = {r.get("bld") for r in g["rooms"] if r.get("bld")} or set()
+            g["floors"] = {r.get("floor", 0) for r in g["rooms"]}
+            g["c140"] = sum(1 for r in g["rooms"] if r.get("time") == 140)
+            g["c120"] = sum(1 for r in g["rooms"] if r.get("time") == 120)
+            g["cross_bld"] = len(g["blds"]) > 1
+
+        def _move_room(code, src_hk, dst_hk):
+            """Move one room across housekeepers, or return why it could not."""
+            src = next((g for g in fg if g.get("housekeeper") == src_hk
+                        and any(str(r.get("room")) == code for r in g["rooms"])), None)
+            if src is None:
+                return f"{code}: no longer on {src_hk}"
+            room = next(r for r in src["rooms"] if str(r.get("room")) == code)
+            # Prefer a chart of the same service, so a Daily Service room does
+            # not land in a Full Clean chart and quietly change what it is.
+            cands = [g for g in fg if g.get("housekeeper") == dst_hk
+                     and not g.get("verify_group")]
+            dst = next((g for g in cands
+                        if g.get("service_type") == src.get("service_type")), None)
+            if dst is None and cands:
+                dst = cands[0]
+            if dst is None:
+                return f"{code}: {dst_hk} has no chart to put it in"
+            src["rooms"].remove(room)
+            dst["rooms"].append(room)
+            _rechart(src); _rechart(dst)
+            return None
+
+        rb1, rb2 = st.columns([2, 3])
+        with rb1:
+            room_scope = st.selectbox("Rooms within", _rqs_names or [UNASSIGNED],
+                                      key="room_scope")
+        scope_hks = sorted({g.get("housekeeper", "") for g in fg
+                            if g.get("inspector") == room_scope
+                            and g.get("housekeeper")
+                            and not is_unassigned_hk(g.get("housekeeper", ""))})
+        if not scope_hks:
+            st.caption("Nobody is under that inspector yet.")
+        else:
+            room_home, room_cards = {}, {}
+            for _hk in scope_hks:
+                items = []
+                for g in fg:
+                    if g.get("housekeeper") != _hk:
+                        continue
+                    for r in g["rooms"]:
+                        code = str(r.get("room", ""))
+                        if not code:
+                            continue
+                        card = (f"{code}\n{SVC_SHORT.get(g.get('service_type',''),'?')} · "
+                                f"{r.get('time', 0)}m"
+                                + (" · 🐾" if str(r.get("pet", "")).strip() else ""))
+                        room_cards[card] = (code, _hk)
+                        items.append(card)
+                room_home[_hk] = items
+
+            ROOM_CSS = KANBAN_CSS.replace("minmax(232px,1fr)", "minmax(150px,1fr)")
+            r_moved = None
+            try:
+                from streamlit_sortables import sort_items
+                r_after = sort_items(
+                    [{"header": f"{hk}\n{len(v)} rm", "items": v}
+                     for hk, v in room_home.items()],
+                    multi_containers=True, direction="horizontal",
+                    custom_style=ROOM_CSS, key=f"room_board_{room_scope}")
+                r_moved = {c["header"].split("\n")[0]: c["items"] for c in r_after}
+            except Exception as _ex:
+                st.info(f"Drag-and-drop unavailable: {_ex}")
+                r_moved = None
+
+            if r_moved:
+                room_pending = []
+                for dst_hk, cards in r_moved.items():
+                    for card in cards:
+                        got = room_cards.get(card)
+                        if got and got[1] != dst_hk:
+                            room_pending.append((got[0], got[1], dst_hk))
+                if room_pending:
+                    rows = "<br>".join(
+                        f'&nbsp;&nbsp;<b>{e(c)}</b>: {e(a)} <span style="opacity:.6">→</span> {e(b)}'
+                        for c, a, b in room_pending)
+                    st.markdown(f'<div style="background:#eef4fb;border:1px solid #cddff0;'
+                                f'border-radius:8px;padding:10px 13px;font-size:.79rem;'
+                                f'color:#1c4a78">{len(room_pending)} room move(s) waiting:'
+                                f'<br>{rows}</div>', unsafe_allow_html=True)
+                    if st.button("Apply room moves", type="primary", key="btn_apply_rooms"):
+                        problems = [p for p in
+                                    (_move_room(c, a, b) for c, a, b in room_pending) if p]
+                        # A chart emptied by the move is dropped, the same as
+                        # when the schedule is first built.
+                        st.session_state["groups_data"] = [g for g in fg if g["rooms"]]
+                        _save_reassignment(st.session_state["groups_data"])
+                        if problems:
+                            st.warning("Some rooms could not move:\n\n"
+                                       + "\n\n".join(f"- {p}" for p in problems))
+                        st.success(f"Moved {len(room_pending) - len(problems)} room(s).")
+                        st.rerun()
+                else:
+                    st.caption("No room moves pending.")
 
         # ── Gaps: charts nobody is on ─────────────────────────────────────────
         st.markdown('<p class="sec">Charts still needing someone</p>',
