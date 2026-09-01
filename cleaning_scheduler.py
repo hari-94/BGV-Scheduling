@@ -971,8 +971,15 @@ def _auto_apply_today(force=False):
         st.session_state["ds_team"] = [
             n for n in update["ds_team"]
             if st.session_state["hk_roster"].get(n, {}).get("present")]
-        # Attendance checkboxes redraw from the roster once their keys are gone.
-        for _k in [k for k in list(st.session_state) if k.startswith(("att_", "insp_att_"))]:
+        # The attendance tick boxes are keyed by a generation number, which
+        # moves on here. Deleting their keys and trusting them to rebuild is
+        # the fragile way round: a widget whose key is merely absent may still
+        # be handed its old value, and the Inspectors list would then sit
+        # there ticked while the roster underneath it said otherwise. A key
+        # that has never existed cannot carry a stale value.
+        st.session_state["_att_gen"] = st.session_state.get("_att_gen", 0) + 1
+        for _k in [k for k in list(st.session_state)
+                   if k.startswith(("att_", "insp_att_"))]:
             st.session_state.pop(_k, None)
         # The RQS selectboxes are different: they are keyed widgets that write
         # rqs1/rqs2 back on every run. Clearing their keys resets them to
@@ -3308,6 +3315,10 @@ with st.sidebar:
         ds_team      = st.session_state.get("ds_team",[])
         groups_per_insp = 3
     else:
+        # Every attendance tick box carries this in its key, so that a reload
+        # from the schedule gives them all new identities and none of them can
+        # answer with yesterday's tick.
+        _ATT_GEN = st.session_state.get("_att_gen", 0)
         st.markdown("## Daily Attendance")
         _ri_note = st.session_state.get("roster_import_note")
         if _ri_note:
@@ -3400,13 +3411,13 @@ with st.sidebar:
                         roster[_n]["present"] = True
                         # also update the checkbox widget's own state so the tick
                         # reflects the change after rerun
-                        st.session_state[f"att_{_n}"] = True
+                        st.session_state[f"att_{_ATT_GEN}_{_n}"] = True
                     _persist_roster(); st.rerun()
             with c_none:
                 if st.button("Unselect all", key=f"selnone_b{bld}", use_container_width=True):
                     for _n in bld_hks:
                         roster[_n]["present"] = False
-                        st.session_state[f"att_{_n}"] = False
+                        st.session_state[f"att_{_ATT_GEN}_{_n}"] = False
                     _persist_roster(); st.rerun()
 
             # ── Bulk replace: paste a list of names (e.g. from Excel) to replace
@@ -3457,7 +3468,7 @@ with st.sidebar:
                     # widget (and Select/Unselect all, which write the same key)
                     # drives the value. Passing both value= and an existing key
                     # would conflict, so we only set the key.
-                    _ck = f"att_{name}"
+                    _ck = f"att_{_ATT_GEN}_{name}"
                     if _ck not in st.session_state:
                         st.session_state[_ck] = roster[name]["present"]
                     checked = st.checkbox("", key=_ck, label_visibility="collapsed")
@@ -3517,7 +3528,8 @@ with st.sidebar:
         present_insp = []
         _insp_before = dict(insp_roster)
         for name in list(insp_roster.keys()):
-            insp_roster[name] = st.checkbox(name, value=insp_roster[name], key=f"insp_att_{name}")
+            insp_roster[name] = st.checkbox(
+                name, value=insp_roster[name], key=f"insp_att_{_ATT_GEN}_{name}")
             if insp_roster[name]: present_insp.append(name)
         # Persist attendance immediately so it survives logout/login even without
         # regenerating the schedule.
