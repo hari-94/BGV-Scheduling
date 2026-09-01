@@ -830,6 +830,46 @@ table{min-width:0;width:100%;border-collapse:collapse;}
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
+def _save_reassignment(fg):
+    """Persist a manual housekeeper/RQS change.
+
+    inspectors_data is rebuilt from the charts rather than patched, so the
+    Inspectors view can never drift from what the charts actually say.
+    """
+    order, entries = [], {}
+    for g in fg:
+        name = g.get("inspector") or ""
+        if not name:
+            continue
+        if name not in entries:
+            order.append(name)
+            entries[name] = {"id": len(order), "name": name,
+                             "role": "RQS2" if name == st.session_state.get("rqs2")
+                                     else "FC",
+                             "groups": [], "buildings": set()}
+        entries[name]["groups"].append(g["label"])
+        entries[name]["buildings"] |= set(g.get("blds") or set())
+    rebuilt = []
+    for name in order:
+        ent = entries[name]
+        ent["buildings"] = sorted(ent["buildings"])
+        rebuilt.append(ent)
+    st.session_state["groups_data"] = fg
+    st.session_state["inspectors_data"] = rebuilt
+    used = {g.get("housekeeper", "") for g in fg
+            if g.get("housekeeper") and not is_unassigned_hk(g.get("housekeeper", ""))
+            and g.get("housekeeper") != "Manager"}
+    st.session_state["used_hk_set"] = used
+    try:
+        db.save_full_schedule({
+            "groups_data": fg, "total_rooms": st.session_state.get("total_rooms", 0),
+            "inspectors_data": rebuilt, "used_hk_set": list(used),
+            "hk_roster": dict(st.session_state.get("hk_roster", {})),
+            "generated_by": st.session_state.get("username", "unknown"),
+        })
+    except Exception as ex:
+        print(f"[app] _save_reassignment failed: {ex}")
+
 def _persist_roster():
     """Save the current housekeeper + inspector rosters to the database so all
     changes (add, remove, present-toggle, building move, bulk set) survive page
@@ -4170,7 +4210,7 @@ else:
     # ══════════════════════════════════════════════════════════════════════
     # ADMIN / RQS VIEW — one comprehensive schedule table + Live tracking
     # ══════════════════════════════════════════════════════════════════════
-    tab_sched, tab_live = st.tabs(["Schedule", "Live"])
+    tab_sched, tab_reassign, tab_live = st.tabs(["Schedule", "Reassign", "Live"])
 
     with tab_sched:
         # Optional filter bar
@@ -4478,6 +4518,162 @@ td{{transition:background .15s ease}}
     # ══════════════════════════════════════════════════════════════════════════════
     # LIVE TAB — Real-time cleaning & inspection tracking
     # ══════════════════════════════════════════════════════════════════════════════
+    with tab_reassign:
+        st.markdown('<p class="sec">Move a housekeeper to a different RQS</p>',
+                    unsafe_allow_html=True)
+        st.caption("Drag a housekeeper's card into another inspector's column. All of "
+                   "their charts move with them. Nothing is saved until you press Apply.")
+
+        # A housekeeper's charts can be split across inspectors; the card shows
+        # where the bulk of their work sits and moving it takes everything.
+        hk_charts, hk_insp = {}, {}
+        for _g in fg:
+            _hk = _g.get("housekeeper", "")
+            if not _hk or _hk == "Manager" or is_unassigned_hk(_hk):
+                continue
+            hk_charts.setdefault(_hk, []).append(_g)
+            if _g.get("inspector"):
+                hk_insp.setdefault(_hk, {})
+                hk_insp[_hk][_g["inspector"]] = hk_insp[_hk].get(_g["inspector"], 0) + 1
+
+        UNASSIGNED = "— no RQS —"
+        _rqs_names = sorted({g.get("inspector", "") for g in fg if g.get("inspector")}
+                            | set(present_insp))
+        containers = {n: [] for n in _rqs_names}
+        containers[UNASSIGNED] = []
+        card_to_hk = {}
+        for _hk, _gs in sorted(hk_charts.items()):
+            here = hk_insp.get(_hk) or {}
+            home = max(here, key=here.get) if here else UNASSIGNED
+            mins = sum(g["time"] for g in _gs)
+            card = f"{_hk}  ·  {len(_gs)} chart{'s' if len(_gs) != 1 else ''}  ·  {mins}m"
+            card_to_hk[card] = _hk
+            containers.setdefault(home, []).append(card)
+
+        moved = None
+        try:
+            from streamlit_sortables import sort_items
+            _dnd_style = """
+            .sortable-component{background:transparent;font-family:'DM Sans',sans-serif}
+            .sortable-container{background:#f4f7fb;border:1px solid #e3e8ef;
+                border-radius:14px;padding:8px;min-width:210px}
+            .sortable-container-header{background:linear-gradient(135deg,#1b4a80,#2d72b8);
+                color:#fff;border-radius:10px;padding:7px 11px;font-size:.76rem;
+                font-weight:700;letter-spacing:.02em}
+            .sortable-container-body{min-height:54px;padding-top:7px}
+            .sortable-item{background:#fff;border:1px solid #dfe6ef;border-radius:10px;
+                padding:8px 11px;margin:5px 0;font-size:.78rem;font-weight:600;
+                color:#26313f;box-shadow:0 1px 2px rgba(16,26,42,.05);cursor:grab}
+            .sortable-item:hover{border-color:#9fc0e0;box-shadow:0 4px 12px rgba(37,99,168,.14)}
+            """
+            after = sort_items([{"header": k, "items": v} for k, v in containers.items()],
+                               multi_containers=True, direction="horizontal",
+                               custom_style=_dnd_style, key="reassign_dnd")
+            moved = {c["header"]: c["items"] for c in after}
+        except Exception as _ex:
+            st.info("Drag-and-drop is unavailable here, so use the pickers below "
+                    f"instead — they do the same thing. ({_ex})")
+            moved = {}
+            mc = st.columns(min(len(containers), 4))
+            for i, (_hk, _gs) in enumerate(sorted(hk_charts.items())):
+                here = hk_insp.get(_hk) or {}
+                home = max(here, key=here.get) if here else UNASSIGNED
+                opts = [UNASSIGNED] + _rqs_names
+                with mc[i % len(mc)]:
+                    pick = st.selectbox(_hk, opts, index=opts.index(home) if home in opts else 0,
+                                        key=f"reass_{_hk}")
+                    moved.setdefault(pick, []).append(
+                        f"{_hk}  ·  {len(_gs)} charts  ·  {sum(g['time'] for g in _gs)}m")
+                    card_to_hk.setdefault(
+                        f"{_hk}  ·  {len(_gs)} charts  ·  {sum(g['time'] for g in _gs)}m", _hk)
+
+        # What would change if this were applied?
+        pending = {}
+        for target, cards in (moved or {}).items():
+            for card in cards:
+                _hk = card_to_hk.get(card)
+                if not _hk:
+                    continue
+                new_insp = "" if target == UNASSIGNED else target
+                for _g in hk_charts.get(_hk, []):
+                    if (_g.get("inspector") or "") != new_insp:
+                        pending.setdefault(_hk, (set(), new_insp))
+                        pending[_hk][0].add(_g.get("inspector") or UNASSIGNED)
+
+        if pending:
+            rows = "<br>".join(
+                f'&nbsp;&nbsp;<b>{e(hk)}</b>: {e(" / ".join(sorted(froms)))} '
+                f'<span style="opacity:.6">→</span> {e(to or UNASSIGNED)}'
+                for hk, (froms, to) in sorted(pending.items()))
+            st.markdown(f'<div style="background:#eef4fb;border:1px solid #cddff0;'
+                        f'border-radius:8px;padding:10px 13px;font-size:.79rem;'
+                        f'color:#1c4a78">{len(pending)} change(s) waiting:<br>{rows}</div>',
+                        unsafe_allow_html=True)
+            if st.button("Apply these moves", type="primary", key="btn_apply_moves"):
+                n = 0
+                for hk, (_froms, to) in pending.items():
+                    for _g in hk_charts.get(hk, []):
+                        _g["inspector"] = to
+                        n += 1
+                _save_reassignment(fg)
+                st.success(f"Moved {len(pending)} housekeeper(s), {n} chart(s) reassigned.")
+                st.rerun()
+        else:
+            st.caption("No moves pending.")
+
+        # ── Gaps: charts nobody is on ─────────────────────────────────────────
+        st.markdown('<p class="sec">Charts still needing someone</p>',
+                    unsafe_allow_html=True)
+        need_hk_charts = [g for g in fg
+                          if is_unassigned_hk(g.get("housekeeper", ""))
+                          and not g.get("verify_group") and not g.get("dv_rqs2")]
+        need_rqs_charts = [g for g in fg
+                           if not g.get("inspector") and not g.get("verify_group")
+                           and not g.get("dv_rqs2")]
+
+        if not need_hk_charts and not need_rqs_charts:
+            st.success("Every chart has a housekeeper and an RQS.")
+        else:
+            free_hk = [n for n in present_hk if n not in used_hk_set]
+            gc1, gc2 = st.columns(2)
+            with gc1:
+                st.markdown(f'<div class="mono">NEEDS A HOUSEKEEPER · '
+                            f'{len(need_hk_charts)}</div>', unsafe_allow_html=True)
+                if not need_hk_charts:
+                    st.caption("None.")
+                for _g in need_hk_charts:
+                    lbl = _g["label"]
+                    opts = ["— leave unassigned —"] + (free_hk or []) + \
+                           [n for n in present_hk if n not in free_hk]
+                    pick = st.selectbox(
+                        f'{lbl} · {_g.get("service_type","")} · '
+                        f'Bldg {",".join(str(b) for b in sorted(_g["blds"]))} · {_g["time"]}m',
+                        opts, key=f"fillhk_{lbl}")
+                    if pick != opts[0] and st.button("Assign", key=f"fillhk_btn_{lbl}"):
+                        _g["housekeeper"] = pick
+                        st.session_state["used_hk_set"] = (
+                            set(st.session_state.get("used_hk_set") or set()) | {pick})
+                        _save_reassignment(fg)
+                        st.success(f"{lbl} → {pick}")
+                        st.rerun()
+            with gc2:
+                st.markdown(f'<div class="mono">NEEDS AN RQS · '
+                            f'{len(need_rqs_charts)}</div>', unsafe_allow_html=True)
+                if not need_rqs_charts:
+                    st.caption("None.")
+                for _g in need_rqs_charts:
+                    lbl = _g["label"]
+                    opts = ["— leave unassigned —"] + sorted(set(present_insp) | set(_rqs_names))
+                    pick = st.selectbox(
+                        f'{lbl} · {_g.get("service_type","")} · '
+                        f'{_g.get("housekeeper","") or "no housekeeper"}',
+                        opts, key=f"fillrqs_{lbl}")
+                    if pick != opts[0] and st.button("Assign", key=f"fillrqs_btn_{lbl}"):
+                        _g["inspector"] = pick
+                        _save_reassignment(fg)
+                        st.success(f"{lbl} → {pick}")
+                        st.rerun()
+
     with tab_live:
         _tmsg = st.session_state.pop("_live_toast", None)
         if _tmsg:
