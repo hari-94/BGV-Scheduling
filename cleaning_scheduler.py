@@ -1096,7 +1096,8 @@ if not st.session_state.get("logged_in"):
 /* Hide the entire sidebar + nav on the login screen */
 section[data-testid="stSidebar"]{display:none !important;}
 [data-testid="stSidebarNav"]{display:none !important;}
-[data-testid="collapsedControl"]{display:none !important;}
+/* The login screen has no sidebar to reopen. */
+[data-testid="stExpandSidebarButton"]{display:none !important;}
 button[kind="header"]{display:none !important;}
 .stApp{
   background:#f4f5f7 !important;

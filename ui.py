@@ -169,6 +169,58 @@ CHROME_CSS = """
     flex-wrap:wrap !important;row-gap:4px !important;
   }
 }
+
+/* ── Getting the sidebar back ──
+   Every page flattens header[data-testid="stHeader"] to nothing, and in
+   Streamlit 1.62 that header is where the button that reopens a collapsed
+   sidebar lives -- so collapsing it hid the only way to bring it back. The
+   button is lifted out of that header and pinned to the corner instead.
+   (The old rules hid "collapsedControl", a name Streamlit stopped using
+   several versions ago, so they were doing nothing at all.) */
+[data-testid="stExpandSidebarButton"]{
+  display:flex !important;visibility:visible !important;opacity:1 !important;
+  position:fixed !important;top:10px;left:10px;z-index:1000;
+  background:#ffffff !important;border:1px solid #dbe3ec !important;
+  border-radius:11px !important;box-shadow:0 3px 10px rgba(16,26,42,.13) !important;
+  width:36px;height:36px;align-items:center;justify-content:center;
+}
+[data-testid="stExpandSidebarButton"]:hover{
+  border-color:#9fc0e0 !important;background:#f4f8fc !important;}
+[data-testid="stExpandSidebarButton"] svg{color:#2d72b8 !important;}
+
+/* ── On a phone ──
+   The team opens this on a handset in a corridor, so the pages have to work
+   at 390px without anyone asking for the desktop site. Streamlit's columns
+   shrink rather than stack, which is what turns a three-column row into three
+   unreadable slivers; below this width they wrap instead. */
+@media (max-width:820px){
+  .block-container{padding:0.7rem 0.75rem 2rem !important;max-width:100% !important;}
+  [data-testid="stMain"] [data-testid="stHorizontalBlock"]{flex-wrap:wrap !important;}
+  [data-testid="stMain"] [data-testid="stColumn"]{
+    min-width:100% !important;flex:1 1 100% !important;}
+  /* The sidebar is an overlay at this width and has the screen to itself, so
+     its two-up lists stay two-up. */
+  section[data-testid="stSidebar"] [data-testid="stColumn"]{
+    min-width:0 !important;flex:1 1 0 !important;}
+  section[data-testid="stSidebar"]{width:88vw !important;min-width:0 !important;}
+  /* Tap targets, not mouse targets. */
+  .stButton>button,.stDownloadButton>button{min-height:40px !important;}
+  [data-testid="stExpandSidebarButton"]{width:40px;height:40px;}
+  /* Anything that cannot be made narrower scrolls inside itself rather than
+     pushing the whole page sideways. */
+  [data-testid="stDataFrame"],[data-testid="stTable"],.stDataFrame{
+    overflow-x:auto !important;}
+  h1{font-size:1.5rem !important;}
+  h2{font-size:1.15rem !important;}
+  /* The nav bar keeps its own wrapping rule; just tighten it up here. */
+  [data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
+    padding:6px 7px !important;gap:1px !important;}
+  [data-testid="stPageLink"] a{padding:7px 8px !important;font-size:.78rem !important;}
+  .navwho{display:none !important;}
+}
+@media (max-width:430px){
+  [data-testid="stPageLink"] a{font-size:.74rem !important;padding:6px !important;}
+}
 </style>
 """
 
@@ -212,7 +264,7 @@ def topnav(active: str = "", hide_sidebar: bool = True):
     st.markdown(CHROME_CSS, unsafe_allow_html=True)
     if hide_sidebar:
         st.markdown('<style>section[data-testid="stSidebar"]{display:none !important;}'
-                    '[data-testid="collapsedControl"]{display:none !important;}</style>',
+                    '[data-testid="stExpandSidebarButton"]{display:none !important;}</style>',
                     unsafe_allow_html=True)
 
     i18n.load_lang_for_user()
