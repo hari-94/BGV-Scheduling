@@ -71,6 +71,27 @@ def remember(user: dict) -> None:
     _write_cookie(token)
 
 
+def ensure_cookie() -> None:
+    """Make sure the browser really has the token, on every page.
+
+    Writing it once at sign-in was not enough: the login screen writes the
+    cookie and then immediately switches page, and the page it came from is
+    torn down before the browser ever runs the little script that would have
+    stored it. So nothing was saved, and the next refresh went back to the
+    login form.
+
+    This runs on every page instead. st.context.cookies reports what the
+    browser sent with the page load, so until a reload happens it will not
+    show a cookie written a moment ago -- which means this rewrites it a few
+    times over a few reruns. That is harmless: the write is the same each
+    time, and it stops of its own accord once a load carries the cookie back.
+    """
+    token = st.session_state.get("_session_token")
+    if not token or _cookie_token() == token:
+        return
+    _write_cookie(token)
+
+
 def restore() -> bool:
     """Bring back a signed-in session from the browser's cookie.
 

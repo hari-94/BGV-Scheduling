@@ -15,19 +15,12 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 # Guard: init defaults
-for _k, _v in [("logged_in",False),("username",""),("role","")]:
-    if _k not in st.session_state: st.session_state[_k] = _v
-
-auth.init_auth()
-if not st.session_state.get("logged_in"):
-    st.markdown("""
-<div style="text-align:center;padding:60px 20px;font-family:Inter,sans-serif">
-  <div style="font-size:3rem;margin-bottom:16px"></div>
-  <div style="font-size:1.2rem;font-weight:700;color:#1e293b;margin-bottom:8px">Not signed in</div>
-  <div style="color:#64748b;margin-bottom:20px">Please sign in from the main page.</div>
-</div>""", unsafe_allow_html=True)
-    # (navigation via sidebar)
-    st.stop()
+# One guard for every page: it restores a signed-in browser from its cookie
+# and, failing that, goes to the sign-in screen. The hand-rolled version that
+# used to sit here seeded logged_in=False into the session before init_auth
+# ran, which made the restore skip itself -- so a refresh on this page could
+# never have brought anybody back, cookie or no cookie.
+auth.require_login()
 if not auth.can("can_manage_users"):
     st.error("Admin access required.")
     # (navigation via sidebar)

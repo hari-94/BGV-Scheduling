@@ -28,16 +28,12 @@ st.markdown("""<style>
 [data-testid="stSidebarNav"]{display:none !important;}
 </style>""", unsafe_allow_html=True)
 
-for _k, _v in [("logged_in", False), ("username", ""), ("role", "")]:
-    if _k not in st.session_state: st.session_state[_k] = _v
-
-auth.init_auth()
-if not st.session_state.get("logged_in"):
-    st.markdown('<div style="text-align:center;padding:60px 20px">'
-                '<div style="font-size:1.2rem;font-weight:700;color:#1e293b">Not signed in</div>'
-                '<div style="color:#64748b">Please sign in from the main page.</div></div>',
-                unsafe_allow_html=True)
-    st.stop()
+# One guard for every page: it restores a signed-in browser from its cookie
+# and, failing that, goes to the sign-in screen. The hand-rolled version that
+# used to sit here seeded logged_in=False into the session before init_auth
+# ran, which made the restore skip itself -- so a refresh on this page could
+# never have brought anybody back, cookie or no cookie.
+auth.require_login()
 # Admin and RQS both run schedules day to day, so both get this page.
 # can_generate is exactly that distinction: true for admin and rqs, false for
 # housekeepers (who get My Home instead).

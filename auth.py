@@ -124,9 +124,20 @@ def can(permission: str) -> bool:
     return ROLE_PERMISSIONS.get(role, {}).get(permission, False)
 
 def require_login():
+    """Send anyone who is not signed in to the sign-in screen.
+
+    It used to stop the page with a note telling them to go to the main page
+    themselves, which on a refreshed inner page is a dead end with no link out
+    of it.
+    """
     init_auth()
-    if not st.session_state.get("logged_in"):
-        st.warning("🔒 Please sign in from the main page first.")
+    if st.session_state.get("logged_in"):
+        return
+    try:
+        st.switch_page("cleaning_scheduler.py")
+    except Exception:
+        # Older Streamlit, or a context where switching is not allowed.
+        st.warning("Please sign in from the main page first.")
         st.stop()
 
 def is_housekeeper() -> bool:

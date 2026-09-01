@@ -276,6 +276,15 @@ def topnav(active: str = "", hide_sidebar: bool = True):
                     unsafe_allow_html=True)
 
     i18n.load_lang_for_user()
+    # The sign-in page writes the cookie and then switches page, so the write
+    # can be lost before the browser runs it. Every page tries again until the
+    # browser is actually carrying it.
+    if st.session_state.get("logged_in"):
+        try:
+            import session
+            session.ensure_cookie()
+        except Exception as ex:
+            print(f"[ui] could not refresh the session cookie: {ex}")
     items = [it for it in NAV_ITEMS if _visible(it[3])]
     who = st.session_state.get("display_name") or st.session_state.get("username", "")
     role_key = f'role.{st.session_state.get("role", "")}'

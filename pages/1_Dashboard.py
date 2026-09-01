@@ -21,14 +21,16 @@ st.markdown("""<style>
 [data-testid="stSidebarNav"]{display:none !important;}
 </style>""", unsafe_allow_html=True)
 
-for _k,_v in [("logged_in",False),("username",""),("role",""),
-              ("groups_data",None),("total_rooms",0),("inspectors_data",[])]:
-    if _k not in st.session_state: st.session_state[_k] = _v
+for _k, _v in [("groups_data",None),("total_rooms",0),("inspectors_data",[])]:
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
 
-auth.init_auth()
-if not st.session_state.get("logged_in"):
-    st.warning("Please sign in from the main page.")
-    st.stop()
+# One guard for every page: it restores a signed-in browser from its cookie
+# and, failing that, goes to the sign-in screen. The hand-rolled version that
+# used to sit here seeded logged_in=False into the session before init_auth
+# ran, which made the restore skip itself -- so a refresh on this page could
+# never have brought anybody back, cookie or no cookie.
+auth.require_login()
 if not auth.can("can_view_dashboard"):
     st.error("Dashboard requires RQS or Admin role.")
     st.stop()
