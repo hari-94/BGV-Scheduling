@@ -3370,6 +3370,17 @@ with st.sidebar:
         # from the schedule gives them all new identities and none of them can
         # answer with yesterday's tick.
         _ATT_GEN = st.session_state.get("_att_gen", 0)
+
+        def _att_now(name, prefix, fallback):
+            """Whether this person is ticked right now.
+
+            The counts in the headers are drawn before the tick boxes below
+            them, so reading the roster would show the state as it was one
+            interaction ago -- tick somebody and the total would not move until
+            you touched something else. The widget's own state is the current
+            answer.
+            """
+            return bool(st.session_state.get(f"{prefix}{_ATT_GEN}_{name}", fallback))
         st.markdown("## Daily Attendance")
         _ri_note = st.session_state.get("roster_import_note")
         if _ri_note:
@@ -3442,7 +3453,8 @@ with st.sidebar:
                 3: ("#b45309", "#8f420a"),   # amber
             }
             bar_bg, badge_bg = BLD_SB.get(bld, ("#475569", "#334155"))
-            n_present = sum(1 for n in bld_hks if roster[n]["present"])
+            n_present = sum(1 for n in bld_hks
+                            if _att_now(n, "att_", roster[n]["present"]))
             st.markdown(
                 f'<div style="background:{bar_bg};color:#ffffff;border-radius:8px;'
                 f'padding:7px 12px;font-family:\'DM Mono\',monospace;font-size:.7rem;font-weight:600;'
@@ -3559,6 +3571,21 @@ with st.sidebar:
 
         st.markdown("### Inspectors")
         insp_roster = st.session_state["insp_roster"]
+        # The same header the buildings carry, so the sidebar reads one way all
+        # the way down: who this is, and how many of them are in.
+        _n_insp_in = sum(1 for n, v in insp_roster.items()
+                         if _att_now(n, "insp_att_", v))
+        st.markdown(
+            f'<div style="background:#4b3f8f;color:#ffffff;border-radius:8px;'
+            f'padding:7px 12px;font-family:\'DM Mono\',monospace;font-size:.7rem;'
+            f'font-weight:600;display:flex;justify-content:space-between;'
+            f'align-items:center;margin:10px 0 4px;letter-spacing:.05em;'
+            f'text-transform:uppercase">'
+            f'<span>On duty</span>'
+            f'<span style="background:#3b3175;color:#ffffff;border-radius:20px;'
+            f'padding:2px 10px;font-size:.66rem;font-weight:700">'
+            f'{_n_insp_in}/{len(insp_roster)}</span></div>',
+            unsafe_allow_html=True)
         # ── Shuffle RQS order so they pair with different housekeepers ───────
         if st.button("Shuffle RQS order", key="btn_shuffle_rqs", use_container_width=True,
                      help="Randomize inspector order so RQS get paired with different housekeepers each run"):
@@ -3575,10 +3602,17 @@ with st.sidebar:
             st.rerun()
         present_insp = []
         _insp_before = dict(insp_roster)
-        for name in list(insp_roster.keys()):
-            insp_roster[name] = st.checkbox(
-                name, value=insp_roster[name], key=f"insp_att_{_ATT_GEN}_{name}")
-            if insp_roster[name]: present_insp.append(name)
+        # Two to a row, matching the housekeepers above.
+        _inames = list(insp_roster.keys())
+        for _i in range(0, len(_inames), 2):
+            _icols = st.columns(2, gap="small")
+            for _icol, name in zip(_icols, _inames[_i:_i + 2]):
+                with _icol:
+                    insp_roster[name] = st.checkbox(
+                        name, value=insp_roster[name],
+                        key=f"insp_att_{_ATT_GEN}_{name}")
+                    if insp_roster[name]:
+                        present_insp.append(name)
         # Persist attendance immediately so it survives logout/login even without
         # regenerating the schedule.
         if insp_roster != _insp_before:
