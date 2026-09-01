@@ -4627,12 +4627,22 @@ td{{transition:background .15s ease}}
             blds = sorted({b for g in hk_charts.get(hk, []) for b in g.get("blds") or set()})
             return blds[0] if blds else 99
 
+        def _is_ds_hk(hk):
+            return any(g.get("service_type") == SVC_DS
+                       for g in hk_charts.get(hk, []))
+
         def _card_order(hks):
             if kb_sort == "Building":
-                return sorted(hks, key=lambda h: (_hk_bld(h), h.lower()))
-            if kb_sort == "RQS name":
-                return sorted(hks, key=str.lower)
-            return sorted(hks, key=lambda h: (-_hk_mins(h), h.lower()))
+                key = lambda h: (_hk_bld(h), h.lower())        # noqa: E731
+            elif kb_sort == "RQS name":
+                key = lambda h: (h.lower(),)                   # noqa: E731
+            else:
+                key = lambda h: (-_hk_mins(h), h.lower())      # noqa: E731
+            # A Daily Service round carries several times the rooms of a Full
+            # Clean chart, so any workload sort would park those people at the
+            # top of every column and push the charts you are actually
+            # rebalancing out of sight. They sort to the bottom instead.
+            return sorted(hks, key=lambda h: (_is_ds_hk(h),) + key(h))
 
         def _col_order(names):
             # The no-RQS column stays last wherever it lands; it is a holding
@@ -4887,6 +4897,30 @@ td{{transition:background .15s ease}}
                 cursor:grabbing;color:#26313f !important;border-color:#2d72b8;
                 box-shadow:0 12px 26px rgba(16,26,42,.2)}
             """
+
+            # Those wide Daily Service columns get a full-width box with the
+            # rooms flowing across it, rather than one 166px column running
+            # far below everything else. The component gives containers no
+            # per-column class, so they are addressed by position -- as
+            # div:nth-of-type, which skips the <style> tag the component
+            # renders as its own first child.
+            ds_cols = [i + 1 for i, hk in enumerate(room_home) if _is_ds_hk(hk)]
+            if ds_cols:
+                def _sel(suffix=""):
+                    return ",".join(
+                        f".sortable-component > div:nth-of-type({i}){suffix}"
+                        for i in ds_cols)
+                ROOM_CSS += f"""
+                {_sel()}{{grid-column:1/-1;width:100% !important;
+                    background:#e8f0f9;border-color:#cbdff2}}
+                {_sel(" .sortable-container-header")}{{
+                    background:linear-gradient(135deg,#1d6b52 0%,#2f9169 60%,#46b184 100%);
+                    box-shadow:0 3px 9px rgba(29,107,82,.22)}}
+                {_sel(" .sortable-container-body")}{{display:flex !important;
+                    flex-wrap:wrap;gap:6px;min-height:52px;align-content:flex-start}}
+                {_sel(" .sortable-item")}{{width:auto !important;
+                    min-width:104px;margin:0 !important;flex:0 0 auto}}
+                """
 
             r_moved = None
             try:
