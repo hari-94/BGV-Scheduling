@@ -4768,8 +4768,10 @@ td{{transition:background .15s ease}}
 
         # ── Rooms between housekeepers ────────────────────────────────────────
         st.markdown('<p class="sec">Move single rooms</p>', unsafe_allow_html=True)
-        st.caption("Pick an inspector, then drag a room from one housekeeper to "
-                   "another. Times, buildings and floors are recalculated for both.")
+        st.caption("Drag a room to any housekeeper on the board, including one "
+                   "under a different RQS. Times, buildings and floors are "
+                   "recalculated for both charts. Nothing is saved until you "
+                   "press Apply.")
 
         def _rechart(g):
             """Recompute a chart's totals after its rooms changed."""
@@ -4802,43 +4804,101 @@ td{{transition:background .15s ease}}
             _rechart(src); _rechart(dst)
             return None
 
-        rb1, rb2 = st.columns([2, 3])
+        # Every housekeeper on the property is a column, whoever inspects
+        # them - a room is just as likely to belong next door under another
+        # RQS as under its own. The filter narrows a crowded board; it does
+        # not fence the move.
+        rb1, rb2 = st.columns([3, 2])
         with rb1:
-            room_scope = st.selectbox("Rooms within", _rqs_names or [UNASSIGNED],
-                                      key="room_scope")
-        scope_hks = sorted({g.get("housekeeper", "") for g in fg
-                            if g.get("inspector") == room_scope
-                            and g.get("housekeeper")
-                            and not is_unassigned_hk(g.get("housekeeper", ""))})
+            room_scope = st.multiselect(
+                "Inspectors shown", _rqs_names + [UNASSIGNED],
+                default=_rqs_names + [UNASSIGNED], key="room_scope")
+        with rb2:
+            room_hide_empty = st.checkbox("Hide empty housekeepers", value=True,
+                                          key="room_hide_empty")
+        scope = set(room_scope) or set(_rqs_names) | {UNASSIGNED}
+
+        scope_hks = _card_order([hk for hk in hk_charts
+                                 if home_of.get(hk, UNASSIGNED) in scope
+                                 and not is_unassigned_hk(hk)])
         if not scope_hks:
-            st.caption("Nobody is under that inspector yet.")
+            st.caption("No housekeepers under the inspectors you picked.")
         else:
             room_home, room_cards = {}, {}
             for _hk in scope_hks:
                 items = []
-                for g in fg:
-                    if g.get("housekeeper") != _hk:
-                        continue
-                    for r in g["rooms"]:
+                for g in sorted(hk_charts.get(_hk, []),
+                                key=lambda x: x.get("label", "")):
+                    for r in sorted(g["rooms"],
+                                    key=lambda x: str(x.get("room", ""))):
                         code = str(r.get("room", ""))
                         if not code:
                             continue
-                        card = (f"{code}\n{SVC_SHORT.get(g.get('service_type',''),'?')} · "
+                        card = (f"{code}\n"
+                                f"{SVC_SHORT.get(g.get('service_type', ''), '?')} · "
                                 f"{r.get('time', 0)}m"
                                 + (" · 🐾" if str(r.get("pet", "")).strip() else ""))
                         room_cards[card] = (code, _hk)
                         items.append(card)
-                room_home[_hk] = items
+                if items or not room_hide_empty:
+                    room_home[_hk] = items
 
-            ROOM_CSS = KANBAN_CSS.replace("minmax(232px,1fr)", "minmax(150px,1fr)")
+            def _room_header(hk, items):
+                mins = sum(g["time"] for g in hk_charts.get(hk, []))
+                insp = home_of.get(hk, UNASSIGNED)
+                blds = sorted({b for g in hk_charts.get(hk, [])
+                               for b in g.get("blds") or set()})
+                return (f"{hk}\n{insp if insp != UNASSIGNED else 'no RQS'} · "
+                        f"B{'/'.join(str(b) for b in blds) or '?'}\n"
+                        f"{len(items)} rm · {mins}m")
+
+            # Written out rather than derived from KANBAN_CSS by a string
+            # replace: that would silently no-op if the other block's wording
+            # ever changed, and these columns would quietly stack again.
+            ROOM_CSS = """
+            .sortable-component{display:grid !important;
+                grid-template-columns:repeat(auto-fill,minmax(166px,1fr));
+                gap:10px;align-items:start;background:transparent;
+                font-family:'DM Sans',sans-serif;padding-bottom:4px}
+            .sortable-container{background:#eef2f7;border:1px solid #e0e6ee;
+                border-radius:14px;padding:7px;margin:0 !important;
+                min-width:0 !important;max-width:none;width:100%}
+            .sortable-container-header{
+                background:linear-gradient(135deg,#245c8f 0%,#3a83c4 60%,#5aa0d8 100%);
+                color:#fff;border-radius:10px;padding:7px 10px;
+                font-size:.68rem;font-weight:700;line-height:1.45;
+                white-space:pre-line;letter-spacing:.01em;
+                box-shadow:0 3px 9px rgba(27,74,128,.22)}
+            .sortable-container-body{min-height:56px;padding:8px 0 0 !important;
+                background:transparent !important}
+            .sortable-item{background:#fff !important;border:1px solid #e0e6ee;
+                border-radius:9px;height:auto !important;
+                padding:7px 9px !important;margin:0 0 6px !important;
+                font-size:.71rem;line-height:1.45;
+                color:#26313f !important;text-align:left;white-space:pre-line;
+                font-weight:500;box-shadow:0 1px 2px rgba(16,26,42,.05);
+                cursor:grab;width:100%;
+                transition:box-shadow .15s ease,border-color .15s ease,transform .1s ease}
+            .sortable-item:first-line{font-weight:800;font-size:.79rem;color:#16202e}
+            .sortable-item:hover{border-color:#9fc0e0;transform:translateY(-1px);
+                color:#26313f !important;
+                box-shadow:0 6px 16px rgba(37,99,168,.15)}
+            .sortable-item:active,.sortable-item.dragging{opacity:.95;
+                cursor:grabbing;color:#26313f !important;border-color:#2d72b8;
+                box-shadow:0 12px 26px rgba(16,26,42,.2)}
+            """
+
             r_moved = None
             try:
                 from streamlit_sortables import sort_items
                 r_after = sort_items(
-                    [{"header": f"{hk}\n{len(v)} rm", "items": v}
+                    [{"header": _room_header(hk, v), "items": v}
                      for hk, v in room_home.items()],
                     multi_containers=True, direction="horizontal",
-                    custom_style=ROOM_CSS, key=f"room_board_{room_scope}")
+                    custom_style=ROOM_CSS,
+                    # Keyed on the column set, so changing the filter starts a
+                    # fresh board rather than replaying stale positions.
+                    key="room_board_" + str(abs(hash(tuple(room_home)))))
                 r_moved = {c["header"].split("\n")[0]: c["items"] for c in r_after}
             except Exception as _ex:
                 st.info(f"Drag-and-drop unavailable: {_ex}")
@@ -4853,7 +4913,10 @@ td{{transition:background .15s ease}}
                             room_pending.append((got[0], got[1], dst_hk))
                 if room_pending:
                     rows = "<br>".join(
-                        f'&nbsp;&nbsp;<b>{e(c)}</b>: {e(a)} <span style="opacity:.6">→</span> {e(b)}'
+                        f'&nbsp;&nbsp;<b>{e(c)}</b>: {e(a)} '
+                        f'<span style="opacity:.6">→</span> {e(b)}'
+                        + ('  <span style="opacity:.6">(across RQS)</span>'
+                           if home_of.get(a) != home_of.get(b) else '')
                         for c, a, b in room_pending)
                     st.markdown(f'<div style="background:#eef4fb;border:1px solid #cddff0;'
                                 f'border-radius:8px;padding:10px 13px;font-size:.79rem;'
