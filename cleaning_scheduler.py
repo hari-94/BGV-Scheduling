@@ -4529,11 +4529,6 @@ td{{transition:background .15s ease}}
         # sits under whoever has the bulk and the move takes the rest with it.
         KB_TARGET = 12          # rooms an RQS is meant to inspect in a day
         RQS_KB_LOW = 8          # below this a column is flagged light
-        # A person's DAY, not a single chart. MAX_FC caps one chart, so
-        # metering a multi-chart housekeeper against it fills the bar and
-        # reads as fine when they are actually over a full day.
-        KB_DAY_MIN = 480
-        KB_DAY_HEAVY = 540
         SVC_SHORT = {SVC_FC: "FC", SVC_IH: "IH", SVC_DS: "DS", SVC_DV: "DV"}
         hk_charts, hk_insp = {}, {}
         for _g in fg:
@@ -4549,30 +4544,51 @@ td{{transition:background .15s ease}}
         _rqs_names = sorted({g.get("inspector", "") for g in fg if g.get("inspector")}
                             | set(present_insp))
 
-        def _meter(done, cap, width=10):
-            """A load bar drawn in block characters — cards are plain text, so a
-            real <div> bar is not an option."""
-            filled = 0 if cap <= 0 else max(0, min(width, round(width * done / cap)))
-            return "█" * filled + "░" * (width - filled)
+        # Per-service fill targets for the load bars. A chart is judged against
+        # its own service, not one blanket number: a 420-minute Daily Service is
+        # thin, while a 380-minute Full Clean is exactly full.
+        KB_FILL = {
+            SVC_DS: (460, 400),      # (target, below-this-is-red)
+            SVC_FC: (MAX_FC, LOW_MIN),
+            SVC_IH: (MAX_FC, LOW_MIN),
+            SVC_DV: (MAX_FC, LOW_MIN),
+        }
+
+        def _bar(mins, svc, width=6):
+            """Load bar for one chart, coloured green through red.
+
+            Drag cards are plain text, so a CSS gradient cannot reach inside
+            them — the colour comes from emoji blocks instead. That gives four
+            bands rather than a smooth ramp, which is enough to see at a glance
+            whether a chart is full, thin, or badly short.
+            """
+            target, red = KB_FILL.get(svc, (MAX_FC, LOW_MIN))
+            if mins >= target:      block = "🟩"      # full
+            elif mins >= red:       block = "🟨"      # a little light
+            elif mins >= red * 0.85: block = "🟧"     # well short
+            else:                   block = "🟥"      # badly short
+            filled = max(0, min(width, round(width * mins / max(target, 1))))
+            return block * filled + "⬜" * (width - filled)
+
+        def _rooms_of(g, cap=6):
+            names = [str(r.get("room", "")).strip() for r in (g.get("rooms") or [])
+                     if str(r.get("room", "")).strip()]
+            shown = " ".join(names[:cap])
+            return shown + (f" +{len(names) - cap}" if len(names) > cap else "")
 
         def _hk_card(hk, gs):
             blds = sorted({b for g in gs for b in g.get("blds") or set()})
             mins = sum(g["time"] for g in gs)
             rooms = sum(len(g.get("rooms") or []) for g in gs)
-            svcs = []
-            for g in gs:
-                tag = SVC_SHORT.get(g.get("service_type", ""), "?")
-                if tag not in svcs:
-                    svcs.append(tag)
-            labels = " ".join(g["label"] for g in gs[:4])
-            if len(gs) > 4:
-                labels += f" +{len(gs) - 4}"
-            flag = ("  ⚠ over" if mins > KB_DAY_HEAVY else
-                    "  ⚠ light" if mins and mins < LOW_MIN else "")
-            return (f"{hk}\n"
-                    f"B{'/'.join(str(b) for b in blds) or '?'} · {'/'.join(svcs)} · "
-                    f"{len(gs)} chart{'s' if len(gs) != 1 else ''} · {rooms} rm\n"
-                    f"{_meter(mins, KB_DAY_MIN)} {mins}m{flag}")
+            head = (f"{hk}\n"
+                    f"B{'/'.join(str(b) for b in blds) or '?'} · {len(gs)} "
+                    f"chart{'s' if len(gs) != 1 else ''} · {rooms} rm · {mins}m")
+            lines = []
+            for g in sorted(gs, key=lambda x: x.get("label", "")):
+                svc = g.get("service_type", "")
+                lines.append(f"{_bar(g['time'], svc)} {SVC_SHORT.get(svc, '?')} "
+                             f"{g['time']}m · {_rooms_of(g)}")
+            return head + "\n" + "\n".join(lines)
 
         def _col_header(name, hks):
             gs = [g for hk in hks for g in hk_charts.get(hk, [])]
