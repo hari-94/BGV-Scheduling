@@ -1,4 +1,4 @@
-2026-08-26 15:51:56.968 
+2026-08-31 20:59:25.985 
 Warning: the config option 'server.enableCORS=false' is not compatible with 'server.enableXsrfProtection=true'.
 As a result, 'server.enableCORS' is being overridden to 'true'.
 
@@ -13,6 +13,6 @@ If cross origin resource sharing is required, please disable server.enableXsrfPr
   You can now view your Streamlit app in your browser.
 
   Local URL: http://localhost:8502
-  Network URL: http://172.16.0.166:8502
-  External URL: http://4.18.17.114:8502
+  Network URL: http://10.0.0.76:8502
+  External URL: http://76.130.179.130:8502
 

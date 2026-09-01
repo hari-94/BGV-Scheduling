@@ -4519,13 +4519,22 @@ td{{transition:background .15s ease}}
     # LIVE TAB — Real-time cleaning & inspection tracking
     # ══════════════════════════════════════════════════════════════════════════════
     with tab_reassign:
-        st.markdown('<p class="sec">Move a housekeeper to a different RQS</p>',
+        st.markdown('<p class="sec">Board — drag a housekeeper to another RQS</p>',
                     unsafe_allow_html=True)
-        st.caption("Drag a housekeeper's card into another inspector's column. All of "
-                   "their charts move with them. Nothing is saved until you press Apply.")
+        st.caption("One column per inspector. Each card is a housekeeper with everything "
+                   "needed to judge the move. Dragging takes all of their charts. "
+                   "Nothing is saved until you press Apply.")
 
-        # A housekeeper's charts can be split across inspectors; the card shows
-        # where the bulk of their work sits and moving it takes everything.
+        # A housekeeper's charts can already be split across inspectors; the card
+        # sits under whoever has the bulk and the move takes the rest with it.
+        KB_TARGET = 12          # rooms an RQS is meant to inspect in a day
+        RQS_KB_LOW = 8          # below this a column is flagged light
+        # A person's DAY, not a single chart. MAX_FC caps one chart, so
+        # metering a multi-chart housekeeper against it fills the bar and
+        # reads as fine when they are actually over a full day.
+        KB_DAY_MIN = 480
+        KB_DAY_HEAVY = 540
+        SVC_SHORT = {SVC_FC: "FC", SVC_IH: "IH", SVC_DS: "DS", SVC_DV: "DV"}
         hk_charts, hk_insp = {}, {}
         for _g in fg:
             _hk = _g.get("housekeeper", "")
@@ -4539,53 +4548,113 @@ td{{transition:background .15s ease}}
         UNASSIGNED = "— no RQS —"
         _rqs_names = sorted({g.get("inspector", "") for g in fg if g.get("inspector")}
                             | set(present_insp))
-        containers = {n: [] for n in _rqs_names}
-        containers[UNASSIGNED] = []
-        card_to_hk = {}
-        for _hk, _gs in sorted(hk_charts.items()):
+
+        def _meter(done, cap, width=10):
+            """A load bar drawn in block characters — cards are plain text, so a
+            real <div> bar is not an option."""
+            filled = 0 if cap <= 0 else max(0, min(width, round(width * done / cap)))
+            return "█" * filled + "░" * (width - filled)
+
+        def _hk_card(hk, gs):
+            blds = sorted({b for g in gs for b in g.get("blds") or set()})
+            mins = sum(g["time"] for g in gs)
+            rooms = sum(len(g.get("rooms") or []) for g in gs)
+            svcs = []
+            for g in gs:
+                tag = SVC_SHORT.get(g.get("service_type", ""), "?")
+                if tag not in svcs:
+                    svcs.append(tag)
+            labels = " ".join(g["label"] for g in gs[:4])
+            if len(gs) > 4:
+                labels += f" +{len(gs) - 4}"
+            flag = ("  ⚠ over" if mins > KB_DAY_HEAVY else
+                    "  ⚠ light" if mins and mins < LOW_MIN else "")
+            return (f"{hk}\n"
+                    f"B{'/'.join(str(b) for b in blds) or '?'} · {'/'.join(svcs)} · "
+                    f"{len(gs)} chart{'s' if len(gs) != 1 else ''} · {rooms} rm\n"
+                    f"{_meter(mins, KB_DAY_MIN)} {mins}m{flag}")
+
+        def _col_header(name, hks):
+            gs = [g for hk in hks for g in hk_charts.get(hk, [])]
+            rooms = sum(len(g.get("rooms") or []) for g in gs)
+            mins = sum(g["time"] for g in gs)
+            role = ""
+            if name == st.session_state.get("rqs1"): role = " · RQS 1"
+            elif name == st.session_state.get("rqs2"): role = " · RQS 2"
+            warn = ""
+            if name != UNASSIGNED and rooms and rooms < RQS_KB_LOW:
+                warn = "  ⚠ light"
+            elif rooms > KB_TARGET + 4:
+                warn = "  ⚠ heavy"
+            return (f"{name}{role}\n"
+                    f"{len(hks)} HK · {len(gs)} chart{'s' if len(gs) != 1 else ''} · {rooms} rm · {mins}m{warn}")
+
+        home_of = {}
+        for _hk, _gs in hk_charts.items():
             here = hk_insp.get(_hk) or {}
-            home = max(here, key=here.get) if here else UNASSIGNED
-            mins = sum(g["time"] for g in _gs)
-            card = f"{_hk}  ·  {len(_gs)} chart{'s' if len(_gs) != 1 else ''}  ·  {mins}m"
-            card_to_hk[card] = _hk
-            containers.setdefault(home, []).append(card)
+            home_of[_hk] = max(here, key=here.get) if here else UNASSIGNED
+
+        board, card_to_hk = {}, {}
+        for name in _rqs_names + [UNASSIGNED]:
+            board[name] = sorted(hk for hk, h in home_of.items() if h == name)
+        containers = []
+        for name, hks in board.items():
+            items = []
+            for hk in hks:
+                card = _hk_card(hk, hk_charts[hk])
+                card_to_hk[card] = hk
+                items.append(card)
+            containers.append({"header": _col_header(name, hks), "items": items})
+        header_to_name = {c["header"]: n for c, n in zip(containers, board.keys())}
+
+        KANBAN_CSS = """
+        .sortable-component{background:transparent;font-family:'DM Sans',sans-serif;
+            gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:6px}
+        .sortable-container{background:#eef2f7;border:1px solid #e0e6ee;
+            border-radius:16px;padding:9px;min-width:250px;max-width:280px}
+        .sortable-container-header{
+            background:linear-gradient(135deg,#1b4a80 0%,#2d72b8 55%,#4b93d1 100%);
+            color:#fff;border-radius:11px;padding:9px 12px;
+            font-size:.73rem;font-weight:700;line-height:1.5;
+            white-space:pre-line;letter-spacing:.01em;
+            box-shadow:0 3px 10px rgba(27,74,128,.24)}
+        .sortable-container-body{min-height:76px;padding-top:9px}
+        .sortable-item{background:#fff;border:1px solid #e0e6ee;border-radius:12px;
+            padding:10px 12px;margin:0 0 8px;font-size:.74rem;line-height:1.55;
+            color:#26313f;text-align:left;white-space:pre-line;font-weight:500;
+            box-shadow:0 1px 2px rgba(16,26,42,.05);cursor:grab;width:100%;
+            transition:box-shadow .15s ease,border-color .15s ease,transform .1s ease}
+        .sortable-item:first-line{font-weight:800;font-size:.86rem;color:#16202e}
+        .sortable-item:hover{border-color:#9fc0e0;transform:translateY(-2px);
+            box-shadow:0 8px 20px rgba(37,99,168,.16)}
+        .sortable-item.dragging{opacity:.9;cursor:grabbing;
+            box-shadow:0 14px 30px rgba(16,26,42,.22);border-color:#2d72b8}
+        """
 
         moved = None
         try:
             from streamlit_sortables import sort_items
-            _dnd_style = """
-            .sortable-component{background:transparent;font-family:'DM Sans',sans-serif}
-            .sortable-container{background:#f4f7fb;border:1px solid #e3e8ef;
-                border-radius:14px;padding:8px;min-width:210px}
-            .sortable-container-header{background:linear-gradient(135deg,#1b4a80,#2d72b8);
-                color:#fff;border-radius:10px;padding:7px 11px;font-size:.76rem;
-                font-weight:700;letter-spacing:.02em}
-            .sortable-container-body{min-height:54px;padding-top:7px}
-            .sortable-item{background:#fff;border:1px solid #dfe6ef;border-radius:10px;
-                padding:8px 11px;margin:5px 0;font-size:.78rem;font-weight:600;
-                color:#26313f;box-shadow:0 1px 2px rgba(16,26,42,.05);cursor:grab}
-            .sortable-item:hover{border-color:#9fc0e0;box-shadow:0 4px 12px rgba(37,99,168,.14)}
-            """
-            after = sort_items([{"header": k, "items": v} for k, v in containers.items()],
-                               multi_containers=True, direction="horizontal",
-                               custom_style=_dnd_style, key="reassign_dnd")
-            moved = {c["header"]: c["items"] for c in after}
+            after = sort_items(containers, multi_containers=True,
+                               direction="horizontal", custom_style=KANBAN_CSS,
+                               key="reassign_board")
+            moved = {header_to_name.get(c["header"], c["header"]): c["items"]
+                     for c in after}
         except Exception as _ex:
-            st.info("Drag-and-drop is unavailable here, so use the pickers below "
-                    f"instead — they do the same thing. ({_ex})")
+            st.info("Drag-and-drop could not load, so use the pickers below — they do "
+                    f"the same thing. ({_ex})")
             moved = {}
-            mc = st.columns(min(len(containers), 4))
+            mc = st.columns(4)
             for i, (_hk, _gs) in enumerate(sorted(hk_charts.items())):
-                here = hk_insp.get(_hk) or {}
-                home = max(here, key=here.get) if here else UNASSIGNED
                 opts = [UNASSIGNED] + _rqs_names
-                with mc[i % len(mc)]:
-                    pick = st.selectbox(_hk, opts, index=opts.index(home) if home in opts else 0,
-                                        key=f"reass_{_hk}")
-                    moved.setdefault(pick, []).append(
-                        f"{_hk}  ·  {len(_gs)} charts  ·  {sum(g['time'] for g in _gs)}m")
-                    card_to_hk.setdefault(
-                        f"{_hk}  ·  {len(_gs)} charts  ·  {sum(g['time'] for g in _gs)}m", _hk)
+                home = home_of.get(_hk, UNASSIGNED)
+                with mc[i % 4]:
+                    pick = st.selectbox(
+                        f'{_hk} · {len(_gs)} charts',
+                        opts, index=opts.index(home) if home in opts else 0,
+                        key=f"reass_{_hk}")
+                card = _hk_card(_hk, _gs)
+                card_to_hk[card] = _hk
+                moved.setdefault(pick, []).append(card)
 
         # What would change if this were applied?
         pending = {}
