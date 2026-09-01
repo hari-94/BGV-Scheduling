@@ -241,6 +241,26 @@ section[data-testid="stSidebar"] h3{
 }
 section[data-testid="stSidebar"] hr{border-color:var(--border)!important;}
 
+/* ── The attendance list ──
+   Two names to a row in a narrow sidebar, so the tick boxes have to sit tight
+   and the names have to stay legible at a small size. Someone who is off is
+   struck through and greyed rather than merely unticked, which is readable at
+   a glance down a list of thirty. */
+section[data-testid="stSidebar"] [data-testid="stCheckbox"]{
+  margin:0 0 -7px 0!important;}
+section[data-testid="stSidebar"] [data-testid="stCheckbox"] label{
+  gap:6px!important;align-items:center!important;}
+section[data-testid="stSidebar"] [data-testid="stCheckbox"] label p{
+  font-size:.76rem!important;line-height:1.25!important;color:#1f2733;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;}
+section[data-testid="stSidebar"] [data-testid="stCheckbox"]:has(input:not(:checked)) label p{
+  color:#9aa5b4!important;text-decoration:line-through;}
+section[data-testid="stSidebar"] [data-testid="stCheckbox"]:hover label p{
+  color:#12395f!important;}
+/* The rows are tight together, so give the columns a little air. */
+section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"]{
+  gap:8px!important;margin-bottom:2px!important;}
+
 /* ── The day's numbers ──
    These were dark-theme cards -- white numerals, glow shadows, translucent
    fills -- left over on a page that is now white, and every figure had the
@@ -3403,7 +3423,8 @@ with st.sidebar:
                 _persist_roster(); st.rerun()
 
         st.markdown("### Housekeepers")
-        st.caption("Check to mark present. Use the arrow buttons to move between buildings.")
+        st.caption("Tick who is in today. Buildings come from the staff sheet — "
+                   "use Bulk set below if one needs changing.")
         roster = st.session_state["hk_roster"]
         present_hk = []
         import copy as _copy
@@ -3492,35 +3513,31 @@ with st.sidebar:
                     else:
                         st.warning("No valid names found to set.")
 
-            for name in bld_hks:
-                c_chk, c_name, c_left, c_right = st.columns([0.4,3.2,0.6,0.6])
-                with c_chk:
-                    # Seed the widget's state from the roster once; thereafter the
-                    # widget (and Select/Unselect all, which write the same key)
-                    # drives the value. Passing both value= and an existing key
-                    # would conflict, so we only set the key.
-                    _ck = f"att_{_ATT_GEN}_{name}"
-                    if _ck not in st.session_state:
-                        st.session_state[_ck] = roster[name]["present"]
-                    checked = st.checkbox("", key=_ck, label_visibility="collapsed")
-                    if roster[name]["present"] != checked:
-                        roster[name]["present"] = checked
-                        _persist_roster()
-                    else:
-                        roster[name]["present"] = checked
-                with c_name:
-                    col2 = "inherit" if checked else "#94a3b8"
-                    td = "none" if checked else "line-through"
-                    st.markdown(f'<div style="font-size:.8rem;color:{col2};padding:4px 0;text-decoration:{td}">{e(name)}</div>', unsafe_allow_html=True)
-                with c_left:
-                    if bld > 1:
-                        if st.button("◀", key=f"ml_{name}", use_container_width=True):
-                            roster[name]["building"] = bld-1; _persist_roster(); st.rerun()
-                with c_right:
-                    if bld < 3:
-                        if st.button("▶", key=f"mr_{name}", use_container_width=True):
-                            roster[name]["building"] = bld+1; _persist_roster(); st.rerun()
-                if roster[name]["present"]: present_hk.append(name)
+            # Two names to a row, each its own tick box with the name as its
+            # label. The old row spent four columns on one person -- a box, the
+            # name, and two arrows for moving them between buildings. The
+            # buildings come from the staff sheet now, so the arrows are gone
+            # and the space pays for a list half as long to scroll.
+            _pairs = [bld_hks[i:i + 2] for i in range(0, len(bld_hks), 2)]
+            for _pair in _pairs:
+                _cols = st.columns(2, gap="small")
+                for _col, name in zip(_cols, _pair):
+                    with _col:
+                        # Seed the widget's state from the roster once; after
+                        # that the widget (and Select/Unselect all, which write
+                        # the same key) drives it. Passing value= alongside an
+                        # existing key would conflict, so only the key is set.
+                        _ck = f"att_{_ATT_GEN}_{name}"
+                        if _ck not in st.session_state:
+                            st.session_state[_ck] = roster[name]["present"]
+                        checked = st.checkbox(name, key=_ck)
+                        if roster[name]["present"] != checked:
+                            roster[name]["present"] = checked
+                            _persist_roster()
+                        else:
+                            roster[name]["present"] = checked
+                        if checked:
+                            present_hk.append(name)
 
         # Persist HK attendance immediately so it survives logout/login. The
         # authoritative store is the 'roster' record (via _persist_roster); we no
