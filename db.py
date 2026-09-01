@@ -347,6 +347,21 @@ def load_custom_options() -> dict:
         print(f"[db] load_custom_options error: {ex}")
         return {}
 
+def save_user_lang(username: str, code: str) -> None:
+    """Remember which language someone reads the app in."""
+    try:
+        _upsert_key(f"lang_{username}", {"lang": code})
+    except Exception as ex:
+        print(f"[db] save_user_lang error: {ex}")
+
+def load_user_lang(username: str) -> str | None:
+    try:
+        rec = _load_key(f"lang_{username}") or {}
+        return rec.get("lang")
+    except Exception as ex:
+        print(f"[db] load_user_lang error: {ex}")
+        return None
+
 def load_autoapply() -> dict:
     """Which date's roster has already been auto-applied from the schedule."""
     try:

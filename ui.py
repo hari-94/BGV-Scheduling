@@ -7,15 +7,20 @@ but only for the attendance controls — its navigation comes from here too.
 """
 import streamlit as st
 import auth
+import i18n
 
 #: Every destination, with the permission that reveals it. Order is the order
 #: they appear across the bar.
+#: (path, label, icon, permission, translation key). The label doubles as the
+#: `active` marker, so it stays English in the code and is translated only on
+#: the way to the screen.
 NAV_ITEMS = [
-    ("pages/4_My_Home.py",       "My Home",       "🏠", None),
-    ("cleaning_scheduler.py",    "Schedule",      "🧹", "can_generate"),
-    ("pages/1_Dashboard.py",     "Dashboard",     "📊", "can_view_dashboard"),
-    ("pages/3_Roster_Import.py", "Roster Import", "📥", "can_generate"),
-    ("pages/2_Admin.py",         "Admin",         "⚙️", "can_manage_users"),
+    ("pages/4_My_Home.py",       "My Home",       "🏠", None, "nav.my_home"),
+    ("pages/5_My_Rooms.py",      "My Rooms",      "🛎️", None, "nav.my_rooms"),
+    ("cleaning_scheduler.py",    "Schedule",      "🧹", "can_generate", "nav.schedule"),
+    ("pages/1_Dashboard.py",     "Dashboard",     "📊", "can_view_dashboard", "nav.dashboard"),
+    ("pages/3_Roster_Import.py", "Roster Import", "📥", "can_generate", "nav.roster_import"),
+    ("pages/2_Admin.py",         "Admin",         "⚙️", "can_manage_users", "nav.admin"),
 ]
 
 CHROME_CSS = """
@@ -142,7 +147,7 @@ CHROME_CSS = """
 #: the person and the way out. Without the spacer the links spread across the
 #: whole width and stop reading as a group.
 def _weights(n):
-    return [1.0] * n + [1.4, 1.5, 1.0]
+    return [1.0] * n + [1.0, 1.5, 0.9, 1.0]
 
 def topnav(active: str = "", hide_sidebar: bool = True):
     """Draw the horizontal navigation bar.
@@ -157,23 +162,34 @@ def topnav(active: str = "", hide_sidebar: bool = True):
                     '[data-testid="collapsedControl"]{display:none !important;}</style>',
                     unsafe_allow_html=True)
 
+    i18n.load_lang_for_user()
     items = [it for it in NAV_ITEMS if it[3] is None or auth.can(it[3])]
     who = st.session_state.get("display_name") or st.session_state.get("username", "")
-    role = str(st.session_state.get("role", "")).title()
+    role_key = f'role.{st.session_state.get("role", "")}'
+    role = i18n.t(role_key) if role_key in i18n.STRINGS else \
+        str(st.session_state.get("role", "")).title()
 
     cols = st.columns(_weights(len(items)), vertical_alignment="center")
-    for col, (path, label, icon, _perm) in zip(cols, items):
+    for col, (path, label, icon, _perm, tkey) in zip(cols, items):
         with col:
             if label == active:
                 # Marker div; the CSS reaches the link beside it. Streamlit
                 # gives no hook of its own for "this page link is current".
                 st.markdown('<span class="navactive"></span>', unsafe_allow_html=True)
-            st.page_link(path, label=label, icon=icon)
+            st.page_link(path, label=i18n.t(tkey), icon=icon)
     with cols[len(items) + 1]:
-        st.markdown(f'<div class="navwho">Signed in as <b>{who}</b><br>'
+        st.markdown(f'<div class="navwho">{i18n.t("nav.signed_in_as")} <b>{who}</b><br>'
                     f'<span class="role">{role}</span></div>', unsafe_allow_html=True)
     with cols[len(items) + 2]:
-        if st.button("Sign out", key=f"nav_signout_{active or 'x'}",
+        # The button shows the language you would be switching *to*, which is
+        # the only way round that reads correctly in both.
+        code, label = i18n.other()
+        if st.button(f"🌐 {label}", key=f"nav_lang_{active or 'x'}",
+                     use_container_width=True, help="English / Español"):
+            i18n.set_lang(code)
+            st.rerun()
+    with cols[len(items) + 3]:
+        if st.button(i18n.t("nav.sign_out"), key=f"nav_signout_{active or 'x'}",
                      use_container_width=True):
             auth.logout()
             st.switch_page("cleaning_scheduler.py")
