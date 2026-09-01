@@ -3403,15 +3403,13 @@ with st.sidebar:
                      if _att_now(n, "att_", v.get("present")))
         _rqs_in = sum(1 for n, v in _insp_roster_now.items()
                       if _att_now(n, "insp_att_", v))
-        _ds_in = len(st.session_state.get("ds_team") or [])
         st.markdown(f"""
 <div class="sbtop">
   <div class="sbday">{_datetime.now(_MTN_TZ).strftime("%A")}</div>
   <div class="sbdate">{_datetime.now(_MTN_TZ).strftime("%d %B %Y")}</div>
   <div class="sbstats">
     <div><b>{_hk_in}</b><span>Housekeepers</span></div>
-    <div><b>{_rqs_in}</b><span>RQS</span></div>
-    <div><b>{_ds_in}</b><span>Daily svc</span></div>
+    <div><b>{_rqs_in}</b><span>RQS on duty</span></div>
   </div>
 </div>""", unsafe_allow_html=True)
         _ri_note = st.session_state.get("roster_import_note")
@@ -3450,7 +3448,6 @@ with st.sidebar:
         _rmsg = st.session_state.pop("_reload_msg", None)
         if _rmsg:
             {"ok": st.success, "info": st.info, "warn": st.warning}[_rmsg[0]](_rmsg[1])
-        st.markdown("---")
         with st.expander("Add or remove a housekeeper"):
             col_a, col_b = st.columns([2,1])
             with col_a: new_hk_name = st.text_input("Name", key="new_hk_inp")
@@ -3499,25 +3496,30 @@ with st.sidebar:
                 unsafe_allow_html=True)
 
             # ── Select all / none for this building ──────────────────────────
-            c_all, c_none = st.columns(2)
-            with c_all:
-                if st.button("Select all", key=f"selall_b{bld}", use_container_width=True):
-                    for _n in bld_hks:
-                        roster[_n]["present"] = True
-                        # also update the checkbox widget's own state so the tick
-                        # reflects the change after rerun
-                        st.session_state[f"att_{_ATT_GEN}_{_n}"] = True
-                    _persist_roster(); st.rerun()
-            with c_none:
-                if st.button("Unselect all", key=f"selnone_b{bld}", use_container_width=True):
-                    for _n in bld_hks:
-                        roster[_n]["present"] = False
-                        st.session_state[f"att_{_ATT_GEN}_{_n}"] = False
-                    _persist_roster(); st.rerun()
-
-            # ── Bulk replace: paste a list of names (e.g. from Excel) to replace
-            # ALL housekeepers currently in this building ────────────────────
-            with st.expander(f"Bulk set Building {bld} names"):
+            # Marking everyone in or out, and pasting a new list of names, are
+            # occasional jobs. Left out in the open they put six buttons and
+            # three panels between you and the ticking you came to do, so they
+            # fold away and open when they are wanted.
+            with st.expander(f"Building {bld} tools"):
+                c_all, c_none = st.columns(2)
+                with c_all:
+                    if st.button("All in", key=f"selall_b{bld}",
+                                 use_container_width=True):
+                        for _n in bld_hks:
+                            roster[_n]["present"] = True
+                            # also update the checkbox widget's own state so the
+                            # tick reflects the change after rerun
+                            st.session_state[f"att_{_ATT_GEN}_{_n}"] = True
+                        _persist_roster(); st.rerun()
+                with c_none:
+                    if st.button("All out", key=f"selnone_b{bld}",
+                                 use_container_width=True):
+                        for _n in bld_hks:
+                            roster[_n]["present"] = False
+                            st.session_state[f"att_{_ATT_GEN}_{_n}"] = False
+                        _persist_roster(); st.rerun()
+                st.caption(f"Replace the Building {bld} list — paste names, "
+                           f"one per line")
                 _bulk = st.text_area(
                     "Paste names (one per line or comma-separated)",
                     key=f"bulk_hk_b{bld}", height=90,
@@ -3589,8 +3591,7 @@ with st.sidebar:
         if roster != _hk_before:
             _persist_roster()
 
-        st.markdown("---")
-        with st.expander("Add / Remove Inspector"):
+        with st.expander("Add or remove an inspector"):
             new_insp = st.text_input("Name", key="new_insp_inp")
             if st.button("Add Inspector", key="btn_add_insp"):
                 n = new_insp.strip()
@@ -3618,19 +3619,25 @@ with st.sidebar:
             f'{_n_insp_in}/{len(insp_roster)}</span></div>',
             unsafe_allow_html=True)
         # ── Shuffle RQS order so they pair with different housekeepers ───────
-        if st.button("Shuffle RQS order", key="btn_shuffle_rqs", use_container_width=True,
-                     help="Randomize inspector order so RQS get paired with different housekeepers each run"):
-            import random as _rnd
-            _items = list(insp_roster.items())
-            _rnd.shuffle(_items)
-            st.session_state["insp_roster"] = dict(_items)
-            insp_roster = st.session_state["insp_roster"]
-            # clear cached RQS role picks so they re-pick from the new order
-            for _k in ("rqs1","rqs2"):
-                if _k in st.session_state: st.session_state[_k] = ""
-            _persist_roster()
-            st.toast("RQS order shuffled")
-            st.rerun()
+        with st.expander("RQS tools"):
+            st.caption("Pairs the RQS with different housekeepers next time "
+                       "the schedule is built.")
+            if st.button("Shuffle RQS order", key="btn_shuffle_rqs",
+                         use_container_width=True,
+                         help="Randomize inspector order so RQS get paired "
+                              "with different housekeepers each run"):
+                import random as _rnd
+                _items = list(insp_roster.items())
+                _rnd.shuffle(_items)
+                st.session_state["insp_roster"] = dict(_items)
+                insp_roster = st.session_state["insp_roster"]
+                # clear cached RQS picks so they re-pick from the new order
+                for _k in ("rqs1", "rqs2"):
+                    if _k in st.session_state:
+                        st.session_state[_k] = ""
+                _persist_roster()
+                st.toast("RQS order shuffled")
+                st.rerun()
         present_insp = []
         _insp_before = dict(insp_roster)
         # Two to a row, matching the housekeepers above.
