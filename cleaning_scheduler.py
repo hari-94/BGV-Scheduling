@@ -4792,6 +4792,17 @@ td{{transition:background .15s ease}}
             g["c120"] = sum(1 for r in g["rooms"] if r.get("time") == 120)
             g["cross_bld"] = len(g["blds"]) > 1
 
+        _SVC_PREFIX = {SVC_FC: "FC", SVC_IH: "IH", SVC_DS: "DS", SVC_DV: "DV"}
+
+        def _free_label(svc):
+            """A label of the right family that no chart is using yet."""
+            used = {g.get("label") for g in fg}
+            pre = _SVC_PREFIX.get(svc, "FC")
+            for lbl in make_labels(pre, len(fg) + 27):
+                if lbl not in used:
+                    return lbl
+            return f"{pre}-{len(fg) + 1}"
+
         def _move_room(code, src_hk, dst_hk):
             """Move one room across housekeepers, or return why it could not."""
             src = next((g for g in fg if g.get("housekeeper") == src_hk
@@ -4799,16 +4810,22 @@ td{{transition:background .15s ease}}
             if src is None:
                 return f"{code}: no longer on {src_hk}"
             room = next(r for r in src["rooms"] if str(r.get("room")) == code)
-            # Prefer a chart of the same service, so a Daily Service room does
-            # not land in a Full Clean chart and quietly change what it is.
+            svc = src.get("service_type")
             cands = [g for g in fg if g.get("housekeeper") == dst_hk
                      and not g.get("verify_group")]
-            dst = next((g for g in cands
-                        if g.get("service_type") == src.get("service_type")), None)
-            if dst is None and cands:
-                dst = cands[0]
+            dst = next((g for g in cands if g.get("service_type") == svc), None)
             if dst is None:
-                return f"{code}: {dst_hk} has no chart to put it in"
+                # The service belongs to the room, not to whoever cleans it.
+                # Dropping a Full Clean into the only chart a Daily Service
+                # person has would relabel the room as a Daily Service and
+                # cost it three hours of its time. Open a second chart of the
+                # right service for them instead -- someone can carry a DS
+                # round and a Full Clean room, and the board should say so.
+                dst = mk([], svc)
+                dst.update({"label": _free_label(svc), "housekeeper": dst_hk,
+                            "inspector": (cands[0].get("inspector")
+                                          if cands else "")})
+                fg.append(dst)
             src["rooms"].remove(room)
             dst["rooms"].append(room)
             _rechart(src); _rechart(dst)
