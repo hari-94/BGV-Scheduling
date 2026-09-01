@@ -1,4 +1,7 @@
-streamlit>=1.32.0
+# Pinned, not floating. With `streamlit>=1.32` the deployment installed
+# whatever was newest while development sat on an old copy, so the app being
+# tested was never the app being served.
+streamlit==1.62.0
 pandas>=2.0.0
 supabase>=2.3.0
 plotly>=5.18.0

@@ -1,10 +1,95 @@
+# Streamlit's own theme. Much of this used to be hand-written CSS aimed at
+# private data-testid selectors, which broke whenever Streamlit renamed one.
+# These are the supported way to say the same things, so the buttons, inputs
+# and tables Streamlit draws match the cards the app draws itself.
+#
+# Note on ordering: every plain [theme] setting has to appear ABOVE the
+# [[theme.fontFaces]] blocks. TOML gives keys after an array-of-tables to that
+# table, so anything written below would quietly become a property of a font
+# instead of the theme -- which is exactly what happened the first time.
+
 [theme]
 base = "light"
 primaryColor = "#2563a8"
 backgroundColor = "#f4f5f7"
 secondaryBackgroundColor = "#ffffff"
 textColor = "#1f2733"
-font = "sans serif"
+
+# The app's own cards have used DM Sans, Syne and DM Mono for a while, but
+# Streamlit's widgets kept their default face, so a button never quite matched
+# the card it sat on. Registering the faces settles it everywhere.
+font = "DM Sans"
+headingFont = "Syne"
+codeFont = "DM Mono"
+baseFontSize = 15
+
+# Headings step down gently: this app puts a lot of small section titles close
+# together, and the default scale shouts at that density.
+headingFontSizes = ["1.85rem", "1.35rem", "1.1rem", "0.95rem", "0.85rem", "0.78rem"]
+headingFontWeights = [800, 700, 700, 700, 700, 700]
+
+# Rounded, quiet edges to match the cards, tiles and Kanban columns.
+baseRadius = "large"
+buttonRadius = "large"
+borderColor = "#e3e8ef"
+dataframeBorderColor = "#e3e8ef"
+dataframeHeaderBackgroundColor = "#f1f5f9"
+showWidgetBorder = true
+showSidebarBorder = true
+linkColor = "#1c4a78"
+linkUnderline = false
+
+# The status colours used across the Live board, My Rooms and the roster grid,
+# so Streamlit's own alerts and badges agree with them.
+greenColor = "#22b365"
+blueColor = "#3b82f6"
+yellowColor = "#f0b429"
+redColor = "#e5484d"
+violetColor = "#8b5cf6"
+grayColor = "#94a3b8"
+chartCategoricalColors = ["#2563a8", "#22b365", "#f0b429", "#8b5cf6", "#e5484d", "#3b82f6"]
+
+[[theme.fontFaces]]
+family = "DM Sans"
+url = "https://fonts.gstatic.com/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K4.woff2"
+weight = 400
+style = "normal"
+
+[[theme.fontFaces]]
+family = "DM Sans"
+url = "https://fonts.gstatic.com/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K4.woff2"
+weight = 600
+style = "normal"
+
+[[theme.fontFaces]]
+family = "DM Sans"
+url = "https://fonts.gstatic.com/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K4.woff2"
+weight = 700
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Syne"
+url = "https://fonts.gstatic.com/s/syne/v24/8vIH7w4qzmVxm2BL9A.woff2"
+weight = 700
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Syne"
+url = "https://fonts.gstatic.com/s/syne/v24/8vIH7w4qzmVxm2BL9A.woff2"
+weight = 800
+style = "normal"
+
+[[theme.fontFaces]]
+family = "DM Mono"
+url = "https://fonts.gstatic.com/s/dmmono/v16/aFTU7PB1QTsUX8KYthqQBA.woff2"
+weight = 400
+style = "normal"
+
+[theme.sidebar]
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f7fb"
+borderColor = "#e6ebf2"
+baseRadius = "large"
 
 [client]
 showSidebarNavigation = false
