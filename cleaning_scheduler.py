@@ -396,7 +396,13 @@ header[data-testid="stHeader"]{
   height:0 !important;
   min-height:0 !important;
 }
-[data-testid="stToolbar"]{display:none !important;}
+/* Not display:none -- the button that reopens the sidebar lives in here.
+   See ui.CHROME_CSS, which empties the toolbar instead of hiding it. */
+[data-testid="stToolbar"]{background:transparent !important;
+  pointer-events:none !important;}
+[data-testid="stMainMenu"],[data-testid="stMainMenuButton"],
+[data-testid="stAppDeployButton"],[data-testid="stStatusWidget"],
+[data-testid="stToolbarActions"]{display:none !important;}
 [data-testid="stDecoration"]{display:none !important;}
 /* Hide Streamlit's auto-generated page nav — we use a custom role-based nav */
 [data-testid="stSidebarNav"]{display:none !important;}

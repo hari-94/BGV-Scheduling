@@ -171,19 +171,27 @@ CHROME_CSS = """
 }
 
 /* ── Getting the sidebar back ──
-   Every page flattens header[data-testid="stHeader"] to nothing, and in
-   Streamlit 1.62 that header is where the button that reopens a collapsed
-   sidebar lives -- so collapsing it hid the only way to bring it back. The
-   button is lifted out of that header and pinned to the corner instead.
-   (The old rules hid "collapsedControl", a name Streamlit stopped using
-   several versions ago, so they were doing nothing at all.) */
+   The button that reopens a collapsed sidebar is rendered INSIDE
+   [data-testid="stToolbar"], which this app was hiding wholesale. A hidden
+   parent cannot be overridden from the child, which is why forcing the button
+   visible did nothing at all: it was inside a display:none box the whole time.
+   So the toolbar stays displayed and is emptied of the things we do not want
+   -- the menu, the deploy button, the status widget -- rather than being
+   switched off with the one control we need still inside it. The bar itself
+   takes no clicks; the button takes its own back. */
+[data-testid="stToolbar"]{
+  display:flex !important;background:transparent !important;
+  pointer-events:none !important;padding:0 !important;}
+[data-testid="stMainMenu"],[data-testid="stMainMenuButton"],
+[data-testid="stAppDeployButton"],[data-testid="stStatusWidget"],
+[data-testid="stToolbarActions"],#MainMenu{display:none !important;}
 [data-testid="stExpandSidebarButton"]{
   display:flex !important;visibility:visible !important;opacity:1 !important;
+  pointer-events:auto !important;
   position:fixed !important;top:10px;left:10px;z-index:1000;
   background:#ffffff !important;border:1px solid #dbe3ec !important;
   border-radius:11px !important;box-shadow:0 3px 10px rgba(16,26,42,.13) !important;
-  width:36px;height:36px;align-items:center;justify-content:center;
-}
+  width:36px;height:36px;align-items:center;justify-content:center;}
 [data-testid="stExpandSidebarButton"]:hover{
   border-color:#9fc0e0 !important;background:#f4f8fc !important;}
 [data-testid="stExpandSidebarButton"] svg{color:#2d72b8 !important;}
