@@ -16,7 +16,7 @@ import i18n
 #: the way to the screen.
 NAV_ITEMS = [
     ("pages/4_My_Home.py",       "My Home",       "🏠", None, "nav.my_home"),
-    ("pages/5_My_Rooms.py",      "My Rooms",      "🛎️", None, "nav.my_rooms"),
+    ("pages/5_My_Rooms.py",      "My Rooms",      "🛎️", "_my_rooms", "nav.my_rooms"),
     ("cleaning_scheduler.py",    "Schedule",      "🧹", "can_generate", "nav.schedule"),
     ("pages/1_Dashboard.py",     "Dashboard",     "📊", "can_view_dashboard", "nav.dashboard"),
     ("pages/3_Roster_Import.py", "Roster Import", "📥", "can_generate", "nav.roster_import"),
@@ -178,6 +178,30 @@ CHROME_CSS = """
 def _weights(n):
     return [1.0] * n + [0.6, 1.5, 0.9, 1.0]
 
+def _visible(perm) -> bool:
+    """Whether a nav entry belongs to this person.
+
+    My Rooms is a special case rather than a permission. A housekeeper always
+    has it, because an empty day is itself worth seeing. An admin always has
+    it, because they look after everyone. An RQS is neither: they are on the
+    page only on the days they are carrying rooms themselves, so the link
+    appears only then.
+    """
+    if perm is None:
+        return True
+    if perm != "_my_rooms":
+        return auth.can(perm)
+    role = st.session_state.get("role", "")
+    if role in ("housekeeper", "admin"):
+        return True
+    try:
+        import assignments
+        return assignments.has_rooms_today()
+    except Exception as ex:            # never let a lookup cost the whole bar
+        print(f"[ui] my-rooms visibility check failed: {ex}")
+        return False
+
+
 def topnav(active: str = "", hide_sidebar: bool = True):
     """Draw the horizontal navigation bar.
 
@@ -192,7 +216,7 @@ def topnav(active: str = "", hide_sidebar: bool = True):
                     unsafe_allow_html=True)
 
     i18n.load_lang_for_user()
-    items = [it for it in NAV_ITEMS if it[3] is None or auth.can(it[3])]
+    items = [it for it in NAV_ITEMS if _visible(it[3])]
     who = st.session_state.get("display_name") or st.session_state.get("username", "")
     role_key = f'role.{st.session_state.get("role", "")}'
     role = i18n.t(role_key) if role_key in i18n.STRINGS else \

@@ -7,10 +7,11 @@ database on every run, so a swap or a room move an RQS makes upstairs shows up
 here without anyone reloading anything.
 """
 import streamlit as st
-import sys, os, datetime, re, hashlib
+import sys, os, datetime, hashlib
 import html as _html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, i18n
+import assignments
 import ui
 
 st.set_page_config(page_title="My Rooms", page_icon="🛎️", layout="wide")
@@ -113,19 +114,8 @@ me_user = cu.get("username", "")
 today = clock.today()
 
 
-def _norm(s):
-    return re.sub(r"[^a-z]", "", str(s or "").lower())
-
-
 # ── today's published schedule ───────────────────────────────────────────────
-def _load():
-    """Today's charts and room statuses, straight from the database.
-
-    Deliberately uncached: this page exists to show what an RQS just changed.
-    """
-    sched = db.load_full_schedule() or {}
-    return sched.get("groups_data") or [], db.get_room_statuses()
-
+_load = assignments.todays_charts
 
 charts, statuses = _load()
 
@@ -135,30 +125,32 @@ if not charts:
                 unsafe_allow_html=True)
     st.stop()
 
-hk_names = sorted({g.get("housekeeper", "") for g in charts
-                   if g.get("housekeeper")})
+hk_names = assignments.housekeepers(charts)
 
 # Sign-in names rarely match the schedule exactly, so try the display name and
-# the username, then fall back to asking.
-mine = None
-for cand in (me_display, me_user):
-    n = _norm(cand)
-    if not n:
-        continue
-    mine = next((h for h in hk_names if _norm(h) == n), None) \
-        or next((h for h in hk_names
-                 if _norm(h).startswith(n) or n.startswith(_norm(h))), None)
-    if mine:
-        break
+# then the username.
+mine = assignments.match_name(hk_names, me_display, me_user)
 
-# A supervisor may look at anyone's day; everyone else sees their own.
-can_browse = auth.can("can_view_insp_tab")
-if mine is None or can_browse:
-    pick = st.selectbox(
-        T("rooms.whose") if can_browse else T("rooms.not_matched"),
-        hk_names, index=hk_names.index(mine) if mine in hk_names else 0,
-        key="mr_person")
-    mine = pick
+# Only a manager looks after everyone, so only a manager may browse. An RQS is
+# here for their own rooms if they are carrying any, and for nothing else --
+# the boards on the Schedule page are where they look after the team.
+can_browse = auth.can("can_manage_users")
+role = st.session_state.get("role", "")
+
+if can_browse:
+    mine = st.selectbox(
+        T("rooms.whose"), hk_names,
+        index=hk_names.index(mine) if mine in hk_names else 0, key="mr_person")
+elif mine is None and role == "housekeeper":
+    # Her name is on the schedule in some other spelling; let her find it
+    # rather than telling her she has no work.
+    mine = st.selectbox(T("rooms.not_matched"), hk_names, key="mr_person")
+elif mine is None:
+    st.markdown(f'<div class="mrcard"><div class="mrroom">'
+                f'{e(T("rooms.none_today"))}</div>'
+                f'<div class="mrmeta">{e(T("rooms.none_body"))}</div></div>',
+                unsafe_allow_html=True)
+    st.stop()
 
 my_charts = [g for g in charts if g.get("housekeeper") == mine]
 my_rooms = [(g, r) for g in my_charts for r in (g.get("rooms") or [])]
