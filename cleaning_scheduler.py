@@ -241,6 +241,32 @@ section[data-testid="stSidebar"] h3{
 }
 section[data-testid="stSidebar"] hr{border-color:var(--border)!important;}
 
+/* ── The sidebar's own header ──
+   A date and three live counts, in place of a card that repeated the top bar
+   in a colour you could barely read. */
+.sbtop{background:linear-gradient(135deg,#12395f 0%,#255f9c 62%,#3d84c4 100%);
+  color:#fff;border-radius:14px;padding:13px 15px 11px;margin:0 0 12px;
+  box-shadow:0 5px 16px rgba(18,57,95,.22);}
+.sbday{font-family:'Syne',sans-serif;font-weight:800;font-size:1.05rem;
+  line-height:1.1;letter-spacing:-.01em;}
+.sbdate{font-size:.7rem;color:#cfe0f2;margin-top:1px;}
+.sbstats{display:flex;gap:6px;margin-top:11px;}
+.sbstats>div{flex:1;background:rgba(255,255,255,.15);border-radius:9px;
+  padding:5px 4px;text-align:center;}
+.sbstats b{display:block;font-family:'DM Sans',sans-serif;font-size:1.05rem;
+  font-weight:800;line-height:1.15;font-variant-numeric:tabular-nums;}
+.sbstats span{font-size:.53rem;text-transform:uppercase;letter-spacing:.06em;
+  color:#d3e3f3;}
+/* Section labels: the same voice as the building bars, without the weight of
+   a markdown heading. */
+.sbsec{font-family:'DM Mono',monospace;font-size:.62rem;font-weight:600;
+  text-transform:uppercase;letter-spacing:.13em;color:#5b6b7e;
+  margin:16px 0 2px;padding-bottom:5px;border-bottom:1px solid #e6ebf2;}
+section[data-testid="stSidebar"] [data-testid="stExpander"]{
+  border-color:#e6ebf2!important;background:#fbfcfe!important;}
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary{
+  font-size:.76rem!important;color:#5b6b7e!important;}
+
 /* ── The attendance list ──
    Two names to a row in a narrow sidebar, so the tick boxes have to sit tight
    and the names have to stay legible at a small size. Someone who is off is
@@ -3332,21 +3358,11 @@ def insp_card_html(insp, fg, color):
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     _cu = auth.current_user()
-    _ac, _bg = auth.ROLE_COLORS.get(_cu["role"], ("#6366f1","rgba(99,102,241,.15)"))
-    st.markdown(f"""
-<div style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.25);
-            border-radius:10px;padding:10px 14px;display:flex;justify-content:space-between;
-            align-items:center;margin-bottom:10px;
-            box-shadow:0 0 16px rgba(99,102,241,.1)">
-  <div>
-    <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:.85rem;
-                color:#a5b4fc">{_cu["username"]}</div>
-    <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#475569;
-                text-transform:uppercase;letter-spacing:.08em">{_cu["role"].title()}</div>
-  </div>
-  <span style="font-size:1.3rem;opacity:.8">{"" if _cu["role"]=="admin" else "" if _cu["role"]=="rqs" else ""}</span>
-</div>""", unsafe_allow_html=True)
-    # Sign out lives in the top bar now, the same place as on every page.
+    _ac, _bg = auth.ROLE_COLORS.get(_cu["role"], ("#6366f1", "rgba(99,102,241,.15)"))
+    # The signed-in card that used to sit here said the same thing as the top
+    # bar, in pale lavender on lavender, and took the best space in the
+    # sidebar to do it. Who you are belongs in the bar; this space belongs to
+    # the day. Sign out is up there too.
 
     # ── Role-based navigation ──────────────────────────────────────────────
     # admin Schedule + Dashboard + Admin
@@ -3381,7 +3397,23 @@ with st.sidebar:
             answer.
             """
             return bool(st.session_state.get(f"{prefix}{_ATT_GEN}_{name}", fallback))
-        st.markdown("## Daily Attendance")
+        _hk_roster_now = st.session_state.get("hk_roster") or {}
+        _insp_roster_now = st.session_state.get("insp_roster") or {}
+        _hk_in = sum(1 for n, v in _hk_roster_now.items()
+                     if _att_now(n, "att_", v.get("present")))
+        _rqs_in = sum(1 for n, v in _insp_roster_now.items()
+                      if _att_now(n, "insp_att_", v))
+        _ds_in = len(st.session_state.get("ds_team") or [])
+        st.markdown(f"""
+<div class="sbtop">
+  <div class="sbday">{_datetime.now(_MTN_TZ).strftime("%A")}</div>
+  <div class="sbdate">{_datetime.now(_MTN_TZ).strftime("%d %B %Y")}</div>
+  <div class="sbstats">
+    <div><b>{_hk_in}</b><span>Housekeepers</span></div>
+    <div><b>{_rqs_in}</b><span>RQS</span></div>
+    <div><b>{_ds_in}</b><span>Daily svc</span></div>
+  </div>
+</div>""", unsafe_allow_html=True)
         _ri_note = st.session_state.get("roster_import_note")
         if _ri_note:
             st.markdown(f'<div style="background:#eff6ff;border:1px solid #bfdbfe;'
@@ -3419,7 +3451,7 @@ with st.sidebar:
         if _rmsg:
             {"ok": st.success, "info": st.info, "warn": st.warning}[_rmsg[0]](_rmsg[1])
         st.markdown("---")
-        with st.expander("Add / Remove Housekeeper"):
+        with st.expander("Add or remove a housekeeper"):
             col_a, col_b = st.columns([2,1])
             with col_a: new_hk_name = st.text_input("Name", key="new_hk_inp")
             with col_b: new_hk_bld = st.selectbox("Bldg", [1,2,3], key="new_hk_bld")
@@ -3433,9 +3465,8 @@ with st.sidebar:
                 del st.session_state["hk_roster"][rm_hk]
                 _persist_roster(); st.rerun()
 
-        st.markdown("### Housekeepers")
-        st.caption("Tick who is in today. Buildings come from the staff sheet — "
-                   "use Bulk set below if one needs changing.")
+        st.markdown('<div class="sbsec">Housekeepers</div>', unsafe_allow_html=True)
+        st.caption("Tick who is in. Buildings come from the staff sheet.")
         roster = st.session_state["hk_roster"]
         present_hk = []
         import copy as _copy
@@ -3569,7 +3600,7 @@ with st.sidebar:
             if st.button("Remove", key="btn_rm_insp") and rm_insp != "—":
                 del st.session_state["insp_roster"][rm_insp]; _persist_roster(); st.rerun()
 
-        st.markdown("### Inspectors")
+        st.markdown('<div class="sbsec">Inspectors</div>', unsafe_allow_html=True)
         insp_roster = st.session_state["insp_roster"]
         # The same header the buildings carry, so the sidebar reads one way all
         # the way down: who this is, and how many of them are in.
