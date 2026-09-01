@@ -5179,401 +5179,320 @@ td{{transition:background .15s ease}}
                         st.rerun()
 
     with tab_live:
+        # ── Live board ────────────────────────────────────────────────────────
+        # Every room on one screen, coloured by where it has got to. The old
+        # version buried them in an expander per chart with four buttons each,
+        # so nothing could be seen at a glance and a shift with 150 rooms took
+        # a lot of scrolling. Display is a plain grid; acting on a room happens
+        # in one panel underneath, which also makes it possible to move several
+        # rooms at once.
+        import roomstatus as _rst
+
         _tmsg = st.session_state.pop("_live_toast", None)
         if _tmsg:
-            try: st.toast(_tmsg)
-            except Exception: pass
-        import json as _json
-        _NOW = _now_iso # shared Mountain-time timestamp helper
-
-        # ── Status pipeline definition ─────────────────────────────────────────
-        STATUS_FLOW = ["pending","already_clean","cleaning_started","cleaning_done","inspected"]
-        STATUS_META = {
-            "pending": {"icon":"","label":"Pending","color":"#334155","bg":"rgba(51,65,85,.25)","border":"rgba(71,85,105,.4)"},
-            "already_clean": {"icon":"","label":"Already Clean","color":"#34d399","bg":"rgba(52,211,153,.12)","border":"rgba(52,211,153,.35)"},
-            "cleaning_started":{"icon":"","label":"Cleaning...","color":"#fbbf24","bg":"rgba(251,191,36,.12)","border":"rgba(251,191,36,.35)"},
-            "cleaning_done": {"icon":"","label":"Cleaned","color":"#60a5fa","bg":"rgba(96,165,250,.12)","border":"rgba(96,165,250,.35)"},
-            "inspected": {"icon":"","label":"Inspected ","color":"#a78bfa","bg":"rgba(167,139,250,.15)","border":"rgba(167,139,250,.4)"},
-        }
-
-        # ── Load / init room statuses ──────────────────────────────────────────
-        if "room_statuses" not in st.session_state:
-            st.session_state["room_statuses"] = {}
-
-        def _load_statuses():
             try:
-                st.session_state["room_statuses"] = db.get_room_statuses()
+                st.toast(_tmsg)
             except Exception:
-                pass # table may not exist yet — use session-only tracking
+                pass
 
-        def _save_status(room, fields):
-            rs = st.session_state["room_statuses"]
-            if room not in rs:
-                rs[room] = {"room": room, "status": "pending"}
-            rs[room].update(fields)
-            rs[room]["updated_by"] = st.session_state.get("username","?")
+        def _live_load():
+            """Status rows for today, straight from the database."""
             try:
-                db.upsert_room_status(room, fields | {
-                    "updated_by": st.session_state.get("username","?")
-                })
+                return db.get_room_statuses() or {}
             except Exception:
-                pass # persist in session even if DB fails
+                return {}
 
-        def _init_statuses_from_schedule():
-            """Pre-populate room_statuses from the schedule if not in DB."""
-            rs = st.session_state["room_statuses"]
+        def _live_rows():
+            """One row per room: what the schedule says, plus what has happened.
+
+            The schedule is the source of truth for who a room belongs to; the
+            status table only says how far along it is. Anything the schedule
+            no longer contains is dropped, so yesterday's rooms cannot linger.
+            """
+            saved = _live_load()
+            out = []
             for g in fg:
-                for r in g["rooms"]:
-                    rm = r["room"]
-                    if rm not in rs:
-                        rs[rm] = {
-                            "room": rm,
-                            "status": "pending",
-                            "group_label": g.get("label",""),
-                            "housekeeper": g.get("housekeeper",""),
-                            "inspector": g.get("inspector",""),
-                            "svc": r.get("service",""),
-                            "guest": r.get("guest",""),
-                            "pet": r.get("pet",""),
-                            "late": r.get("late_checkout",""),
-                            "bld": r.get("bld",""),
-                        }
-                    else:
-                        # Always keep schedule info in sync, EXCEPT housekeeper
-                        # if the room was swapped (swapped_from set) — keep DB HK.
-                        rs[rm]["group_label"] = g.get("label","")
-                        if not rs[rm].get("swapped_from"):
-                            rs[rm]["housekeeper"] = g.get("housekeeper","")
-                        rs[rm]["inspector"] = g.get("inspector","")
-                        rs[rm]["svc"] = r.get("service","")
-                        rs[rm]["guest"] = r.get("guest","")
-                        rs[rm]["pet"] = r.get("pet","")
-                        rs[rm]["late"] = r.get("late_checkout","")
-                        rs[rm]["bld"] = r.get("bld","")
+                if g.get("service_type") == SVC_DV and not st.session_state.get(
+                        "live_show_dv"):
+                    continue
+                for r in g.get("rooms") or []:
+                    code = str(r.get("room", ""))
+                    if not code:
+                        continue
+                    rec = saved.get(code) or {}
+                    out.append({
+                        "room": code,
+                        "status": _rst.normalise(rec.get("status")),
+                        "hk": rec.get("swapped_from") and rec.get("housekeeper") \
+                            or g.get("housekeeper", "") or "—",
+                        "insp": g.get("inspector", "") or "—",
+                        "label": g.get("label", ""),
+                        "svc": g.get("service_type", ""),
+                        "bld": r.get("bld", ""),
+                        "floor": r.get("floor", ""),
+                        "mins": r.get("time", 0),
+                        "pet": str(r.get("pet", "")).strip(),
+                        "late": bool(r.get("late_checkout")),
+                        "started": rec.get("started_at"),
+                        "cleaned": rec.get("cleaned_at"),
+                        "inspected": rec.get("inspected_at"),
+                        "at": rec.get("updated_at") or rec.get("cleaned_at")
+                              or rec.get("started_at"),
+                        "by": rec.get("updated_by") or "",
+                        "note": rec.get("notes") or "",
+                    })
+            return out
 
-        # Load from DB on first visit to this tab, then init from schedule
-        if not st.session_state.get("_live_loaded"):
-            st.session_state["_live_loaded"] = True
-            _load_statuses()
-        _init_statuses_from_schedule()
-
-        rs = st.session_state["room_statuses"]
-
-        # ── Header bar ────────────────────────────────────────────────────────
-        # Progress summary — only count non-DV rooms consistently
-        _live_rooms = [r for r in rs.values() if r.get("svc","") != "Dust n Vac"]
-        total_rooms_live = len(_live_rooms)
-        n_clean = sum(1 for r in _live_rooms if r.get("status") in ("already_clean","cleaning_done","inspected"))
-        n_insp = sum(1 for r in _live_rooms if r.get("status") == "inspected")
-        n_active = sum(1 for r in _live_rooms if r.get("status") == "cleaning_started")
-        pct_done = int(n_clean / max(total_rooms_live,1) * 100)
-
-        st.markdown(f"""
-    <div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);
-                border-radius:12px;padding:14px 18px;margin-bottom:16px;
-                display:flex;align-items:center;gap:20px;flex-wrap:wrap">
-      <div style="flex:1;min-width:200px">
-        <div style="font-family:'DM Mono',monospace;font-size:.6rem;color:#475569;
-                    text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Overall Progress</div>
-        <div style="background:rgba(255,255,255,.06);border-radius:99px;height:8px;overflow:hidden;border:1px solid rgba(255,255,255,.05)">
-          <div style="background:linear-gradient(90deg,#6366f1,#22d3ee);width:{pct_done}%;height:8px;
-                      border-radius:99px;box-shadow:0 0 8px rgba(99,102,241,.5);transition:width .4s"></div>
-        </div>
-        <div style="font-family:'DM Mono',monospace;font-size:.68rem;color:#94a3b8;margin-top:4px">
-          {n_clean}/{total_rooms_live} rooms done &nbsp;·&nbsp; {pct_done}%
-        </div>
-      </div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <div style="text-align:center;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.25);
-                    border-radius:8px;padding:8px 14px">
-          <div style="font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;color:#fbbf24;
-                      text-shadow:0 0 10px rgba(251,191,36,.4)">{n_active}</div>
-          <div style="font-size:.6rem;color:#94a3b8;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.06em">Active</div>
-        </div>
-        <div style="text-align:center;background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.25);
-                    border-radius:8px;padding:8px 14px">
-          <div style="font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;color:#60a5fa;
-                      text-shadow:0 0 10px rgba(96,165,250,.4)">{n_clean - n_insp}</div>
-          <div style="font-size:.6rem;color:#94a3b8;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.06em">Awaiting Insp</div>
-        </div>
-        <div style="text-align:center;background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.25);
-                    border-radius:8px;padding:8px 14px">
-          <div style="font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;color:#a78bfa;
-                      text-shadow:0 0 10px rgba(167,139,250,.4)">{n_insp}</div>
-          <div style="font-size:.6rem;color:#94a3b8;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.06em">Inspected</div>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-    """, unsafe_allow_html=True)
-
-        lv1, lv2 = st.columns([1,1])
-        with lv1:
-            if st.button("Refresh", key="live_refresh", use_container_width=True):
-                # Pull fresh status records from DB and merge onto schedule
-                try:
-                    fresh = db.get_room_statuses()
-                    cur_rs = st.session_state.get("room_statuses", {})
-                    for rm_code, rec in fresh.items():
-                        if rm_code in cur_rs:
-                            # keep schedule metadata, take DB status + timestamps
-                            cur_rs[rm_code].update({
-                                k: rec.get(k) for k in
-                                ("status","started_at","cleaned_at","inspected_at",
-                                 "marked_clean_at","housekeeper","swapped_from")
-                                if rec.get(k) is not None
-                            })
-                        else:
-                            cur_rs[rm_code] = rec
-                    st.session_state["room_statuses"] = cur_rs
-                except Exception:
-                    pass
-                _init_statuses_from_schedule()
-                st.rerun()
-        with lv2:
-            if st.button("Reset All", key="live_reset", use_container_width=True):
-                for rm in rs:
-                    if rs[rm].get("status") != "pending":
-                        rs[rm]["status"] = "pending"
-                        for f in ["started_at","cleaned_at","inspected_at","marked_clean_at"]:
-                            rs[rm].pop(f, None)
-                st.rerun()
-
-        st.markdown("</div></div>", unsafe_allow_html=True)
-
-        # ── View filter ───────────────────────────────────────────────────────
-        lf1, lf2, lf3, lf4 = st.columns([2,2,2,1])
-        with lf1:
-            live_view_insp = st.selectbox("Inspector",
-                ["All"] + sorted(set(r.get("inspector","") for r in rs.values() if r.get("inspector","")), ),
-                key="live_insp_filter")
-        with lf2:
-            live_view_hk = st.selectbox("Housekeeper",
-                ["All"] + sorted(set(r.get("housekeeper","") for r in rs.values() if r.get("housekeeper","")), ),
-                key="live_hk_filter")
-        with lf3:
-            live_status_filter = st.selectbox("Status",
-                ["All"] + list(STATUS_META.keys()),
-                key="live_status_filter",
-                format_func=lambda s: f"{STATUS_META[s]['icon']} {STATUS_META[s]['label']}" if s != "All" else "All Statuses")
-        with lf4:
-            show_dv = st.checkbox("Show DV", value=False, key="live_show_dv")
-
-        # ── Group rooms by inspector batch ────────────────────────────────────
-        # Build inspector groups rooms mapping
-        insp_groups: dict = {}
-        for g in fg:
-            if g.get("service_type") == "Dust n Vac" and not show_dv:
-                continue
-            insp_name = g.get("inspector","—")
-            if live_view_insp != "All" and insp_name != live_view_insp: continue
-            if insp_name not in insp_groups:
-                insp_groups[insp_name] = []
-            insp_groups[insp_name].append(g)
-
-        if not insp_groups:
-            st.markdown('<div style="text-align:center;padding:40px;color:#334155;font-family:\'DM Mono\',monospace">No groups match the current filters</div>', unsafe_allow_html=True)
+        rows = _live_rows()
+        if not rows:
+            st.info("No rooms on today's schedule yet.")
         else:
-            # Render each inspector section
-            for insp_name, groups in sorted(insp_groups.items()):
-                # Inspector header
-                insp_rooms_all = [r for g in groups for r in g["rooms"]]
-                insp_done = sum(1 for r in insp_rooms_all if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
-                insp_pct = int(insp_done / max(len(insp_rooms_all),1) * 100)
+            done_n = sum(1 for r in rows if _rst.is_clean(r["status"]))
+            work_n = sum(1 for r in rows if r["status"] == _rst.STARTED)
+            insp_n = sum(1 for r in rows if r["status"] == _rst.INSPECTED)
+            help_n = sum(1 for r in rows if r["status"] == _rst.HELP)
+            wait_n = sum(1 for r in rows if r["status"] == _rst.PENDING)
+            pct = int(round(100 * done_n / max(len(rows), 1)))
 
-                st.markdown(f"""
-    <div style="margin:16px 0 8px;display:flex;align-items:center;gap:10px">
-      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:.95rem;color:#a5b4fc">{insp_name}</div>
-      <div style="flex:1;background:rgba(255,255,255,.05);border-radius:99px;height:4px;overflow:hidden">
-        <div style="background:linear-gradient(90deg,#6366f1,#22d3ee);width:{insp_pct}%;height:4px;border-radius:99px"></div>
-      </div>
-      <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#475569">{insp_done}/{len(insp_rooms_all)}</div>
-    </div>""", unsafe_allow_html=True)
+            st.markdown(f"""
+<div class="lvhead">
+  <div class="lvbarwrap">
+    <div class="lvttl">Today · {done_n} of {len(rows)} rooms done</div>
+    <div class="lvbar"><i style="width:{pct}%"></i></div>
+  </div>
+  <div class="lvkpis">
+    <div class="lvkpi"><b>{wait_n}</b><span>Not started</span></div>
+    <div class="lvkpi w"><b>{work_n}</b><span>Cleaning</span></div>
+    <div class="lvkpi d"><b>{done_n - insp_n}</b><span>Ready for RQS</span></div>
+    <div class="lvkpi i"><b>{insp_n}</b><span>Inspected</span></div>
+    <div class="lvkpi h"><b>{help_n}</b><span>Need help</span></div>
+  </div>
+</div>""", unsafe_allow_html=True)
 
-                # Render each group as a compact card
-                for _gidx, g in enumerate(groups):
-                    hk_name = g.get("housekeeper","—")
-                    g_label = g.get("label","—")
-                    _gk = f"{g_label}_{_gidx}" # unique per-group key prefix
+            # ── what changed, and when ────────────────────────────────────
+            @st.fragment(run_every=15)
+            def _live_watch():
+                """Notice work marked from the floor without anyone reloading."""
+                sig = _hashlib.sha1(repr(sorted(
+                    (k, (v or {}).get("status"), (v or {}).get("updated_at"))
+                    for k, v in _live_load().items())).encode()).hexdigest()
+                if st.session_state.get("_live_sig") not in (None, sig):
+                    st.session_state["_live_sig"] = sig
+                    st.rerun()
+                st.session_state["_live_sig"] = sig
+                st.caption(f"Updating on its own · checked "
+                           f"{_datetime.now(_MTN_TZ).strftime('%H:%M:%S')}")
 
-                    # Filter by HK
-                    rooms_in_g = g["rooms"]
-                    if live_view_hk != "All":
-                        rooms_in_g = [r for r in rooms_in_g if rs.get(r["room"],{}).get("housekeeper","") == live_view_hk or g.get("housekeeper","") == live_view_hk]
-                    if not rooms_in_g: continue
+            _live_watch()
 
-                    # Filter by status
-                    if live_status_filter != "All":
-                        rooms_in_g = [r for r in rooms_in_g if rs.get(r["room"],{}).get("status","pending") == live_status_filter]
-                    if not rooms_in_g: continue
+            f1, f2, f3, f4, f5 = st.columns([2, 2, 2, 2, 1.4])
+            with f1:
+                lv_insp = st.multiselect(
+                    "RQS", sorted({r["insp"] for r in rows}), key="live_f_insp",
+                    placeholder="All")
+            with f2:
+                lv_hk = st.multiselect(
+                    "Housekeeper", sorted({r["hk"] for r in rows}),
+                    key="live_f_hk", placeholder="All")
+            with f3:
+                lv_st = st.multiselect(
+                    "Status", [s for s in _rst.META],
+                    format_func=lambda s: _rst.label(s), key="live_f_st",
+                    placeholder="All")
+            with f4:
+                lv_group = st.selectbox(
+                    "Group by", ["Housekeeper", "RQS", "Building", "Status"],
+                    key="live_group")
+            with f5:
+                st.checkbox("Show DV", value=False, key="live_show_dv")
 
-                    g_done = sum(1 for r in g["rooms"] if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
-                    g_pct = int(g_done / max(len(g["rooms"]),1) * 100)
-                    g_color = "#6366f1" if g.get("service_type")==SVC_FC else ("#14b8a6" if g.get("service_type")==SVC_DS else "#f59e0b")
+            shown = [r for r in rows
+                     if (not lv_insp or r["insp"] in lv_insp)
+                     and (not lv_hk or r["hk"] in lv_hk)
+                     and (not lv_st or r["status"] in lv_st)]
 
-                    with st.expander(f"{g_label} · {hk_name} · {g_done}/{len(g['rooms'])} done", expanded=(g_pct < 100)):
+            KEYED = {"Housekeeper": "hk", "RQS": "insp",
+                     "Building": "bld", "Status": "status"}[lv_group]
 
-                        # ── Room swap UI ─────────────────────────────────────
-                        swap_col, _ = st.columns([3,1])
-                        with swap_col:
-                            # Collect all HKs in same inspector batch for swap target
-                            batch_hks = sorted(set(
-                                gg.get("housekeeper","") for gg in fg
-                                if gg.get("inspector","") == insp_name
-                                and not is_unassigned_hk(gg.get("housekeeper",""))
-                            ))
-                            if len(batch_hks) > 1:
-                                st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.62rem;color:#475569;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px"> Swap rooms to:</div>', unsafe_allow_html=True)
-                                swap_target = st.selectbox(
-                                    "Swap to HK", ["— select HK —"] + [h for h in batch_hks if h != hk_name],
-                                    key=f"swap_target_{_gk}", label_visibility="collapsed"
-                                )
+            def _tile(r):
+                dot, bg, ink = _rst.colours(r["status"])
+                flags = ("🐾" if r["pet"] else "") + ("🕔" if r["late"] else "")
+                when = ""
+                for f in ("inspected", "cleaned", "started"):
+                    if r.get(f):
+                        when = str(r[f])[11:16]
+                        break
+                return (f'<div class="lvtile" style="background:{bg};color:{ink};'
+                        f'border-color:{dot}">'
+                        f'<div class="lvroom">{e(r["room"])}<span>{flags}</span></div>'
+                        f'<div class="lvmeta">{e(SVC_SHORT.get(r["svc"], "?"))}'
+                        f' · {r["mins"]}m'
+                        f'{" · B" + str(r["bld"]) if r["bld"] else ""}</div>'
+                        f'<div class="lvfoot"><span class="lvdot" '
+                        f'style="background:{dot}"></span>'
+                        f'{e(_rst.label(r["status"], short=True))}'
+                        f'{" · " + when if when else ""}</div>'
+                        + (f'<div class="lvnote">📝 {e(r["note"][:60])}</div>'
+                           if r["note"] else "")
+                        + '</div>')
 
-                                if swap_target and swap_target != "— select HK —":
-                                    # Show swappable rooms (pending or cleaning_started only)
-                                    swappable = [r for r in g["rooms"] if rs.get(r["room"],{}).get("status","pending") in ("pending","cleaning_started")]
-                                    if swappable:
-                                        swap_rooms_sel = st.multiselect(
-                                            "Rooms to swap",
-                                            [r["room"] for r in swappable],
-                                            key=f"swap_rooms_{_gk}",
-                                            label_visibility="collapsed",
-                                            placeholder="Select rooms to move..."
-                                        )
-                                        if swap_rooms_sel and st.button(f"Move {len(swap_rooms_sel)} room(s) {swap_target}", key=f"do_swap_{_gk}", type="primary"):
-                                            # Find the target group
-                                            tgt_group = next((gg for gg in fg if gg.get("housekeeper","") == swap_target and gg.get("inspector","") == insp_name), None)
-                                            if tgt_group:
-                                                for rm_code in swap_rooms_sel:
-                                                    src_room = next((r for r in g["rooms"] if r["room"] == rm_code), None)
-                                                    if src_room:
-                                                        # Move room from source to target group in session data
-                                                        g["rooms"].remove(src_room)
-                                                        tgt_group["rooms"].append(src_room)
-                                                        # Update status tracking
-                                                        old_hk = rs.get(rm_code,{}).get("housekeeper","")
-                                                        _save_status(rm_code, {
-                                                            "housekeeper": swap_target,
-                                                            "group_label": tgt_group.get("label",""),
-                                                            "swapped_from": old_hk,
-                                                        })
-                                                st.success(f"Moved {len(swap_rooms_sel)} room(s) to {swap_target}")
-                                                st.rerun()
+            if not shown:
+                st.caption("Nothing matches those filters.")
+            for key in sorted({str(r[KEYED]) for r in shown}):
+                part = [r for r in shown if str(r[KEYED]) == key]
+                part.sort(key=lambda r: (_rst.rank(r["status"]), r["room"]))
+                k_done = sum(1 for r in part if _rst.is_clean(r["status"]))
+                k_pct = int(round(100 * k_done / max(len(part), 1)))
+                head = key if lv_group != "Status" else _rst.label(key)
+                sub = ""
+                if lv_group == "Housekeeper":
+                    sub = " · ".join(sorted({r["insp"] for r in part}))
+                elif lv_group == "RQS":
+                    sub = f'{len({r["hk"] for r in part})} HK'
+                st.markdown(
+                    f'<div class="lvgrp"><div class="lvgname">{e(head)}'
+                    f'{" <em>" + e(sub) + "</em>" if sub else ""}</div>'
+                    f'<div class="lvgbar"><i style="width:{k_pct}%"></i></div>'
+                    f'<div class="lvgcount">{k_done}/{len(part)}</div></div>'
+                    f'<div class="lvgrid">{"".join(_tile(r) for r in part)}</div>',
+                    unsafe_allow_html=True)
 
-                        st.markdown("---")
+            # ── acting on rooms ───────────────────────────────────────────
+            st.markdown('<p class="sec">Mark rooms</p>', unsafe_allow_html=True)
+            st.caption("Pick one room or several, then say what happened. "
+                       "Housekeepers marking their own rooms show up here too.")
+            by_room = {r["room"]: r for r in rows}
+            a1, a2 = st.columns([3, 2])
+            with a1:
+                picked = st.multiselect(
+                    "Rooms", sorted(by_room), key="live_pick",
+                    placeholder="Start typing a room number",
+                    format_func=lambda c: f'{c} · {by_room[c]["hk"]} · '
+                                          f'{_rst.label(by_room[c]["status"])}')
+            with a2:
+                move_to = st.selectbox(
+                    "Move to housekeeper", ["— leave as is —"]
+                    + sorted({r["hk"] for r in rows if r["hk"] != "—"}),
+                    key="live_moveto")
 
-                        # ── Room status rows ─────────────────────────────────
-                        # Dedupe rooms within the group (a room can appear twice
-                        # if upstream grouping duplicated it) so widget keys and
-                        # the displayed list stay unique.
-                        _seen_rm = set(); _dedup_rooms = []
-                        for r in rooms_in_g:
-                            _rc = r.get("room")
-                            if _rc in _seen_rm: continue
-                            _seen_rm.add(_rc); _dedup_rooms.append(r)
-                        for _ridx, r in enumerate(_dedup_rooms):
-                            rm = r["room"]
-                            _rk = f"{_gk}_{_ridx}_{rm}" # fully unique row key
-                            r_state = rs.get(rm, {"status":"pending"})
-                            cur_status = r_state.get("status","pending")
-                            sm = STATUS_META.get(cur_status, STATUS_META["pending"])
+            def _mark(codes, status):
+                stamp = _now_iso()
+                field = {_rst.STARTED: "started_at", _rst.DONE: "cleaned_at",
+                         _rst.INSPECTED: "inspected_at",
+                         _rst.ALREADY_CLEAN: "marked_clean_at"}.get(status)
+                n = 0
+                for c in codes:
+                    r = by_room.get(c) or {}
+                    fields = {"status": status, "housekeeper": r.get("hk", ""),
+                              "inspector": r.get("insp", ""),
+                              "group_label": r.get("label", ""),
+                              "updated_by": st.session_state.get("username", "?")}
+                    if field:
+                        fields[field] = stamp
+                    if status == _rst.PENDING:
+                        fields.update({"started_at": None, "cleaned_at": None,
+                                       "inspected_at": None,
+                                       "marked_clean_at": None})
+                    try:
+                        db.upsert_room_status(c, fields)
+                        n += 1
+                    except Exception as ex:
+                        print(f"[live] {c}: {ex}")
+                st.session_state["_live_toast"] = (
+                    f"{n} room{'s' if n != 1 else ''} → {_rst.label(status)}")
+                st.rerun()
 
-                            # Timestamps (shared formatter; keep the ts[:5] fallback)
-                            def _fmt_ts(ts):
-                                return _fmt_mtn(ts) or (ts[:5] if ts else "")
+            b = st.columns(6)
+            for col, (lbl, target) in zip(b, [
+                    ("Start", _rst.STARTED), ("Done", _rst.DONE),
+                    ("Inspected", _rst.INSPECTED),
+                    ("Already clean", _rst.ALREADY_CLEAN),
+                    ("Needs help", _rst.HELP), ("Reset", _rst.PENDING)]):
+                with col:
+                    if st.button(lbl, key=f"live_btn_{target}_{lbl}",
+                                 use_container_width=True,
+                                 disabled=not picked,
+                                 type="primary" if target == _rst.DONE
+                                 else "secondary"):
+                        _mark(picked, target)
 
-                            ts_start = _fmt_ts(r_state.get("started_at",""))
-                            ts_clean = _fmt_ts(r_state.get("cleaned_at",""))
-                            ts_insp = _fmt_ts(r_state.get("inspected_at",""))
-                            ts_ac = _fmt_ts(r_state.get("marked_clean_at",""))
+            if picked and move_to != "— leave as is —":
+                if st.button(f"Move {len(picked)} room(s) to {move_to}",
+                             key="live_do_move", use_container_width=True):
+                    moved = 0
+                    for c in picked:
+                        try:
+                            db.upsert_room_status(c, {
+                                "housekeeper": move_to,
+                                "swapped_from": (by_room.get(c) or {}).get("hk", ""),
+                                "updated_by": st.session_state.get("username", "?")})
+                            moved += 1
+                        except Exception as ex:
+                            print(f"[live] move {c}: {ex}")
+                    st.session_state["_live_toast"] = f"{moved} room(s) → {move_to}"
+                    st.rerun()
 
-                            pet_icon = " " if r.get("pet") else ""
-                            late_html = (f'<span style="font-family:\'DM Mono\',monospace;font-size:.6rem;'
-                                         f'color:#f59e0b;background:rgba(245,158,11,.12);border-radius:4px;'
-                                         f'padding:1px 5px;margin-left:4px"> {r.get("late_checkout","")}</span>'
-                                         if r.get("late_checkout") else "")
-                            guest_disp = r.get("guest","")
-                            if len(guest_disp) > 22: guest_disp = guest_disp[:21]+"…"
+            # ── the last thing that happened, newest first ────────────────
+            recent = sorted((r for r in rows if r["at"]),
+                            key=lambda r: str(r["at"]), reverse=True)[:12]
+            if recent:
+                st.markdown('<p class="sec">Latest</p>', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="lvfeed">'
+                    + "".join(
+                        f'<div class="lvline"><b>{e(r["room"])}</b> '
+                        f'{e(_rst.label(r["status"]))} '
+                        f'<span>{e(r["hk"])}'
+                        f'{" · " + e(r["by"]) if r["by"] else ""} · '
+                        f'{e(str(r["at"])[11:16])}</span></div>'
+                        for r in recent)
+                    + '</div>', unsafe_allow_html=True)
 
-                            # ── Info line: room + guest + animated status pill ──
-                            _is_active = (cur_status == "cleaning_started")
-                            _dot = (f'<span style="display:inline-block;width:6px;height:6px;'
-                                    f'border-radius:50%;background:{sm["color"]};margin-right:5px;'
-                                    f'vertical-align:middle;'
-                                    + ('animation:pulseDot 1.1s ease-in-out infinite;' if _is_active else '')
-                                    + '"></span>')
-                            _ring = 'animation:statusPop .35s cubic-bezier(.34,1.56,.64,1) both' \
-                                    + (',ringPulse 2s ease-out infinite' if _is_active else '')
-                            st.markdown(
-                                f'<div style="display:flex;align-items:center;justify-content:space-between;'
-                                f'gap:8px;flex-wrap:wrap;padding:7px 10px;background:rgba(255,255,255,.02);'
-                                f'border:1px solid rgba(99,102,241,.1);border-radius:8px;margin-bottom:4px">'
-                                f' <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">'
-                                f' <span style="font-family:\'DM Mono\',monospace;font-size:.82rem;'
-                                f'font-weight:600;color:#6366f1;white-space:nowrap">{rm}</span>'
-                                f' <span style="font-size:.76rem;color:#94a3b8;overflow:hidden;'
-                                f'text-overflow:ellipsis;white-space:nowrap">{guest_disp}{pet_icon}</span>'
-                                f' {late_html}'
-                                f' </div>'
-                                f' <div style="background:{sm["bg"]};border:1px solid {sm["border"]};'
-                                f'border-radius:6px;padding:3px 9px;font-size:.68rem;font-weight:600;'
-                                f'color:{sm["color"]};white-space:nowrap;flex-shrink:0;{_ring}">'
-                                f'{_dot}{sm["icon"]} {sm["label"]}</div>'
-                                f'</div>', unsafe_allow_html=True)
+        st.markdown("""<style>
+.lvhead{display:flex;gap:18px;flex-wrap:wrap;align-items:center;
+  background:linear-gradient(135deg,#12395f,#2f6fae);color:#fff;
+  border-radius:16px;padding:15px 19px;margin:2px 0 14px}
+.lvbarwrap{flex:1;min-width:230px}
+.lvttl{font-size:.86rem;font-weight:700;margin-bottom:8px}
+.lvbar{height:9px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden}
+.lvbar i{display:block;height:100%;border-radius:99px;
+  background:linear-gradient(90deg,#8ff0b6,#25d366);transition:width .6s ease}
+.lvkpis{display:flex;gap:8px;flex-wrap:wrap}
+.lvkpi{background:rgba(255,255,255,.14);border-radius:11px;padding:6px 13px;
+  text-align:center;min-width:74px}
+.lvkpi b{display:block;font-size:1.15rem;font-weight:800;line-height:1.2}
+.lvkpi span{font-size:.58rem;text-transform:uppercase;letter-spacing:.07em;opacity:.9}
+.lvkpi.w b{color:#ffe08a}.lvkpi.d b{color:#bfe0ff}
+.lvkpi.i b{color:#dcd0ff}.lvkpi.h b{color:#ffc2c2}
 
-                            # ── Action button row — 4 equal columns, stays horizontal ──
-                            bc1, bc2, bc3, bc4 = st.columns(4)
-                            with bc1:
-                                if cur_status == "pending":
-                                    if st.button("Clean", key=f"ac_{_rk}", use_container_width=True):
-                                        _save_status(rm, {"status":"already_clean","marked_clean_at":_NOW()})
-                                        st.session_state["_live_toast"] = f" {rm} marked Already Clean"
-                                        st.rerun()
-                                elif cur_status == "already_clean":
-                                    if st.button("Undo", key=f"undo_ac_{_rk}", use_container_width=True):
-                                        _save_status(rm, {"status":"pending","marked_clean_at":None})
-                                        st.session_state["_live_toast"] = f" {rm} back to Pending"
-                                        st.rerun()
-                            with bc2:
-                                if cur_status == "pending":
-                                    if st.button("Start", key=f"start_{_rk}", use_container_width=True):
-                                        _save_status(rm, {"status":"cleaning_started","started_at":_NOW()})
-                                        st.session_state["_live_toast"] = f" {rm} — cleaning started"
-                                        st.rerun()
-                                elif cur_status == "cleaning_started":
-                                    if st.button("Done", key=f"done_{_rk}", use_container_width=True):
-                                        _save_status(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
-                                        st.session_state["_live_toast"] = f" {rm} — cleaning done, awaiting inspection"
-                                        st.rerun()
-                            with bc3:
-                                if cur_status == "cleaning_done":
-                                    if st.button("Inspect", key=f"insp_{_rk}", use_container_width=True):
-                                        _save_status(rm, {"status":"inspected","inspected_at":_NOW()})
-                                        st.session_state["_live_toast"] = f" {rm} inspected "
-                                        st.rerun()
-                                elif cur_status == "inspected":
-                                    st.markdown(f'<div style="font-family:\'DM Mono\',monospace;font-size:.64rem;color:#a78bfa;padding:8px 0;text-align:center"> {ts_insp}</div>', unsafe_allow_html=True)
-                            with bc4:
-                                if cur_status != "pending":
-                                    if st.button("Reset", key=f"reset_{_rk}", use_container_width=True, help="Reset to Pending"):
-                                        _save_status(rm, {
-                                            "status":"pending",
-                                            "started_at":None,"cleaned_at":None,
-                                            "inspected_at":None,"marked_clean_at":None
-                                        })
-                                        st.rerun()
+.lvgrp{display:flex;align-items:center;gap:10px;margin:14px 0 7px}
+.lvgname{font-size:.82rem;font-weight:800;color:#16202e;white-space:nowrap}
+.lvgname em{font-style:normal;font-weight:500;color:#7b8798;font-size:.72rem}
+.lvgbar{flex:1;height:5px;border-radius:99px;background:#e6ebf2;overflow:hidden}
+.lvgbar i{display:block;height:100%;background:linear-gradient(90deg,#2f9169,#46b184)}
+.lvgcount{font-size:.72rem;color:#64707f;font-weight:700}
 
-                            # Timestamp trail under each room
-                            ts_parts = []
-                            if ts_ac: ts_parts.append(f" {ts_ac}")
-                            if ts_start: ts_parts.append(f" {ts_start}")
-                            if ts_clean: ts_parts.append(f" {ts_clean}")
-                            if ts_insp: ts_parts.append(f" {ts_insp}")
-                            if ts_parts:
-                                st.markdown(
-                                    f'<div style="font-family:\'DM Mono\',monospace;font-size:.6rem;'
-                                    f'color:#334155;padding:0 0 4px 8px;letter-spacing:.04em">'
-                                    f'{" · ".join(ts_parts)}</div>',
-                                    unsafe_allow_html=True)
+.lvgrid{display:grid;gap:7px;
+  grid-template-columns:repeat(auto-fill,minmax(126px,1fr))}
+.lvtile{border:1px solid;border-left-width:5px;border-radius:10px;
+  padding:7px 9px;font-size:.7rem;line-height:1.35}
+.lvroom{font-weight:800;font-size:.86rem;display:flex;justify-content:space-between;
+  gap:4px;align-items:baseline}
+.lvmeta{opacity:.78;font-size:.66rem;margin-top:1px}
+.lvfoot{margin-top:5px;font-weight:700;font-size:.65rem;display:flex;
+  align-items:center;gap:5px}
+.lvdot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.lvnote{margin-top:4px;font-size:.62rem;opacity:.85}
+
+.lvfeed{border:1px solid #e3e8ef;border-radius:12px;overflow:hidden;background:#fff}
+.lvline{padding:6px 12px;font-size:.75rem;border-bottom:1px solid #eef2f7;
+  display:flex;justify-content:space-between;gap:10px}
+.lvline:last-child{border-bottom:none}
+.lvline span{color:#7b8798;font-size:.7rem}
+@media (max-width:640px){
+  .lvgrid{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))}
+}
+</style>""", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════════════════
     st.markdown("---")

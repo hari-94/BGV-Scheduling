@@ -12,6 +12,7 @@ import html as _html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, i18n
 import assignments
+import roomstatus as _rst
 import ui
 
 st.set_page_config(page_title="My Rooms", page_icon="🛎️", layout="wide")
@@ -26,8 +27,16 @@ def e(s):
 
 
 # ── statuses ─────────────────────────────────────────────────────────────────
-NOT_STARTED, IN_PROGRESS, CLEANED = "not_started", "in_progress", "cleaned"
-INSPECTED, DND, HELP = "inspected", "dnd", "help"
+# The words come from roomstatus so that a room marked here is the same room
+# the supervisor sees moving on the Live board. They used to be two private
+# vocabularies writing into one column, and neither could read the other.
+NOT_STARTED = _rst.PENDING
+IN_PROGRESS = _rst.STARTED
+CLEANED = _rst.DONE
+INSPECTED = _rst.INSPECTED
+DND = _rst.DND
+HELP = _rst.HELP
+ALREADY = _rst.ALREADY_CLEAN
 
 # (background, ink, accent) — the accent is the stripe down the card's edge.
 STATUS_STYLE = {
@@ -35,13 +44,16 @@ STATUS_STYLE = {
     IN_PROGRESS: ("#fff5d9", "#7a5200", "#f0b429"),
     CLEANED:     ("#dcfbe7", "#0a5c32", "#22b365"),
     INSPECTED:   ("#dbeafe", "#12447e", "#2f80ed"),
+    ALREADY:     ("#d8fbe8", "#0a5c32", "#10b981"),
     DND:         ("#ede9fe", "#4c1d95", "#8b5cf6"),
     HELP:        ("#ffe1e1", "#8a1c1c", "#e5484d"),
 }
 STATUS_KEY = {NOT_STARTED: "st.not_started", IN_PROGRESS: "st.in_progress",
+              ALREADY: "st.already_clean",
               CLEANED: "st.cleaned", INSPECTED: "st.inspected",
               DND: "st.dnd", HELP: "st.help"}
 STATUS_ICON = {NOT_STARTED: "○", IN_PROGRESS: "◐", CLEANED: "✓",
+               ALREADY: "✓",
                INSPECTED: "★", DND: "⏸", HELP: "!"}
 
 st.markdown("""<style>
@@ -157,8 +169,8 @@ my_rooms = [(g, r) for g in my_charts for r in (g.get("rooms") or [])]
 
 greet = str(mine).split()[0].title() if mine else ""
 done_n = sum(1 for _g, r in my_rooms
-             if (statuses.get(str(r.get("room", ""))) or {}).get("status")
-             in (CLEANED, INSPECTED))
+             if _rst.is_clean(
+                 (statuses.get(str(r.get("room", ""))) or {}).get("status")))
 total_n = len(my_rooms)
 mins = sum(g.get("time", 0) for g in my_charts)
 pct = int(round(100 * done_n / total_n)) if total_n else 0
@@ -185,7 +197,8 @@ def _fingerprint(chs, sts, who):
                  g.get("service_type"), g.get("time"),
                  [str(r.get("room")) for r in (g.get("rooms") or [])])
                 for g in chs if g.get("housekeeper") == who]) + \
-        repr(sorted((k, (v or {}).get("status")) for k, v in sts.items()))
+        repr(sorted((k, _rst.normalise((v or {}).get("status")))
+                    for k, v in sts.items()))
     return hashlib.sha1(sig.encode("utf-8")).hexdigest()
 
 
@@ -259,7 +272,7 @@ for i, (g, r) in enumerate(sorted(
         my_rooms, key=lambda x: str(x[1].get("room", "")))):
     code = str(r.get("room", ""))
     rec = statuses.get(code) or {}
-    cur = rec.get("status") or NOT_STARTED
+    cur = _rst.normalise(rec.get("status"))
     bg, ink, accent = STATUS_STYLE.get(cur, STATUS_STYLE[NOT_STARTED])
     svc = i18n.service(g.get("service_type", ""))
 
@@ -296,7 +309,7 @@ for i, (g, r) in enumerate(sorted(
         # at arm's length on a phone. Done never hides behind Start: someone
         # who cleaned a room without tapping Start still has to be able to
         # say so, and a missing start time is worth less than a missing room.
-        if cur in (CLEANED, INSPECTED):
+        if cur in (CLEANED, INSPECTED, ALREADY):
             primary = [("act.undo", IN_PROGRESS, "secondary")]
             more = [("act.help", HELP), ("act.dnd", DND)]
         elif cur == IN_PROGRESS:

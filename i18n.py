@@ -66,6 +66,7 @@ STRINGS = {
     "st.in_progress":     ("Cleaning", "Limpiando"),
     "st.cleaned":         ("Ready for RQS", "Listo para RQS"),
     "st.inspected":       ("Inspected", "Inspeccionado"),
+    "st.already_clean":   ("Already clean", "Ya está limpio"),
     "st.dnd":             ("Do not disturb", "No molestar"),
     "st.help":            ("Need help", "Necesito ayuda"),
 
