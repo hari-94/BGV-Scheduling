@@ -9,7 +9,7 @@ import sys, os, datetime
 import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import auth, db, roster_import as ri
+import auth, db, clock, roster_import as ri
 import ui
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
@@ -174,7 +174,7 @@ if mine is None or can_browse:
 info = index[mine]
 s_all = ri.summarise_person(rows, pid=mine)
 by_date = {r["date"]: r for r in s_all["rows"]}
-today = datetime.date.today()
+today = clock.today()
 t_iso = today.isoformat()
 greet = info["label"].split()[0].title()
 

@@ -8,6 +8,7 @@ import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
 import db, auth
 import ui
+import clock
 
 try:
     import plotly.graph_objects as go
@@ -232,7 +233,7 @@ def build_snapshot(fg, total_rms, inspectors):
             "buildings": insp.get("buildings",[]),
         }
     return {
-        "date":        str(date.today()),
+        "date":        clock.today_iso(),
         "total_rooms": total_rms,
         "n_groups":    len(fg),
         "hk":          hk_snap,
@@ -267,7 +268,7 @@ if not log:
     st.info("No data yet. Generate a schedule on the main page first.")
     st.stop()
 
-today     = date.today()
+today     = clock.today()
 all_dates = sorted({s.get("date","") for s in log if s.get("date")}, reverse=True)
 
 def filter_log(p):

@@ -3725,7 +3725,7 @@ def _build_snapshot(fg, total_rooms, inspectors):
             labels = set(insp.get("groups",[]))
             n_rooms = sum(len(g.get("rooms",[])) for g in fg if g.get("label") in labels)
             insp_snap[nm] = {"rooms":n_rooms,"groups":len(labels),"role":insp.get("role","FC")}
-    return {"date":str(date.today()),"total_rooms":total_rooms,"n_groups":len(fg),
+    return {"date":_datetime.now(_MTN_TZ).date().isoformat(),"total_rooms":total_rooms,"n_groups":len(fg),
             "hk":hk_snap,"inspectors":insp_snap,
             "saved_by":st.session_state.get("username","unknown"),"schema_v":2}
 

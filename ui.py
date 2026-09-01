@@ -140,6 +140,35 @@ CHROME_CSS = """
   .navwho{font-size:.64rem}
   .stTabs [data-baseweb="tab"]{padding:6px 11px !important;font-size:.72rem !important;}
 }
+
+/* Content-sized nav columns. Streamlit gives every column an equal flex
+   basis, so adding a sixth link and the language switch squeezed the labels
+   until they were cropped mid-word -- worse in Spanish, where the same words
+   are longer. Each column takes the width it needs instead, and one marked
+   spacer absorbs what is left over. */
+[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"])
+  > [data-testid="stColumn"]{
+  flex:0 0 auto !important;width:auto !important;min-width:0 !important;
+}
+[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"])
+  > [data-testid="stColumn"]:has(.navspacer){flex:1 1 auto !important;}
+[data-testid="stPageLink"],
+[data-testid="stPageLink"] a{min-width:max-content !important;
+  overflow:visible !important;}
+[data-testid="stPageLink"] a p{
+  white-space:nowrap !important;overflow:visible !important;
+  text-overflow:clip !important;
+}
+[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"])
+  .stButton>button{white-space:nowrap !important;}
+
+/* On a narrow screen the bar wraps onto a second line rather than shrinking
+   the labels away. */
+@media (max-width:1100px){
+  [data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
+    flex-wrap:wrap !important;row-gap:4px !important;
+  }
+}
 </style>
 """
 
@@ -147,7 +176,7 @@ CHROME_CSS = """
 #: the person and the way out. Without the spacer the links spread across the
 #: whole width and stop reading as a group.
 def _weights(n):
-    return [1.0] * n + [1.0, 1.5, 0.9, 1.0]
+    return [1.0] * n + [0.6, 1.5, 0.9, 1.0]
 
 def topnav(active: str = "", hide_sidebar: bool = True):
     """Draw the horizontal navigation bar.
@@ -177,6 +206,8 @@ def topnav(active: str = "", hide_sidebar: bool = True):
                 # gives no hook of its own for "this page link is current".
                 st.markdown('<span class="navactive"></span>', unsafe_allow_html=True)
             st.page_link(path, label=i18n.t(tkey), icon=icon)
+    with cols[len(items)]:
+        st.markdown('<span class="navspacer"></span>', unsafe_allow_html=True)
     with cols[len(items) + 1]:
         st.markdown(f'<div class="navwho">{i18n.t("nav.signed_in_as")} <b>{who}</b><br>'
                     f'<span class="role">{role}</span></div>', unsafe_allow_html=True)

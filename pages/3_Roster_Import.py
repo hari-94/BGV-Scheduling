@@ -10,7 +10,7 @@ import sys, os, io, json, datetime
 import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import auth, db, roster_import as ri
+import auth, db, clock, roster_import as ri
 import ui
 
 # After a deploy the server can still hold the previous roster_import in
@@ -444,7 +444,7 @@ with tab_week:
     if not week_keys:
         st.info("No weeks stored yet. Upload the workbook on the **Upload & sync** tab.")
     else:
-        today_iso = datetime.date.today().isoformat()
+        today_iso = clock.today().isoformat()
         default_wk = max([w for w in week_keys if w <= today_iso], default=week_keys[-1])
         # Newest first: the weeks people actually open sit at the top instead of
         # at the bottom of a two-year list.
@@ -909,7 +909,7 @@ with tab_att:
     else:
         token = f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}'
         rows = _history(token)
-        today = datetime.date.today()
+        today = clock.today()
         wk_s, mo_s, yr_s = ri.period_bounds(today)
         t_iso = today.isoformat()
 
@@ -1130,7 +1130,7 @@ with tab_changes:
                 st.download_button(
                     "Download updated Schedule.xlsx",
                     data=st.session_state["ri_export_bytes"],
-                    file_name=f"Schedule_updated_{datetime.date.today():%Y%m%d}.xlsx",
+                    file_name=f"Schedule_updated_{clock.today():%Y%m%d}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="ri_dl")
 
@@ -1146,7 +1146,7 @@ with tab_apply:
             base = datetime.date.fromisoformat(wk)
             all_days += [base + datetime.timedelta(days=i) for i in range(7)]
         all_days = sorted(set(all_days))
-        today = datetime.date.today()
+        today = clock.today()
         default = today if today in all_days else min(all_days, key=lambda d: abs((d - today).days))
         c1, c2 = st.columns([1, 2])
         with c1:

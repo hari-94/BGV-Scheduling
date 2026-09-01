@@ -10,7 +10,7 @@ import streamlit as st
 import sys, os, datetime, re, hashlib
 import html as _html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import auth, db, i18n
+import auth, db, clock, i18n
 import ui
 
 st.set_page_config(page_title="My Rooms", page_icon="🛎️", layout="wide")
@@ -110,7 +110,7 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 cu = auth.current_user()
 me_display = cu.get("display_name") or ""
 me_user = cu.get("username", "")
-today = datetime.date.today()
+today = clock.today()
 
 
 def _norm(s):
@@ -218,7 +218,7 @@ def _watch():
         st.rerun()
     st.markdown(
         f'<div class="mrlive"><b>●</b> {e(T("rooms.live"))} · '
-        f'{e(T("rooms.last_check", time=datetime.datetime.now().strftime("%H:%M:%S")))}'
+        f'{e(T("rooms.last_check", time=clock.clock_str()))}'
         f'</div>', unsafe_allow_html=True)
 
 
@@ -234,7 +234,7 @@ if done_n and done_n == total_n:
 
 # ── marking a room ───────────────────────────────────────────────────────────
 def _mark(room, chart, new_status):
-    now = datetime.datetime.now().isoformat(timespec="seconds")
+    now = clock.stamp()
     fields = {"status": new_status, "housekeeper": mine,
               "group_label": chart.get("label", ""),
               "inspector": chart.get("inspector", "") or "",

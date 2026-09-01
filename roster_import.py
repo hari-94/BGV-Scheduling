@@ -15,6 +15,16 @@ Nothing here imports streamlit, so it can be unit-tested on its own.
 import io
 import re
 import datetime as _dt
+import zoneinfo as _zi
+
+#: The property's timezone. A UTC host rolls the date over at six in
+#: the evening Mountain, which would age a week early.
+_MTN = _zi.ZoneInfo("America/Denver")
+
+
+def _local_today():
+    return _dt.datetime.now(_MTN).date()
+
 from collections import OrderedDict
 
 #: Bump when a page starts relying on a helper added here. Pages compare it
@@ -875,7 +885,7 @@ def summarise_person(rows, pid=None, person_key=None, person=None):
 
 def period_bounds(today=None):
     """(week_start, month_start, year_start) as ISO strings, weeks Sunday-based."""
-    today = today or _dt.date.today()
+    today = today or _local_today()
     week_start = today - _dt.timedelta(days=(today.weekday() + 1) % 7)
     return (week_start.isoformat(),
             today.replace(day=1).isoformat(),
@@ -904,7 +914,7 @@ def suggest_building(rows, recent_weeks=8, today=None):
     have settled — but a move, when it happens, is a permanent transfer rather
     than a rotation, so the recent window wins and the change is flagged.
     """
-    today = today or _dt.date.today()
+    today = today or _local_today()
     cut = (today - _dt.timedelta(weeks=recent_weeks)).isoformat()
     allb, recb, label = {}, {}, {}
     for r in rows:
@@ -945,7 +955,7 @@ def suggest_week(rows, target_start, lookback_weeks=16, today=None):
     """
     start = _dt.date.fromisoformat(target_start)
     cutoff = (start - _dt.timedelta(weeks=lookback_weeks)).isoformat()
-    horizon = (today or _dt.date.today()).isoformat()
+    horizon = (today or _local_today()).isoformat()
     # Only learn from days that have actually happened and predate the target.
     past = [r for r in rows
             if cutoff <= r["date"] < target_start and r["date"] <= horizon]
@@ -1135,7 +1145,7 @@ def week_range_text(iso, with_year=None, today=None) -> str:
     """
     start = _dt.date.fromisoformat(iso)
     end = start + _dt.timedelta(days=6)
-    today = today or _dt.date.today()
+    today = today or _local_today()
     if start.month == end.month:
         text = f"{start:%b} {start.day} – {end.day}"
     else:
@@ -1150,7 +1160,7 @@ def week_label(iso, today=None, note="") -> str:
     actually refer to them; anything further out falls back to the date range,
     which stays unambiguous.
     """
-    today = today or _dt.date.today()
+    today = today or _local_today()
     this_sun = today - _dt.timedelta(days=(today.weekday() + 1) % 7)
     start = _dt.date.fromisoformat(iso)
     delta = (start - this_sun).days // 7
@@ -1166,7 +1176,7 @@ def week_label(iso, today=None, note="") -> str:
 
 def next_missing_weeks(week_keys, count=6, today=None):
     """Upcoming Sundays with no stored week yet."""
-    today = today or _dt.date.today()
+    today = today or _local_today()
     sun = today - _dt.timedelta(days=(today.weekday() + 1) % 7)
     have = set(week_keys)
     out, d = [], sun

@@ -8,6 +8,7 @@ Tables (auto-created on first use):
 # Guard against circular imports — this module must never import from
 # cleaning_scheduler.py or auth.py at module level.
 import os, json, hashlib, secrets
+import clock
 from datetime import datetime, date
 
 # Ensure this module is fully initialized before any function is called.
@@ -89,7 +90,7 @@ def save_full_schedule(data: dict):
     Save the complete schedule for today (groups, rooms, inspectors, HK roster).
     Upserts on date — one record per day.
     """
-    today = str(date.today())
+    today = clock.today_iso()
     payload = json.dumps(data, default=str)
     try:
         _client().table("schedule_full").upsert(
@@ -382,7 +383,7 @@ def load_full_schedule(date_str: str = None) -> dict | None:
     Returns None if no schedule exists for that date.
     """
     if date_str is None:
-        date_str = str(date.today())
+        date_str = clock.today_iso()
     try:
         r = (_client().table("schedule_full")
              .select("*")
@@ -403,7 +404,7 @@ def schedule_exists_today() -> bool:
     try:
         r = (_client().table("schedule_full")
              .select("date")
-             .eq("date", str(date.today()))
+             .eq("date", clock.today_iso())
              .limit(1)
              .execute())
         return bool(r.data)
@@ -423,7 +424,7 @@ def load_log() -> list:
 
 def save_snapshot(snapshot: dict):
     """Upsert today's snapshot (keyed on date)."""
-    today = snapshot.get("date", str(date.today()))
+    today = snapshot.get("date", clock.today_iso())
     payload = json.dumps(snapshot)
     try:
         _client().table("schedule_log").upsert(
@@ -632,7 +633,7 @@ def get_room_statuses(date_str: str = None) -> dict:
     Returns dict keyed by room number: {room: status_record}
     """
     if date_str is None:
-        date_str = str(date.today())
+        date_str = clock.today_iso()
     try:
         r = (_client().table("room_status")
              .select("*")
@@ -651,7 +652,7 @@ def upsert_room_status(room: str, fields: dict, date_str: str = None):
     swapped_from, updated_by
     """
     if date_str is None:
-        date_str = str(date.today())
+        date_str = clock.today_iso()
     record = {"date": date_str, "room": room, **fields}
     try:
         _client().table("room_status").upsert(
@@ -667,7 +668,7 @@ def bulk_upsert_room_statuses(records: list, date_str: str = None):
     Each record must have at least 'room' key.
     """
     if date_str is None:
-        date_str = str(date.today())
+        date_str = clock.today_iso()
     rows = [{"date": date_str, **r} for r in records]
     try:
         _client().table("room_status").upsert(
