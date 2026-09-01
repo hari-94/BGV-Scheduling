@@ -4535,14 +4535,30 @@ td{{transition:background .15s ease}}
         # every number appeared to have changed.
         KB_SORTS = ["Busiest first", "Lightest first", "Most rooms first",
                     "Building", "Name (A-Z)"]
-        _sc1, _sc2 = st.columns([2, 3])
+        # Filters narrow what the board shows without touching the schedule.
+        # An empty filter means everything, so the board opens complete.
+        _all_blds = sorted({b for g in fg for b in (g.get("blds") or set())
+                            if b is not None})
+        _all_svcs = sorted({g.get("service_type", "") for g in fg
+                            if g.get("service_type")})
+        _sc1, _sc2, _sc3, _sc4 = st.columns([2, 2, 2, 2])
         with _sc1:
             kb_sort = st.selectbox("Sort housekeepers by", KB_SORTS,
                                    key="kb_sort")
+        with _sc2:
+            kb_f_bld = st.multiselect("Building", _all_blds, key="kb_f_bld",
+                                      placeholder="All buildings")
+        with _sc3:
+            kb_f_svc = st.multiselect("Service", _all_svcs, key="kb_f_svc",
+                                      placeholder="All services")
+        with _sc4:
+            kb_find = st.text_input("Find a housekeeper", key="kb_find",
+                                    placeholder="Type part of a name")
         st.caption("One column per inspector, always in the same order. Sorting "
                    "reorders the cards inside each column, not the columns. "
-                   "Dragging a card takes all of that housekeeper's charts. "
-                   "Nothing is saved until you press Apply.")
+                   "Filters only change what you can see. Dragging a card takes "
+                   "all of that housekeeper's charts, and nothing is saved "
+                   "until you press Apply.")
 
         # A housekeeper's charts can already be split across inspectors; the card
         # sits under whoever has the bulk and the move takes the rest with it.
@@ -4687,9 +4703,22 @@ td{{transition:background .15s ease}}
                            if n != UNASSIGNED and n not in lead), key=str.lower)
             return lead + rest + [UNASSIGNED]
 
+        def _kept(hk):
+            """Whether this housekeeper survives the filters."""
+            gs = hk_charts.get(hk, [])
+            if kb_f_bld and not any(b in kb_f_bld
+                                    for g in gs for b in (g.get("blds") or set())):
+                return False
+            if kb_f_svc and not any(g.get("service_type") in kb_f_svc for g in gs):
+                return False
+            if kb_find and kb_find.strip().lower() not in str(hk).lower():
+                return False
+            return True
+
         board, card_to_hk = {}, {}
         for name in _col_order(_rqs_names + [UNASSIGNED]):
-            board[name] = _card_order([hk for hk, h in home_of.items() if h == name])
+            board[name] = _card_order([hk for hk, h in home_of.items()
+                                       if h == name and _kept(hk)])
         containers = []
         for name, hks in board.items():
             items = []
@@ -4701,18 +4730,35 @@ td{{transition:background .15s ease}}
         header_to_name = {c["header"]: n for c, n in zip(containers, board.keys())}
 
         def _board_key(prefix, conts):
-            """A widget key that changes only when the board's contents do.
-
-            streamlit-sortables seeds its React state from the items prop on
-            mount and never syncs it again, so a board re-rendered with new
-            data keeps showing the old cards -- a room moved away downstairs
-            still appeared under its old housekeeper up here. Folding the
-            contents into the key remounts the component when, and only when,
-            the charts actually changed. Dragging alone leaves the charts
-            untouched, so a drag in progress is not thrown away.
-            """
+            """A widget key that changes only when the board's contents do."""
             sig = repr([(c["header"], c["items"]) for c in conts]).encode("utf-8")
             return f"{prefix}_{_hashlib.sha1(sig).hexdigest()[:10]}"
+
+        def _remount_slot(name, sig):
+            """A slot that puts the board somewhere new whenever `sig` changes.
+
+            streamlit-sortables seeds its React state from the items prop on
+            mount and never looks at the prop again, so a board handed new
+            data keeps drawing the old cards -- picking a different sort did
+            nothing at all on screen. Changing the widget key is not enough:
+            Streamlit keeps the same iframe and simply passes it new
+            arguments, which is exactly what this component ignores.
+
+            Moving the component to a different position in the page is the
+            one thing the browser cannot ignore -- it has to build the frame
+            again, and a fresh frame reads the props properly. Three slots are
+            enough: the counter moves on by one every time the contents
+            change, so the board never lands twice in the same place running.
+            A drag that has not been applied leaves the contents alone, so the
+            slot holds still and the drag is not thrown away.
+            """
+            sig_key, gen_key = f"_slotsig_{name}", f"_slotgen_{name}"
+            if st.session_state.get(sig_key) != sig:
+                st.session_state[sig_key] = sig
+                st.session_state[gen_key] = st.session_state.get(gen_key, 0) + 1
+            gen = st.session_state.get(gen_key, 0)
+            slots = [st.container(key=f"{name}_slot{i}") for i in range(3)]
+            return slots[gen % 3]
 
         KANBAN_CSS = """
         /* The component only ships a flex layout for its "vertical" variant —
@@ -4759,9 +4805,11 @@ td{{transition:background .15s ease}}
         moved = None
         try:
             from streamlit_sortables import sort_items
-            after = sort_items(containers, multi_containers=True,
-                               direction="horizontal", custom_style=KANBAN_CSS,
-                               key=_board_key("reassign_board", containers))
+            _kb_key = _board_key("reassign_board", containers)
+            with _remount_slot("kbboard", _kb_key):
+                after = sort_items(containers, multi_containers=True,
+                                   direction="horizontal",
+                                   custom_style=KANBAN_CSS, key=_kb_key)
             moved = {header_to_name.get(c["header"], c["header"]): c["items"]
                      for c in after}
         except Exception as _ex:
@@ -4983,15 +5031,16 @@ td{{transition:background .15s ease}}
                 from streamlit_sortables import sort_items
                 _room_conts = [{"header": _room_header(hk, v), "items": v}
                                for hk, v in room_home.items()]
-                r_after = sort_items(
-                    _room_conts,
-                    multi_containers=True, direction="horizontal",
-                    custom_style=ROOM_CSS,
-                    # Keyed on the contents, not merely the column set: two
-                    # housekeepers that both keep rooms leave the columns
-                    # unchanged, and the board would otherwise not notice the
-                    # room that moved between them.
-                    key=_board_key("room_board", _room_conts))
+                # Keyed on the contents, not merely the column set: two
+                # housekeepers that both keep rooms leave the columns
+                # unchanged, and the board would otherwise not notice the
+                # room that moved between them.
+                _rb_key = _board_key("room_board", _room_conts)
+                with _remount_slot("roomboard", _rb_key):
+                    r_after = sort_items(
+                        _room_conts,
+                        multi_containers=True, direction="horizontal",
+                        custom_style=ROOM_CSS, key=_rb_key)
                 r_moved = {c["header"].split("\n")[0]: c["items"] for c in r_after}
             except Exception as _ex:
                 st.info(f"Drag-and-drop unavailable: {_ex}")
