@@ -4608,19 +4608,30 @@ td{{transition:background .15s ease}}
         header_to_name = {c["header"]: n for c, n in zip(containers, board.keys())}
 
         KANBAN_CSS = """
-        .sortable-component{background:transparent;font-family:'DM Sans',sans-serif;
-            gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:6px}
+        /* The component only ships a flex layout for its "vertical" variant —
+           the horizontal one has no layout rule at all, so the columns fall
+           back to block and stack. Lay them out here instead: a grid that
+           wraps, so a dozen inspectors fill the width rather than running off
+           the side. */
+        .sortable-component{display:grid !important;
+            grid-template-columns:repeat(auto-fill,minmax(232px,1fr));
+            gap:12px;align-items:start;background:transparent;
+            font-family:'DM Sans',sans-serif;padding-bottom:4px}
         .sortable-container{background:#eef2f7;border:1px solid #e0e6ee;
-            border-radius:16px;padding:9px;min-width:250px;max-width:280px}
+            border-radius:16px;padding:9px;margin:0 !important;
+            min-width:0 !important;max-width:none;width:100%}
         .sortable-container-header{
             background:linear-gradient(135deg,#1b4a80 0%,#2d72b8 55%,#4b93d1 100%);
             color:#fff;border-radius:11px;padding:9px 12px;
             font-size:.73rem;font-weight:700;line-height:1.5;
             white-space:pre-line;letter-spacing:.01em;
             box-shadow:0 3px 10px rgba(27,74,128,.24)}
-        .sortable-container-body{min-height:76px;padding-top:9px}
-        .sortable-item{background:#fff;border:1px solid #e0e6ee;border-radius:12px;
-            padding:10px 12px;margin:0 0 8px;font-size:.74rem;line-height:1.55;
+        .sortable-container-body{min-height:76px;padding:9px 0 0 !important;
+            background:transparent !important}
+        .sortable-item{background:#fff !important;border:1px solid #e0e6ee;
+            border-radius:12px;height:auto !important;
+            padding:10px 12px !important;margin:0 0 8px !important;
+            font-size:.74rem;line-height:1.55;
             color:#26313f;text-align:left;white-space:pre-line;font-weight:500;
             box-shadow:0 1px 2px rgba(16,26,42,.05);cursor:grab;width:100%;
             transition:box-shadow .15s ease,border-color .15s ease,transform .1s ease}
