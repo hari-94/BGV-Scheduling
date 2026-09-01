@@ -1098,6 +1098,7 @@ footer{visibility:hidden!important;}
     with st.form("login_form"):
         _uname = st.text_input("Username")
         _pw = st.text_input("Password", type="password")
+        _remember = st.checkbox("Keep me signed in on this device", value=True)
         _sub = st.form_submit_button("Sign In", type="primary", use_container_width=True)
     if _sub:
         if not _uname or not _pw:
@@ -1106,6 +1107,12 @@ footer{visibility:hidden!important;}
             _user = db.authenticate(_uname.strip(), _pw)
             if _user:
                 auth.login(_user)
+                if _remember:
+                    try:
+                        import session as _session
+                        _session.remember(_user)
+                    except Exception as _ex:
+                        print(f"[app] could not persist session: {_ex}")
                 # Record who signed in and when (best-effort; never blocks login).
                 try:
                     db.log_login(_user.get("username",""),
@@ -4522,13 +4529,19 @@ td{{transition:background .15s ease}}
     with tab_reassign:
         st.markdown('<p class="sec">Board — drag a housekeeper to another RQS</p>',
                     unsafe_allow_html=True)
+        # Sorting moves the CARDS, never the columns. An inspector's column
+        # staying put is what makes the board readable -- when the columns
+        # reordered too, the same place on screen held a different person and
+        # every number appeared to have changed.
+        KB_SORTS = ["Busiest first", "Lightest first", "Most rooms first",
+                    "Building", "Name (A-Z)"]
         _sc1, _sc2 = st.columns([2, 3])
         with _sc1:
-            kb_sort = st.selectbox(
-                "Sort", ["Workload — heaviest first", "RQS name", "Building"],
-                key="kb_sort")
-        st.caption("One column per inspector. Each card is a housekeeper with everything "
-                   "needed to judge the move. Dragging takes all of their charts. "
+            kb_sort = st.selectbox("Sort housekeepers by", KB_SORTS,
+                                   key="kb_sort")
+        st.caption("One column per inspector, always in the same order. Sorting "
+                   "reorders the cards inside each column, not the columns. "
+                   "Dragging a card takes all of that housekeeper's charts. "
                    "Nothing is saved until you press Apply.")
 
         # A housekeeper's charts can already be split across inspectors; the card
@@ -4632,36 +4645,47 @@ td{{transition:background .15s ease}}
             return any(g.get("service_type") == SVC_DS
                        for g in hk_charts.get(hk, []))
 
-        def _card_order(hks):
+        def _hk_rooms(hk):
+            return sum(len(g.get("rooms") or []) for g in hk_charts.get(hk, []))
+
+        def _card_order(hks, ds_last=False):
+            """Order housekeepers by whichever sort is showing.
+
+            `ds_last` pushes Daily Service rounds to the end regardless: on the
+            room board those columns are far wider than the rest, so they sit
+            at the bottom out of the way. The main board honours the sort
+            literally, because a sort that quietly overrules itself is exactly
+            what makes the numbers look wrong.
+            """
             if kb_sort == "Building":
-                key = lambda h: (_hk_bld(h), h.lower())        # noqa: E731
-            elif kb_sort == "RQS name":
-                key = lambda h: (h.lower(),)                   # noqa: E731
+                key = lambda h: (_hk_bld(h), h.lower())         # noqa: E731
+            elif kb_sort == "Name (A-Z)":
+                key = lambda h: (h.lower(),)                    # noqa: E731
+            elif kb_sort == "Lightest first":
+                key = lambda h: (_hk_mins(h), h.lower())        # noqa: E731
+            elif kb_sort == "Most rooms first":
+                key = lambda h: (-_hk_rooms(h), h.lower())      # noqa: E731
             else:
-                key = lambda h: (-_hk_mins(h), h.lower())      # noqa: E731
-            # A Daily Service round carries several times the rooms of a Full
-            # Clean chart, so any workload sort would park those people at the
-            # top of every column and push the charts you are actually
-            # rebalancing out of sight. They sort to the bottom instead.
-            return sorted(hks, key=lambda h: (_is_ds_hk(h),) + key(h))
+                key = lambda h: (-_hk_mins(h), h.lower())       # noqa: E731
+            if ds_last:
+                return sorted(hks, key=lambda h: (_is_ds_hk(h),) + key(h))
+            return sorted(hks, key=key)
 
         def _col_order(names):
-            # The no-RQS column stays last wherever it lands; it is a holding
-            # pen, not an inspector to be ranked among the others.
-            real = [n for n in names if n != UNASSIGNED]
-            if kb_sort == "RQS name":
-                real = sorted(real, key=str.lower)
-            elif kb_sort == "Building":
-                def _cb(n):
-                    bs = sorted({b for hk, h in home_of.items() if h == n
-                                 for g in hk_charts.get(hk, [])
-                                 for b in g.get("blds") or set()})
-                    return (bs[0] if bs else 99, n.lower())
-                real = sorted(real, key=_cb)
-            else:
-                real = sorted(real, key=lambda n: (
-                    -sum(_hk_mins(hk) for hk, h in home_of.items() if h == n), n.lower()))
-            return real + [UNASSIGNED]
+            """A fixed column order: the two RQS on duty, then everyone else
+            by name, then the holding pen.
+
+            Deliberately independent of the sort. Columns that reshuffle when
+            you change how the cards are ordered make the board unreadable --
+            you look at the third column expecting the person who was there a
+            moment ago.
+            """
+            r1 = st.session_state.get("rqs1")
+            r2 = st.session_state.get("rqs2")
+            lead = [n for n in (r1, r2) if n and n in names]
+            rest = sorted((n for n in names
+                           if n != UNASSIGNED and n not in lead), key=str.lower)
+            return lead + rest + [UNASSIGNED]
 
         board, card_to_hk = {}, {}
         for name in _col_order(_rqs_names + [UNASSIGNED]):
@@ -4862,7 +4886,7 @@ td{{transition:background .15s ease}}
 
         scope_hks = _card_order([hk for hk in hk_charts
                                  if home_of.get(hk, UNASSIGNED) in scope
-                                 and not is_unassigned_hk(hk)])
+                                 and not is_unassigned_hk(hk)], ds_last=True)
         if not scope_hks:
             st.caption("No housekeepers under the inspectors you picked.")
         else:

@@ -348,6 +348,19 @@ def load_custom_options() -> dict:
         print(f"[db] load_custom_options error: {ex}")
         return {}
 
+def save_session(token_hash: str, rec: dict) -> None:
+    """Store a signed-in session. Only the token's hash is ever written."""
+    _upsert_key(f"session_{token_hash}", rec)
+
+def load_session(token_hash: str) -> dict | None:
+    return _load_key(f"session_{token_hash}")
+
+def delete_session(token_hash: str) -> None:
+    try:
+        _delete_key(f"session_{token_hash}")
+    except Exception as ex:
+        print(f"[db] delete_session error: {ex}")
+
 def save_user_lang(username: str, code: str) -> None:
     """Remember which language someone reads the app in."""
     try:

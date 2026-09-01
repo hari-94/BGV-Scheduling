@@ -81,9 +81,19 @@ def get_welcome_msg(role: str) -> str:
 
 
 def init_auth():
+    fresh = "logged_in" not in st.session_state
     for k, v in [("logged_in",False),("username",""),("display_name",""),("role",""),("user_id",None)]:
         if k not in st.session_state:
             st.session_state[k] = v
+    # A refresh starts a brand new session state, which is what used to throw
+    # everyone back to the login form. If the browser still carries a valid
+    # token, sign them straight back in.
+    if fresh and not st.session_state["logged_in"]:
+        try:
+            import session
+            session.restore()
+        except Exception as ex:
+            print(f"[auth] session restore failed: {ex}")
 
 def login(user: dict):
     st.session_state["logged_in"]    = True
@@ -93,6 +103,11 @@ def login(user: dict):
     st.session_state["user_id"]      = user.get("id")
 
 def logout():
+    try:
+        import session
+        session.forget()
+    except Exception as ex:
+        print(f"[auth] session cleanup failed: {ex}")
     for k in ("logged_in","username","display_name","role","user_id"):
         st.session_state[k] = False if k=="logged_in" else ""
 
