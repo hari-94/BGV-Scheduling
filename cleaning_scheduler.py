@@ -241,25 +241,56 @@ section[data-testid="stSidebar"] h3{
 }
 section[data-testid="stSidebar"] hr{border-color:var(--border)!important;}
 
-/* ── Stat cards ── */
-.stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:1.2rem;}
-.sc{
-  flex:1 1 100px;background:rgba(255,255,255,.03)!important;border:1px solid var(--border)!important;
-  border-radius:var(--radius)!important;padding:16px 14px;text-align:center;
-  backdrop-filter:blur(12px);transition:transform .2s,box-shadow .2s,border-color .2s;
-  animation:cardIn .5s cubic-bezier(.16,1,.3,1) both;
-}
-.sc:hover{transform:translateY(-3px) scale(1.02);border-color:var(--border-hi)!important;box-shadow:var(--glow-sm);}
-.sc.hi{background:linear-gradient(135deg,rgba(99,102,241,.25),rgba(99,102,241,.1))!important;border-color:rgba(99,102,241,.4)!important;box-shadow:var(--glow-sm);}
-.sc.ds{background:linear-gradient(135deg,rgba(20,184,166,.2),rgba(20,184,166,.06))!important;border-color:rgba(20,184,166,.35)!important;}
-.sc.dv{background:linear-gradient(135deg,rgba(245,158,11,.2),rgba(245,158,11,.06))!important;border-color:rgba(245,158,11,.35)!important;}
-.sc .n{font-family:'Syne',sans-serif!important;font-size:1.8rem;font-weight:800;color:#fff;line-height:1;margin-bottom:3px;text-shadow:0 0 20px rgba(99,102,241,.5);}
-.sc.ds .n{text-shadow:0 0 20px rgba(20,184,166,.5);}
-.sc.dv .n{text-shadow:0 0 20px rgba(245,158,11,.5);}
-.sc .l{font-family:'DM Mono',monospace!important;font-size:.58rem;color:var(--txt2);text-transform:uppercase;letter-spacing:.1em;font-weight:500;}
-@keyframes cardIn{from{opacity:0;transform:translateY(16px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
-.sc:nth-child(1){animation-delay:.05s}.sc:nth-child(2){animation-delay:.1s}.sc:nth-child(3){animation-delay:.15s}
-.sc:nth-child(4){animation-delay:.2s}.sc:nth-child(5){animation-delay:.25s}.sc:nth-child(6){animation-delay:.3s}
+/* ── The day's numbers ──
+   These were dark-theme cards -- white numerals, glow shadows, translucent
+   fills -- left over on a page that is now white, and every figure had the
+   same weight whether it was the whole property or a service nobody is doing.
+   A grid instead of seven equal columns, so nothing squeezes when the window
+   narrows. */
+.k2row{display:grid;gap:9px;margin:0 0 1.2rem;
+  grid-template-columns:repeat(auto-fit,minmax(132px,1fr));}
+.k2{background:#fff;border:1px solid #e3e8ef;border-radius:14px;
+  padding:13px 15px;position:relative;overflow:hidden;
+  box-shadow:0 1px 2px rgba(16,26,42,.05);
+  transition:transform .16s ease,box-shadow .18s ease,border-color .18s ease;
+  animation:k2in .4s cubic-bezier(.2,.8,.25,1) both;}
+.k2:hover{transform:translateY(-2px);border-color:#c9d8e8;
+  box-shadow:0 8px 20px rgba(16,26,42,.09);}
+/* Figures in DM Sans, not Syne: Syne's numerals are drawn narrow and slanted,
+   which is handsome in a heading and hard to read at a glance in a total.
+   Tabular figures so the columns do not jitter as the numbers change. */
+.k2n{font-family:'DM Sans',sans-serif;font-size:1.75rem;font-weight:800;
+  line-height:1;color:#16202e;font-variant-numeric:tabular-nums;
+  letter-spacing:-.02em;}
+.k2l{font-family:'DM Mono',monospace;font-size:.58rem;color:#64707f;
+  text-transform:uppercase;letter-spacing:.09em;font-weight:500;margin-top:5px;}
+.k2sub{font-size:.66rem;color:#8a95a4;margin-top:3px;}
+
+.k2.hero{grid-column:span 2;
+  background:linear-gradient(135deg,#12395f 0%,#255f9c 60%,#3d84c4 100%);
+  border-color:transparent;box-shadow:0 6px 18px rgba(18,57,95,.22);}
+.k2.hero .k2n{color:#fff;font-size:2.15rem;}
+.k2.hero .k2l{color:#cfe0f2;}
+.k2.hero .k2sub{color:#bcd3ea;}
+/* The service mix, so four separate counts read as one picture of the day. */
+.k2bar{display:flex;height:7px;border-radius:99px;overflow:hidden;margin-top:9px;
+  background:rgba(255,255,255,.2);}
+.k2bar i{display:block;height:100%;}
+
+.k2.svc{border-left:4px solid var(--acc);}
+.k2.svc .k2n{color:var(--acc);}
+.k2.svc.empty{opacity:.5;}
+.k2.svc.empty .k2n{color:#94a3b8;}
+
+.k2.alert.ok .k2n{color:#0f8f4a;}
+.k2.alert.warn{border-left:4px solid #e5484d;background:#fff7f7;}
+.k2.alert.warn .k2n{color:#c2261f;}
+@keyframes k2in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.k2:nth-child(2){animation-delay:.04s}.k2:nth-child(3){animation-delay:.08s}
+.k2:nth-child(4){animation-delay:.12s}.k2:nth-child(5){animation-delay:.16s}
+.k2:nth-child(6){animation-delay:.2s}.k2:nth-child(7){animation-delay:.24s}
+.k2:nth-child(8){animation-delay:.28s}
+@media (max-width:560px){.k2.hero{grid-column:span 2}.k2n{font-size:1.45rem}}
 .sc:nth-child(7){animation-delay:.35s}.sc:nth-child(8){animation-delay:.4s}
 
 /* ── Rules box ── */
@@ -332,7 +363,7 @@ header[data-testid="stHeader"]{
   .pg-sub{font-size:.72rem!important;}
 
   /* Stat cards: 2 per row */
-  .stat-row{gap:5px!important;}
+  .k2row{gap:6px!important;}
   .sc{flex:1 1 calc(50% - 5px)!important;min-width:calc(50% - 5px)!important;padding:9px 7px!important;}
   .sc .n{font-size:1.25rem!important;}
   .sc .l{font-size:.5rem!important;letter-spacing:.04em!important;}
@@ -3997,16 +4028,64 @@ n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="M
               and not is_unassigned_hk(g.get("housekeeper")) and g["time"]<LOW_MIN)
 n_need_hk=sum(1 for g in fg if str(g.get("housekeeper","")).startswith(NEED_HK_PREFIX))
 
-st.markdown(f"""<div class="stat-row">
-  <div class="sc hi"><div class="n">{total_rooms}</div><div class="l">Total Rooms</div></div>
-  <div class="sc"><div class="n" style="color:#2563EB">{fc_rooms_n}</div><div class="l">Full Clean</div></div>
-  <div class="sc"><div class="n" style="color:#7C3AED">{ih_rooms_n}</div><div class="l">Full Clean (IH)</div></div>
-  <div class="sc ds"><div class="n">{ds_rooms_n}</div><div class="l">Daily Service</div></div>
-  <div class="sc dv"><div class="n">{dv_rooms_n}</div><div class="l">Dust &amp; Vac</div></div>
-  <div class="sc"><div class="n" style="color:{'#059669' if n_free_hk==0 else '#d97706'}">{n_free_hk}</div>
-    <div class="l">Free HKs</div></div>
-  <div class="sc"><div class="n" style="color:{'#059669' if n_low_hk==0 else '#dc2626'}">{n_low_hk}</div>
-    <div class="l">Low-Hour HKs</div></div>
+# The day in one line: how much work there is, what kind, and whether
+# anybody is short. Room counts alone did not say much -- 35 Full Cleans
+# means nothing without knowing it is 54% of the day and 4,200 minutes.
+_svc_mins = {k: sum(g["time"] for g in v) for k, v in
+             (("fc", fc_g), ("ih", ih_g), ("ds", ds_g), ("dv", dv_g))}
+_all_mins = sum(_svc_mins.values())
+_working_hk = len({g.get("housekeeper") for g in fg
+                   if g.get("housekeeper") and g.get("housekeeper") != "Manager"
+                   and not is_unassigned_hk(g.get("housekeeper", ""))})
+
+
+def _kpi_share(n):
+    return f"{round(100 * n / total_rooms)}%" if total_rooms else "—"
+
+
+def _svc_tile(n, mins, label, colour, key):
+    """One service. A service nobody is doing today is dimmed rather than
+    shouting the same size as the one carrying half the property."""
+    empty = " empty" if not n else ""
+    return (f'<div class="k2 svc{empty}" style="--acc:{colour}">'
+            f'<div class="k2n">{n}</div>'
+            f'<div class="k2l">{label}</div>'
+            f'<div class="k2sub">{_kpi_share(n)} · {mins:,}m</div></div>')
+
+
+def _alert_tile(n, label, good_when_zero=True, hint=""):
+    tone = "ok" if (n == 0) == good_when_zero else ("warn" if n else "ok")
+    return (f'<div class="k2 alert {tone}"><div class="k2n">{n}</div>'
+            f'<div class="k2l">{label}</div>'
+            f'<div class="k2sub">{hint}</div></div>')
+
+
+_bar = "".join(
+    f'<i style="width:{100 * n / total_rooms:.4f}%;background:{c}" title="{lbl}"></i>'
+    for n, c, lbl in ((fc_rooms_n, "#2563a8", "Full Clean"),
+                      (ih_rooms_n, "#8b5cf6", "Full Clean (IH)"),
+                      (ds_rooms_n, "#14b8a6", "Daily Service"),
+                      (dv_rooms_n, "#f0b429", "Dust & Vac"))
+    if n and total_rooms) or '<i style="width:100%;background:#e3e8ef"></i>'
+
+st.markdown(f"""<div class="k2row">
+  <div class="k2 hero">
+    <div class="k2n">{total_rooms}</div>
+    <div class="k2l">Rooms today</div>
+    <div class="k2bar">{_bar}</div>
+    <div class="k2sub">{_all_mins:,} minutes · {_working_hk} housekeeper{
+        '' if _working_hk == 1 else 's'} · {len(fg)} charts</div>
+  </div>
+  {_svc_tile(fc_rooms_n, _svc_mins["fc"], "Full Clean", "#2563a8", "fc")}
+  {_svc_tile(ih_rooms_n, _svc_mins["ih"], "Full Clean (IH)", "#8b5cf6", "ih")}
+  {_svc_tile(ds_rooms_n, _svc_mins["ds"], "Daily Service", "#14b8a6", "ds")}
+  {_svc_tile(dv_rooms_n, _svc_mins["dv"], "Dust &amp; Vac", "#f0b429", "dv")}
+  {_alert_tile(n_need_hk, "Need a housekeeper",
+               hint="charts with nobody on them" if n_need_hk else "all covered")}
+  {_alert_tile(n_free_hk, "Not on a chart",
+               hint="present but unused" if n_free_hk else "everyone is working")}
+  {_alert_tile(n_low_hk, "Under " + str(LOW_MIN) + "m",
+               hint="light charts" if n_low_hk else "all charts full")}
 </div>""", unsafe_allow_html=True)
 
 _is_hk = auth.is_housekeeper()
