@@ -770,8 +770,11 @@ with tab_month:
                         worked += 1
                     if kind == ri.KIND_DAILY:
                         ds += 1
-                    lbl = datetime.date.fromisoformat(_d).strftime("%-d") \
-                        if os.name != "nt" else str(int(_d[8:]))
+                    # "Sun 1" rather than "1": on a grid this wide the day of
+                    # the week is what the eye is looking for, and a bare
+                    # number makes you count back to the last Sunday.
+                    _dd = datetime.date.fromisoformat(_d)
+                    lbl = _dd.strftime("%a") + " " + str(_dd.day)
                     row[lbl] = _code(raw, kind)
                     kinds[lbl] = kind
                 _rows.append({"Person": _p["label"], "In": worked, "DS": ds, **row})
@@ -806,7 +809,7 @@ with tab_month:
                     "DS": st.column_config.NumberColumn(
                         "DS", pinned=True, width=48,
                         help="Days on daily service this month"),
-                    **{c: st.column_config.TextColumn(c, width=34) for c in _daycols}})
+                    **{c: st.column_config.TextColumn(c, width=52) for c in _daycols}})
 
             st.caption("The name and the two tallies stay put while the days slide "
                        "past. **In** is days worked, **DS** days on daily service — "
