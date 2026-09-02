@@ -32,7 +32,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 13
+__version__ = 14
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -1472,3 +1472,129 @@ def build_roster_update(people, existing_roster=None):
         "unknown":     unknown,
         "cover":       cover,
     }
+
+
+# ── Daily service, shared out fairly ─────────────────────────────────────────
+#: What the sheet writes in the cell. "Daily service" is far and away the most
+#: common of the six spellings in the workbook, so a suggestion uses it.
+DS_LABEL = "Daily service"
+
+#: How far back a turn still counts against you.
+WINDOW_DAYS = 28
+
+#: Pseudo-days of smoothing applied to a thin record. See daily_service_record.
+SMOOTH_DAYS = 10
+
+
+def daily_service_record(rows, before=None, since=None):
+    """Who has done daily service, how often, and how long ago.
+
+    Counted against days actually worked, not calendar days: somebody part
+    time is not owed fewer turns per shift than somebody full time.
+    """
+    rec = {}
+    for r in rows:
+        if r.get("group") != "hk":
+            continue
+        if before and r["date"] >= before:
+            continue
+        if since and r["date"] < since:
+            continue
+        p = r["person"]
+        d = rec.setdefault(p, {"person": p, "label": r.get("label") or p,
+                               "worked": 0, "ds": 0, "last": None})
+        if r.get("kind") in WORKED_KINDS:
+            d["worked"] += 1
+        if r.get("daily_service"):
+            d["ds"] += 1
+            if not d["last"] or r["date"] > d["last"]:
+                d["last"] = r["date"]
+    # Smoothed, not raw. A raw ds/worked lets somebody with three worked days
+    # and no turns outrank a veteran who has done twenty in three hundred, so
+    # the rotation chases whoever is newest instead of whoever is owed a turn.
+    # Ten pseudo-days at the house rate pulls thin records back toward average
+    # until there is enough of a record to speak for itself.
+    tot_ds = sum(d["ds"] for d in rec.values())
+    tot_worked = sum(d["worked"] for d in rec.values())
+    rate = (tot_ds / tot_worked) if tot_worked else 0.0
+    for d in rec.values():
+        d["raw_share"] = d["ds"] / d["worked"] if d["worked"] else 0.0
+        d["share"] = ((d["ds"] + SMOOTH_DAYS * rate) /
+                      (d["worked"] + SMOOTH_DAYS)) if (d["worked"] + SMOOTH_DAYS) else 0.0
+        # How many turns this person is owed, against what their days imply.
+        d["owed"] = d["worked"] * rate - d["ds"]
+    return rec
+
+
+def suggest_daily_service(rows, week, dates, per_day, before=None,
+                          window_days=WINDOW_DAYS):
+    """Pick who does daily service on each day of a planned week.
+
+    Two rules, in that order:
+
+    1.  Nobody takes a second turn in the week until everyone who could have
+        taken a first has had one. That is the "no repeats" rule, and the
+        "unless there is nobody left" exception falls out of it: when the pool
+        of people on nought is empty the count simply starts again.
+
+    2.  Between people on equal footing for the week, the turn goes to
+        whoever has done it least often across their worked days, and then to
+        whoever has waited longest. This is the part that matters. Within a
+        week repeats are already rare; it is across the weeks that the job
+        piles up on the same few people -- in this workbook one housekeeper
+        spends 18% of her days on it while another has worked 77 days and
+        never been asked once.
+
+    `per_day` maps each date to how many people that day needs. Returns
+    {date: [names]} plus the reasoning, so the suggestion can be argued with.
+    """
+    # A rolling window, not the whole record. Balancing on everything ever
+    # worked makes the rotation spend the next two months repaying old debts:
+    # it picks the same owed people every day they are in and skips everybody
+    # else entirely. Replayed over ten real weeks that was measurably WORSE
+    # than what the sheet does by hand. Fairness people actually feel is "have
+    # I had it lately", so only the last few weeks count.
+    edge = None
+    if window_days and dates:
+        edge = (_dt.date.fromisoformat(min(dates))
+                - _dt.timedelta(days=window_days)).isoformat()
+    hist = daily_service_record(rows, before=before, since=edge)
+    this_week = {p: 0 for p in hist}
+    picked, why = {}, {}
+
+    for iso in dates:
+        want = int((per_day or {}).get(iso) or 0)
+        # Only housekeepers, and only the ones the plan has working that day.
+        avail = []
+        for name, r in (week.get("people") or {}).items():
+            if r.get("group") != "hk":
+                continue
+            raw = (r.get("cells") or {}).get(iso, "")
+            if classify(raw) not in WORKED_KINDS:
+                continue
+            avail.append(name)
+
+        chosen = []
+        for _ in range(min(want, len(avail))):
+            pool = [n for n in avail if n not in chosen]
+            if not pool:
+                break
+            fewest = min(this_week.get(n, 0) for n in pool)
+            # The hard rule: only people on the lowest count for this week.
+            tier = [n for n in pool if this_week.get(n, 0) == fewest]
+            tier.sort(key=lambda n: (
+                hist.get(n, {}).get("share", 0.0),          # least often, first
+                hist.get(n, {}).get("last") or "",          # longest wait, first
+                n.lower()))
+            pick = tier[0]
+            chosen.append(pick)
+            this_week[pick] = this_week.get(pick, 0) + 1
+            h = hist.get(pick, {})
+            why[(iso, pick)] = {
+                "share": h.get("share", 0.0), "ds": h.get("ds", 0),
+                "worked": h.get("worked", 0), "last": h.get("last"),
+                "second_turn": this_week[pick] > 1,
+            }
+        picked[iso] = chosen
+    return {"picks": picked, "why": why, "history": hist,
+            "week_counts": {p: n for p, n in this_week.items() if n}}

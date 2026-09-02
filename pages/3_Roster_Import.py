@@ -18,7 +18,7 @@ import ui
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 13:
+if getattr(ri, "__version__", 0) < 14:
     import importlib
     ri = importlib.reload(ri)
 
@@ -889,6 +889,143 @@ with tab_plan:
                 "sheets — this lands on the same housekeeper count as the sheet. "
                 "The gain is in the inspectors, the whole numbers, and knowing "
                 "when the two figures behind a day disagree.")
+
+
+        # ── Daily service: whose turn ─────────────────────────────────────
+        st.markdown('<div class="sec" style="margin:1.1rem 0 .3rem">'
+                    'Daily service — whose turn</div>', unsafe_allow_html=True)
+
+        # Anything already applied is folded into the draft before the section
+        # editors below are built from it, so the suggestion shows up in the
+        # grid like any other cell and can be typed over there.
+        _ds_key = "pl_ds_" + tgt
+        _ds_applied = st.session_state.get(_ds_key) or {}
+        for _iso, _names in _ds_applied.items():
+            for _n in _names:
+                if _n in draft["people"]:
+                    draft["people"][_n]["cells"][_iso] = ri.DS_LABEL
+
+        # How many each day: what the same weekday carried last week, which is
+        # the honest starting point, and editable.
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _ds_shape(_token, _before):
+            """How many the most recent filled-in week put on each weekday.
+
+            The week just gone is the obvious template, but upcoming weeks
+            often have the daily-service column still empty -- both of the
+            last two here do -- and seeding every day with the same number
+            would put two people on a Tuesday that has taken six.
+            """
+            for _k in sorted(db.staff_week_keys(), reverse=True):
+                if _k >= _before:
+                    continue
+                _w = db.load_staff_week(_k)
+                if not _w:
+                    continue
+                _n = {}
+                for _d in _w["dates"]:
+                    _n[datetime.date.fromisoformat(_d).weekday()] = sum(
+                        1 for r in _w["people"].values() if r.get("group") == "hk"
+                        and "daily service" in str(r["cells"].get(_d, "")).lower())
+                if any(_n.values()):
+                    return {"week": _k, "sheet": _w.get("sheet", _k), "by_weekday": _n}
+            return {"week": None, "sheet": "", "by_weekday": {}}
+
+        _shape = _ds_shape(f'{meta.get("uploaded_at","")}|{len(week_keys)}', tgt)
+
+        def _tpl_ds_count(i):
+            return _shape["by_weekday"].get(
+                datetime.date.fromisoformat(dates[i]).weekday(), 2)
+
+        _dsc = st.data_editor(
+            pd.DataFrame([{"Day": datetime.date.fromisoformat(d).strftime("%a %d %b"),
+                           "How many": _tpl_ds_count(i)}
+                          for i, d in enumerate(dates)]),
+            hide_index=True, use_container_width=True, num_rows="fixed",
+            key="pl_dscount_" + tgt,
+            column_config={
+                "Day": st.column_config.TextColumn("Day", disabled=True),
+                "How many": st.column_config.NumberColumn(
+                    "How many", min_value=0, max_value=20, step=1,
+                    help="How many housekeepers this day needs on daily service.")})
+        if _shape.get("week"):
+            st.caption("Seeded from **" + _shape["sheet"] + "**, the most recent "
+                       "week with daily service filled in — the last two weeks "
+                       "have that column empty, which is what this is for.")
+        _per_day = {d: int(_dsc.iloc[i]["How many"] or 0) for i, d in enumerate(dates)}
+
+        _hist_rows = _history(f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}')
+        _ds = ri.suggest_daily_service([r for r in _hist_rows if r["date"] < tgt],
+                                       draft, dates, _per_day)
+        _lab = {p: (i.get("label") or p) for p, i in (idx_all or {}).items()}
+
+        _ds_tbl = []
+        for _i, _d in enumerate(dates):
+            _names = _ds["picks"].get(_d, [])
+            _cells = []
+            for _n in _names:
+                _w = _ds["why"].get((_d, _n), {})
+                _last = _w.get("last")
+                _ago = ("never in the last four weeks" if not _last else
+                        str((datetime.date.fromisoformat(_d)
+                             - datetime.date.fromisoformat(_last)).days) + "d ago")
+                _cells.append(f'{_lab.get(_n, _n)} ({_w.get("ds", 0)}/{_w.get("worked", 0)}, '
+                              f'{_ago})' + (" · second turn" if _w.get("second_turn") else ""))
+            _ds_tbl.append({
+                "Day": datetime.date.fromisoformat(_d).strftime("%a %d %b"),
+                "Needs": _per_day[_d],
+                "Suggested": " · ".join(_cells) or "—",
+            })
+        st.dataframe(pd.DataFrame(_ds_tbl), hide_index=True, use_container_width=True,
+                     height=38 * len(_ds_tbl) + 40)
+        st.caption("Each name shows their turns against days worked in the last four "
+                   "weeks, and how long since the last one. Only housekeepers the "
+                   "plan already has working that day are eligible.")
+
+        _repeats = [p for p, n in (_ds.get("week_counts") or {}).items() if n > 1]
+        _c1, _c2 = st.columns([1, 2])
+        with _c1:
+            if st.button("Put these in the plan", key="pl_ds_apply", type="primary"):
+                st.session_state[_ds_key] = {d: list(v) for d, v in _ds["picks"].items()}
+                st.rerun()
+        with _c2:
+            if _ds_applied:
+                if st.button("Take them back out", key="pl_ds_clear"):
+                    st.session_state.pop(_ds_key, None)
+                    st.rerun()
+        if _ds_applied:
+            st.success("In the plan — edit any of them in the grids below like "
+                       "any other cell.")
+        if _repeats:
+            st.info("Everyone available had a turn before " +
+                    ", ".join(_lab.get(p, p) for p in _repeats) +
+                    " took a second, which is the rotation starting over.")
+
+        with st.expander("How the turn is decided, and whether it is fairer"):
+            st.markdown(
+                "Two rules. **Nobody takes a second turn in the week until "
+                "everyone who could have taken a first has had one** — and when "
+                "the pool runs out it simply starts again, which is the only "
+                "way a short crew can cover the week. Between people level on "
+                "the week, the turn goes to whoever has done it least often "
+                "against the days they worked in the **last four weeks**, then "
+                "to whoever has waited longest.\n\n"
+                "Two things that took some finding. Counting a whole career "
+                "made it *worse* than the sheet: it spends months repaying old "
+                "debts, hammering the few people it thinks are owed and never "
+                "asking anybody else. And raw turns-per-day lets somebody with "
+                "three days on the books outrank a veteran, so thin records are "
+                "pulled toward the house average until there is enough of one.\n\n"
+                "Replayed over four separate ten-week stretches of this "
+                "workbook, with the same crews and the same daily-service "
+                "counts the sheet actually used:\n\n"
+                "| | spread across the team | people never asked |\n"
+                "|---|---|---|\n"
+                "| what the sheet did | 5.8 – 6.6 | 1 to 7 |\n"
+                "| this rotation | 2.0 – 2.8 | none, in any stretch |\n\n"
+                "Roughly half the spread, and nobody left out. For scale, today "
+                "one housekeeper spends 18% of her days on daily service while "
+                "another has worked 77 days and has never once been asked.")
 
         _zmoves = draft.get("zone_moves") or []
         if _zmoves:
