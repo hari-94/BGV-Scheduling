@@ -11,13 +11,14 @@ import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, roster_import as ri
+import staffing
 import ui
 
 # After a deploy the server can still hold the previous roster_import in
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 12:
+if getattr(ri, "__version__", 0) < 13:
     import importlib
     ri = importlib.reload(ri)
 
@@ -744,6 +745,151 @@ with tab_plan:
                          for pid, iso, g in sorted(low, key=lambda x: x[2]["confidence"])]),
                         use_container_width=True, hide_index=True, height=300)
 
+
+        # ── How many people the week needs ────────────────────────────────
+        # The workbook works this out in rows it keeps hidden: HSKP Needed is
+        # =<labour minutes>/360 and RQS needed is <checkouts>/12. Nothing had
+        # ever read them, so the numbers behind a week's staffing were
+        # invisible to everyone including the person planning it.
+        st.markdown('<div class="sec" style="margin:1.1rem 0 .3rem">'
+                    'How many people this week needs</div>', unsafe_allow_html=True)
+
+        _tpl_metrics = template.get("metrics") or {}
+        _tpl_dates = list(template.get("dates") or [])
+
+        def _seed(i):
+            """Last week's numbers for the same weekday, as a starting point."""
+            if i < len(_tpl_dates):
+                return _tpl_metrics.get(_tpl_dates[i]) or {}
+            return {}
+
+        # Who the plan currently has working, per day, straight from the draft.
+        def _on_hand(iso, group):
+            return sum(1 for rec in draft["people"].values()
+                       if rec.get("group") == group
+                       and ri.classify(rec["cells"].get(iso, "")) in ri.WORKED_KINDS)
+
+        _mrows = []
+        for _i, _d in enumerate(dates):
+            _m = _seed(_i)
+            _mrows.append({
+                "Day": datetime.date.fromisoformat(_d).strftime("%a %d %b"),
+                "Labour minutes": int(_m.get("minutes") or 0),
+                "Checkouts": int(_m.get("checkouts") or 0),
+                "Daily services": int(_m.get("dailies") or 0),
+            })
+        st.caption("Seeded from the same weekday last week — type over any of it. "
+                   "Labour minutes and checkouts are the two numbers the sheet "
+                   "hides; daily services is the row it leaves blank, and filling "
+                   "it in is what makes the inspector count right.")
+        _med = st.data_editor(
+            pd.DataFrame(_mrows), hide_index=True, use_container_width=True,
+            num_rows="fixed", key="pl_metrics_" + tgt,
+            column_config={
+                "Day": st.column_config.TextColumn("Day", disabled=True),
+                "Labour minutes": st.column_config.NumberColumn(
+                    "Labour minutes", min_value=0, max_value=40000, step=10,
+                    help="The day's total cleaning time. The sheet keeps this "
+                         "inside the HSKP Needed formula, as =4460/360."),
+                "Checkouts": st.column_config.NumberColumn(
+                    "Checkouts", min_value=0, max_value=500, step=1),
+                "Daily services": st.column_config.NumberColumn(
+                    "Daily services", min_value=0, max_value=500, step=1),
+            })
+
+        _ests, _plan_metrics, _warn = [], {}, []
+        for _i, _d in enumerate(dates):
+            _row = _med.iloc[_i]
+            _mins = float(_row["Labour minutes"] or 0)
+            _chk = int(_row["Checkouts"] or 0)
+            _dly = int(_row["Daily services"] or 0)
+            _e = staffing.estimate(_mins, _chk, _dly,
+                                   on_hand_hskp=_on_hand(_d, "hk"),
+                                   on_hand_rqs=_on_hand(_d, "rqs"))
+            _e["date"] = _d
+            _ests.append(_e)
+            _plan_metrics[_d] = {"minutes": _mins, "checkouts": _chk,
+                                 "dailies": _dly,
+                                 "hskp_needed": _e["hskp"], "rqs_needed": _e["rqs"]}
+            _note = staffing.consistency(_mins, _chk, _dly)
+            if _note:
+                _warn.append((_d, _note))
+
+        def _gap(n):
+            if n > 0:
+                return f"+{n} spare"
+            if n < 0:
+                return f"{abs(n)} SHORT"
+            return "exact"
+
+        st.dataframe(pd.DataFrame([{
+            "Day": datetime.date.fromisoformat(x["date"]).strftime("%a %d %b"),
+            "Minutes": f'{int(x["minutes"]):,}' if x["minutes"] else "—",
+            "Rooms": (str(x["checkouts"] + x["dailies"]) if x["checkouts"] or x["dailies"]
+                      else "—"),
+            "HK needed": x["hskp"] or "—",
+            "If it runs badly": (f'{x["hskp_low"]}–{x["hskp_high"]}'
+                                 if x["minutes"] else "—"),
+            "HK planned": x.get("on_hand_hskp", 0),
+            "HK gap": _gap(x.get("extra_hskp", 0)),
+            "RQS needed": x["rqs"] or "—",
+            "RQS planned": x.get("on_hand_rqs", 0),
+            "RQS gap": _gap(x.get("extra_rqs", 0)),
+            "Sheet would say": (f'{x["sheet_hskp"]:.1f} HK / {x["sheet_rqs"]:.1f} RQS'
+                                if x["minutes"] or x["checkouts"] else "—"),
+        } for x in _ests]), hide_index=True, use_container_width=True,
+            height=38 * len(_ests) + 40)
+
+        _tot = staffing.week_totals(_ests)
+        _short = [x for x in _ests if x.get("extra_hskp", 0) < 0]
+        _short_r = [x for x in _ests if x.get("extra_rqs", 0) < 0]
+        st.markdown(
+            f'<div style="background:{"#fff5f5" if _short or _short_r else "#f2fbf5"};'
+            f'border:1px solid {"#f6c6c6" if _short or _short_r else "#c3e9d0"};'
+            f'border-radius:9px;padding:9px 13px;font-size:.79rem;'
+            f'color:{"#8a1c1c" if _short or _short_r else "#0a5c32"}">'
+            f'Week needs <b>{_tot["hskp"]}</b> housekeeper-days and '
+            f'<b>{_tot["rqs"]}</b> inspector-days; the plan plots '
+            f'<b>{_tot["on_hand_hskp"]}</b> and <b>{_tot["on_hand_rqs"]}</b>. '
+            + ("Short on " + ", ".join(
+                datetime.date.fromisoformat(x["date"]).strftime("%a") for x in _short)
+               + " for housekeepers. " if _short else "")
+            + ("Short of an inspector on " + ", ".join(
+                datetime.date.fromisoformat(x["date"]).strftime("%a") for x in _short_r)
+               + ". " if _short_r else "")
+            + ("" if _short or _short_r else "Every day is covered.")
+            + '</div>', unsafe_allow_html=True)
+
+        for _d, _note in _warn:
+            st.warning(datetime.date.fromisoformat(_d).strftime("%A") + ": " + _note)
+
+        with st.expander("Why these numbers differ from the sheet's"):
+            st.markdown(
+                "The sheet divides the whole day's labour by **360** and the "
+                "checkouts by **12**. That is a good first cut and it is kept "
+                "above, in the last column, so nothing is lost.\n\n"
+                "Four things are done differently here:\n\n"
+                "1. **A Full Clean and a Daily Service are not the same job.** "
+                "The scheduler loads a Full Clean housekeeper to 330–380 "
+                "minutes and a Daily Service round to about 460, so the two "
+                "pools are divided by their own targets instead of one 360 "
+                "standing for both.\n"
+                "2. **People are whole.** 5.75 housekeepers is not an answer, "
+                "and the fraction leaks into the sheet's Extras row — it reads "
+                "*0.49 extras* for a thirty-person day that is exactly covered.\n"
+                "3. **An inspector walks the daily services too**, so the RQS "
+                "count comes from every room to be looked at, not the checkouts "
+                "alone. On a day with 60 daily services the sheet asks for one "
+                "inspector; this asks for five.\n"
+                "4. **A range, because the risk is lopsided.** Being one short "
+                "costs a missed checkout or overtime; being one over costs a few "
+                "idle hours. *If it runs badly* is that day with everyone loaded "
+                "light.\n\n"
+                "With the daily-services row left blank — as it is in most "
+                "sheets — this lands on the same housekeeper count as the sheet. "
+                "The gain is in the inspectors, the whole numbers, and knowing "
+                "when the two figures behind a day disagree.")
+
         _zmoves = draft.get("zone_moves") or []
         if _zmoves:
             st.markdown(f'<div style="background:#f5f3ff;border:1px solid #ddd6fe;'
@@ -875,7 +1021,11 @@ with tab_plan:
                    "planned": True, "from_sheet": draft.get("from_sheet", ""),
                    "created_by": st.session_state.get("username", "unknown"),
                    "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                   "basis": basis}
+                   "basis": basis,
+                   # The staffing numbers are part of the plan, not a scratch
+                   # calculation: stored, they can be read back next week and
+                   # written into the sheet's hidden rows.
+                   "metrics": _plan_metrics}
             for name, rec in draft["people"].items():
                 cells = edited_by_name.get(name, rec["cells"])
                 out["people"][name] = {**rec,

@@ -32,7 +32,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 12
+__version__ = 13
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -561,11 +561,16 @@ def parse_week(ws, ws_styles=None):
                 rec["cells"][d.isoformat()] = raw
             if ws_styles is not None and _is_nocall_fill(ws_styles.cell(r, dates[d])):
                 rec["nocall"].append(d.isoformat())
+    cols = {d.isoformat(): dates[d] for d in ordered}
     return {"sheet": ws.title,
             "dates": [d.isoformat() for d in ordered],
             # Column index per date, captured now so writing edits back never has
             # to re-derive it from a workbook opened without cached values.
-            "cols": {d.isoformat(): dates[d] for d in ordered},
+            "cols": cols,
+            # The hidden headcount block. ws_styles is the same sheet opened
+            # without cached values, which is where the formulas -- and so the
+            # labour minutes -- can be read.
+            "metrics": parse_metrics(ws, ws_styles, cols),
             "people": people}
 
 def needs_fill_backfill(week) -> bool:
@@ -1324,6 +1329,66 @@ METRIC_LABELS = OrderedDict([
     ("check outs",    "Check outs"),
     ("rqs needed",    "RQS needed"),
 ])
+
+#: The hidden rows 5-11 every sheet carries, keyed by their column-A label.
+METRIC_ROWS = {
+    "hskp needed":   "hskp_needed",
+    "holds":         "holds",
+    "daily services": "dailies",
+    "check outs":    "checkouts",
+    "rqs needed":    "rqs_needed",
+    "hskp actual #": "hskp_actual",
+    "extras hskp":   "extras",
+}
+
+#: "HSKP Needed" is written as =2070/360 -- the day's labour minutes live
+#: inside that formula and nowhere else in the workbook, so they can only be
+#: had by reading the formula itself.
+_MINUTES_RE = re.compile(r"^=\s*\(?\s*([0-9]+(?:\.[0-9]+)?)\s*\)?\s*/\s*([0-9]+)")
+
+
+def _labour_minutes(formula, value):
+    """The day's cleaning minutes, from =N/360 or from the number it left."""
+    if isinstance(formula, str):
+        m = _MINUTES_RE.match(formula.replace(" ", ""))
+        if m:
+            return float(m.group(1))
+    if isinstance(value, (int, float)):
+        # No formula survived, so rebuild it from the headcount it produced.
+        return round(float(value) * 360)
+    return None
+
+
+def parse_metrics(ws, ws_formulas, cols):
+    """The sheet's own numbers for each day: labour, rooms, headcount.
+
+    These sit in rows the workbook keeps hidden, so nobody sees them and
+    nothing has ever read them. They are the only record of how much work a
+    day actually held.
+    """
+    out = {}
+    rows = {}
+    for r in range(1, min(ws.max_row, 40) + 1):
+        label = _norm(ws.cell(r, 1).value)
+        if label in METRIC_ROWS and METRIC_ROWS[label] not in rows:
+            rows[METRIC_ROWS[label]] = r
+    for iso, col in (cols or {}).items():
+        day = {}
+        for key, r in rows.items():
+            v = ws.cell(r, col).value
+            if isinstance(v, (int, float)):
+                day[key] = round(float(v), 4)
+        r5 = rows.get("hskp_needed")
+        if r5:
+            mins = _labour_minutes(
+                ws_formulas.cell(r5, col).value if ws_formulas is not None else None,
+                ws.cell(r5, col).value)
+            if mins:
+                day["minutes"] = mins
+        if day:
+            out[iso] = day
+    return out
+
 
 def day_metrics(ws, col):
     """Read the sheet's own headcount figures for one day.
