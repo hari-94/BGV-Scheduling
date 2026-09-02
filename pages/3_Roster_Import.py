@@ -6,7 +6,7 @@ last time, renders any week as an Excel-style grid, lets you correct cells in
 the app, and exports a workbook with those corrections written back in.
 """
 import streamlit as st
-import sys, os, io, json, datetime
+import sys, os, io, re, json, datetime
 import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -294,8 +294,9 @@ def _history(_token: str):
     weeks = db.load_staff_weeks()
     return ri.history_rows(weeks, db.load_staff_overrides())
 
-tab_week, tab_plan, tab_att, tab_apply, tab_changes, tab_sync = st.tabs(
-    ["Week view", "Plan a week", "Attendance", "Apply to roster",
+(tab_week, tab_month, tab_plan, tab_att, tab_apply, tab_changes,
+ tab_sync) = st.tabs(
+    ["Week view", "Month view", "Plan a week", "Attendance", "Apply to roster",
      "What changed", "Upload & sync"])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -663,6 +664,169 @@ with tab_week:
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  PLAN A WEEK — build a week that has not been written yet
+
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_month:
+    # A week at a time answers "who is in on Tuesday". It cannot answer "is
+    # this person carrying the month", which is the question behind planning
+    # the next one -- so the same grid, four or five weeks wide, with the names
+    # and the tallies pinned while the days slide past them.
+    if not week_keys:
+        st.info("Upload the workbook first — a month is built from the weeks in it.")
+    else:
+        _all_days = sorted({d for k in week_keys
+                            for d in (db.load_staff_week(k) or {}).get("dates", [])}) \
+            if False else None
+
+        @st.cache_data(ttl=600, show_spinner="Building the month…")
+        def _month_grid(_token, ym, grp):
+            """Every stored day in one month, as a person-by-day grid."""
+            weeks = {}
+            for k in db.staff_week_keys():
+                w = db.load_staff_week(k)
+                if not w:
+                    continue
+                if any(d[:7] == ym for d in w.get("dates", [])):
+                    weeks[k] = ri.apply_overrides(w, db.load_staff_overrides(), k)[0]
+            days = sorted({d for w in weeks.values() for d in w["dates"]
+                           if d[:7] == ym})
+            people = {}
+            for k in sorted(weeks):
+                for name, rec in weeks[k]["people"].items():
+                    p = people.setdefault(name, {
+                        "label": rec.get("label") or name,
+                        "group": rec.get("group"), "section": rec.get("section", ""),
+                        "cells": {}, "nocall": set()})
+                    for d, raw in (rec.get("cells") or {}).items():
+                        if d[:7] == ym:
+                            p["cells"][d] = raw
+                    for d in (rec.get("nocall") or []):
+                        if d[:7] == ym:
+                            p["nocall"].add(d)
+            if grp == "Housekeepers":
+                people = {k: v for k, v in people.items() if v["group"] == "hk"}
+            elif grp == "RQS":
+                people = {k: v for k, v in people.items() if v["group"] == "rqs"}
+            elif grp == "Other teams":
+                people = {k: v for k, v in people.items() if v["group"] == "other"}
+            return days, people
+
+        _months = sorted({d[:7] for k in week_keys
+                          for d in (db.load_staff_week(k) or {}).get("dates", [])},
+                         reverse=True)
+        mc1, mc2, mc3 = st.columns([1.4, 1.4, 2])
+        with mc1:
+            _ym = st.selectbox(
+                "Month", _months, key="mv_month",
+                format_func=lambda x: datetime.date(int(x[:4]), int(x[5:7]), 1)
+                .strftime("%B %Y"))
+        with mc2:
+            _grp = st.selectbox("Show", ["Housekeepers", "RQS", "Other teams", "All"],
+                                key="mv_grp")
+        _days, _people = _month_grid(
+            f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}', _ym, _grp)
+        with mc3:
+            st.markdown(f'<div style="padding-top:26px;font-size:.76rem;color:#5b6675">'
+                        f'{len(_people)} people &nbsp;·&nbsp; {len(_days)} days stored'
+                        f'</div>', unsafe_allow_html=True)
+
+        if not _days or not _people:
+            st.info("No stored days in that month.")
+        else:
+            #: One or two characters per day, so a month fits across a screen.
+            def _code(raw, kind):
+                if kind == ri.KIND_DAILY:
+                    return "DS"
+                if kind == ri.KIND_NOCALL:
+                    return "NC"
+                if kind == ri.KIND_VTO:
+                    return "VTO"
+                if kind == ri.KIND_OFF:
+                    return ""
+                t = str(raw or "").strip()
+                if not t:
+                    return ""
+                m = re.match(r"^(?:hsp|hp)\s*(\d+)", t, re.I)
+                if m:
+                    return "H" + m.group(1)
+                if re.match(r"^\d+$", t):        # a building number
+                    return t
+                if re.match(r"^rqs", t, re.I):
+                    return "RQS"
+                return t[:3].upper()
+
+            _order = sorted(_people.items(),
+                            key=lambda kv: (kv[1]["group"] != "hk",
+                                            kv[1]["section"] or "", kv[1]["label"].lower()))
+            _rows, _kinds = [], []
+            for _name, _p in _order:
+                worked = ds = 0
+                row, kinds = {}, {}
+                for _d in _days:
+                    raw = _p["cells"].get(_d, "")
+                    kind = (ri.KIND_NOCALL if _d in _p["nocall"]
+                            else ri.classify(raw))
+                    if kind in ri.WORKED_KINDS:
+                        worked += 1
+                    if kind == ri.KIND_DAILY:
+                        ds += 1
+                    lbl = datetime.date.fromisoformat(_d).strftime("%-d") \
+                        if os.name != "nt" else str(int(_d[8:]))
+                    row[lbl] = _code(raw, kind)
+                    kinds[lbl] = kind
+                _rows.append({"Person": _p["label"], "In": worked, "DS": ds, **row})
+                _kinds.append(kinds)
+
+            _df = pd.DataFrame(_rows)
+            _daycols = [c for c in _df.columns if c not in ("Person", "In", "DS")]
+
+            def _paint(_):
+                out = pd.DataFrame("", index=_df.index, columns=_df.columns)
+                for i, kinds in enumerate(_kinds):
+                    for c in _daycols:
+                        bg, fg = KIND_STYLE.get(kinds.get(c), ("#ffffff", "#1f2733"))
+                        if kinds.get(c) == ri.KIND_OFF:
+                            out.iloc[i, out.columns.get_loc(c)] = \
+                                "background-color:#f7f9fc;color:#c3cedd"
+                        else:
+                            out.iloc[i, out.columns.get_loc(c)] = \
+                                f"background-color:{bg};color:{fg};font-weight:600"
+                return out
+
+            st.dataframe(
+                _df.style.apply(_paint, axis=None),
+                hide_index=True, use_container_width=True,
+                height=min(90 + 27 * len(_df), 640), row_height=27,
+                column_config={
+                    "Person": st.column_config.TextColumn("Person", pinned=True,
+                                                          width=140),
+                    "In": st.column_config.NumberColumn(
+                        "In", pinned=True, width=48,
+                        help="Days worked this month"),
+                    "DS": st.column_config.NumberColumn(
+                        "DS", pinned=True, width=48,
+                        help="Days on daily service this month"),
+                    **{c: st.column_config.TextColumn(c, width=34) for c in _daycols}})
+
+            st.caption("The name and the two tallies stay put while the days slide "
+                       "past. **In** is days worked, **DS** days on daily service — "
+                       "the pair to compare people on. Codes: a building number, "
+                       "**DS** daily service, **H1** houseperson zone, **VTO** paid "
+                       "time off, **NC** no call, blank for off.")
+
+            _hk = [r for r in _rows if r["In"]]
+            if _hk and _grp == "Housekeepers":
+                _busy = sorted(_hk, key=lambda r: -r["DS"])[:3]
+                _idle = [r for r in sorted(_hk, key=lambda r: r["DS"]) if r["In"] >= 8][:3]
+                st.markdown(
+                    '<div style="background:#f7f9fc;border:1px solid #e6ebf2;'
+                    'border-radius:9px;padding:9px 13px;font-size:.78rem;color:#42536a">'
+                    'Most daily service this month: '
+                    + ", ".join(f'<b>{e(r["Person"])}</b> {r["DS"]}' for r in _busy)
+                    + ' &nbsp;·&nbsp; least, of those in 8+ days: '
+                    + ", ".join(f'<b>{e(r["Person"])}</b> {r["DS"]}' for r in _idle)
+                    + '</div>', unsafe_allow_html=True)
+
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_plan:
     if not week_keys:
