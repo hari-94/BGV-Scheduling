@@ -147,3 +147,155 @@ def other() -> tuple:
     """The language this user is *not* in: (code, label)."""
     code = "en" if lang() == "es" else "es"
     return code, LANGS[code]
+
+
+# ── Translating the whole app, without rewriting every call ─────────────────
+# The pages hold roughly five hundred labels between them. Wrapping each one by
+# hand would be five hundred chances to break an f-string, so the Streamlit
+# calls that carry text are wrapped once, here, and the text is looked up on
+# its way to the screen. A string that is not in the table goes through
+# untouched, which is what makes this safe: the worst case is English.
+import re as _re
+
+try:
+    from i18n_es import ES as _ES
+except Exception:                       # never let a missing table break a page
+    _ES = {}
+
+#: Longest first, so "Daily Service Team" wins over "Daily Service".
+_PHRASES = sorted((k for k in _ES if len(k) >= 6), key=len, reverse=True)
+
+#: Only whole words are replaced inside a longer sentence, or "Add" would
+#: rewrite the middle of somebody's name.
+_WORD = {k: _re.compile(r"(?<![A-Za-z])" + _re.escape(k) + r"(?![A-Za-z])")
+         for k in _PHRASES}
+
+_TEXT_NODE = _re.compile(r">([^<>]{2,})<")
+
+
+def _phrases(s: str) -> str:
+    """Translate the known phrases inside a string built at runtime."""
+    for k in _PHRASES:
+        if k in s:
+            s = _WORD[k].sub(_ES[k], s)
+    return s
+
+
+#: Everything inside these carries code, not prose. A phrase that happened to
+#: appear in a stylesheet would be rewritten into nonsense CSS, so they are
+#: lifted out, left alone, and put back.
+_CODE_BLOCK = _re.compile(r"<(style|script).*?</>", _re.S | _re.I)
+
+
+def _html(s: str) -> str:
+    """Translate the words between the tags, never the markup itself."""
+    kept = []
+
+    def stash(m):
+        kept.append(m.group(0))
+        return "@@I18N%d@@" % (len(kept) - 1)
+
+    s = _CODE_BLOCK.sub(stash, s)
+
+    def one(m):
+        inner = m.group(1)
+        stripped = inner.strip()
+        hit = _ES.get(stripped)
+        if hit:
+            return ">" + inner.replace(stripped, hit) + "<"
+        return ">" + _phrases(inner) + "<"
+    s = _TEXT_NODE.sub(one, s)
+    return _re.sub(r"@@I18N(\d+)@@", lambda m: kept[int(m.group(1))], s)
+
+
+def tr(text):
+    """English in, whatever this reader wants out."""
+    if not isinstance(text, str) or lang() != "es" or not text.strip():
+        return text
+    hit = _ES.get(text.strip())
+    if hit is not None:
+        return text.replace(text.strip(), hit)
+    if "<" in text and ">" in text:
+        return _html(text)
+    return _phrases(text)
+
+
+#: Streamlit calls whose first argument is read by a person. Dropdown OPTIONS
+#: are deliberately not translated -- the code compares against them, so
+#: translating the options would change what the app does, not how it reads.
+_FIRST_ARG = (
+    "button", "caption", "checkbox", "download_button", "error", "expander",
+    "form_submit_button", "header", "info", "link_button", "markdown",
+    "metric", "multiselect", "number_input", "popover", "radio", "selectbox",
+    "slider", "subheader", "success", "text_area", "text_input", "title",
+    "toast", "toggle", "warning", "write", "date_input", "time_input",
+    "file_uploader", "select_slider", "color_picker",
+)
+
+
+def _wrap_first(fn):
+    def inner(*a, **kw):
+        if a:
+            a = (tr(a[0]),) + a[1:]
+        elif "label" in kw:
+            kw["label"] = tr(kw["label"])
+        elif "body" in kw:
+            kw["body"] = tr(kw["body"])
+        for k in ("help", "placeholder"):
+            if isinstance(kw.get(k), str):
+                kw[k] = tr(kw[k])
+        return fn(*a, **kw)
+    inner.__name__ = getattr(fn, "__name__", "wrapped")
+    return inner
+
+
+def _wrap_list(fn):
+    """st.tabs: the labels are shown, and nothing is compared against them."""
+    def inner(*a, **kw):
+        if a and isinstance(a[0], (list, tuple)):
+            a = ([tr(x) for x in a[0]],) + a[1:]
+        return fn(*a, **kw)
+    inner.__name__ = getattr(fn, "__name__", "wrapped")
+    return inner
+
+
+def install() -> None:
+    """Wrap Streamlit once per process.
+
+    Both the module-level functions and the DeltaGenerator methods are
+    wrapped: `st.button(...)` goes through the first, `col.button(...)`
+    through the second, and this app uses both.
+    """
+    if getattr(st, "_i18n_installed", False):
+        return
+    try:
+        from streamlit.delta_generator import DeltaGenerator as _DG
+    except Exception:
+        _DG = None
+    for name in _FIRST_ARG:
+        fn = getattr(st, name, None)
+        if callable(fn):
+            setattr(st, name, _wrap_first(fn))
+        if _DG is not None:
+            m = getattr(_DG, name, None)
+            if callable(m):
+                setattr(_DG, name, _wrap_first(m))
+    for name in ("tabs",):
+        fn = getattr(st, name, None)
+        if callable(fn):
+            setattr(st, name, _wrap_list(fn))
+        if _DG is not None:
+            m = getattr(_DG, name, None)
+            if callable(m):
+                setattr(_DG, name, _wrap_list(m))
+    # Column headers in a table are labels too.
+    try:
+        import streamlit.column_config as _cc
+        for name in ("TextColumn", "NumberColumn", "SelectboxColumn",
+                     "CheckboxColumn", "DateColumn", "Column"):
+            f = getattr(_cc, name, None)
+            if callable(f):
+                setattr(_cc, name, _wrap_first(f))
+    except Exception:
+        pass
+    st._i18n_installed = True

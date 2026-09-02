@@ -9,6 +9,10 @@ import streamlit as st
 import auth
 import i18n
 
+# Wrap Streamlit's text calls once, at import, so every page is translated
+# whether or not it remembers to ask. ui is imported by all of them.
+i18n.install()
+
 #: Every destination, with the permission that reveals it. Order is the order
 #: they appear across the bar.
 #: (path, label, icon, permission, translation key). The label doubles as the
