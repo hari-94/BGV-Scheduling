@@ -49,10 +49,19 @@ def _clear_cookie() -> None:
 
 
 def _cookie_token():
+    """The token this browser is carrying, or None.
+
+    Only a real, non-empty string counts. Streamlit's cookie jar is not always
+    a cookie jar: under a test harness it is a mock whose .get() answers with
+    another mock, which is perfectly truthy and would sail on into the hash as
+    though somebody were signed in -- failing there instead, with an error
+    about buffers that says nothing about sessions.
+    """
     try:
-        return st.context.cookies.get(COOKIE)
+        v = st.context.cookies.get(COOKIE)
     except Exception:
         return None
+    return v if isinstance(v, str) and v.strip() else None
 
 
 def remember(user: dict) -> None:
