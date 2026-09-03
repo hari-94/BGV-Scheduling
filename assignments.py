@@ -61,16 +61,28 @@ def charts_for(charts, person) -> list:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _room_count(display: str, user: str, day: str) -> int:
-    """How many rooms this person is on today. Cached briefly: the navigation
-    asks on every page load, and it only decides whether a link is shown."""
+    """How much of today's work is this person's -- their own rooms, or the
+    rooms of the housekeepers they are inspecting.
+
+    An RQS on duty belongs on the page even with no rooms of their own, since
+    that is where they mark for a housekeeper whose hands are full. Cached
+    briefly: the navigation asks on every page load, and it only decides
+    whether a link is shown.
+    """
     try:
         charts, _ = todays_charts()
     except Exception:
         return 0
     who = match_name(housekeepers(charts), display, user)
-    if not who:
+    n = sum(len(g.get("rooms") or []) for g in charts_for(charts, who)) if who else 0
+    if n:
+        return n
+    insp = match_name(sorted({g.get("inspector", "") for g in charts
+                              if g.get("inspector")}), display, user)
+    if not insp:
         return 0
-    return sum(len(g.get("rooms") or []) for g in charts_for(charts, who))
+    return sum(len(g.get("rooms") or []) for g in charts
+               if g.get("inspector") == insp)
 
 
 def has_rooms_today() -> bool:

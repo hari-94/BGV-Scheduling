@@ -60,6 +60,9 @@ STRINGS = {
                            "Tu supervisor acaba de cambiar tus cuartos"),
     "rooms.live":         ("Updating by itself", "Se actualiza solo"),
     "rooms.last_check":   ("Checked {time}", "Revisado {time}"),
+    "rooms.team_note":    ("housekeepers you are inspecting today — you can mark a room for any of them",
+                           "camaristas que inspeccionas hoy — puedes marcar un cuarto por cualquiera de ellas"),
+    "rooms.mark_rest":    ("Mark the rest done", "Marcar el resto como terminado"),
 
     # ── statuses ─────────────────────────────────────────────────────────
     "st.not_started":     ("Not started", "Sin empezar"),

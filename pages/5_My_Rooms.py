@@ -111,6 +111,50 @@ div[data-testid="stButton"] button:hover{transform:translateY(-1px);
   box-shadow:0 5px 14px rgba(16,26,42,.14)}
 div[data-testid="stButton"] button:active{transform:scale(.97)}
 
+
+/* ── One room, one line ──
+   The cards these replace took a fifth of a phone screen each, so eight rooms
+   could not be seen at once and the answer to "what is left" needed scrolling.
+   A row is 40px: a status dot, the room, the guest, the minutes and the RQS. */
+.mrow{display:flex;align-items:center;gap:9px;min-height:40px;
+  border:1px solid #e2e8f1;border-left-width:6px;border-radius:11px;
+  padding:6px 11px;margin:0;font-size:.82rem;overflow:hidden;
+  transition:background .35s ease,border-color .35s ease,opacity .3s ease;
+  animation:mrowin .3s cubic-bezier(.2,.8,.25,1) both}
+.rdot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;
+  transition:background .35s ease,transform .3s ease}
+.rroom{font-weight:800;font-size:.92rem;color:#16202e;flex:0 0 auto;
+  font-variant-numeric:tabular-nums}
+.rguest{flex:1 1 auto;color:#42536a;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;min-width:0}
+.rmeta{flex:0 0 auto;color:#7b8798;font-size:.74rem;white-space:nowrap}
+.rst{flex:0 0 auto;font-size:.7rem;font-weight:800;text-transform:uppercase;
+  letter-spacing:.04em;white-space:nowrap}
+.rnote{flex:0 0 auto;font-size:.72rem}
+/* Finished rooms recede rather than disappear -- still countable, no longer
+   competing for attention with the ones left to do. */
+.mrow.gone .rroom,.mrow.gone .rguest{opacity:.55}
+.mrow.gone .rroom{text-decoration:line-through;text-decoration-thickness:1px}
+/* The one just touched flashes, so a tap on a phone is visibly received. */
+.mrow.just{animation:mrowpop .55s cubic-bezier(.2,1.2,.3,1) both}
+.mrow.just .rdot{animation:mrdot .6s ease both}
+.mrow.working{position:relative}
+.mrow.working:after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.55) 50%,
+  transparent 65%);animation:mrsweep 2.6s linear infinite}
+.mrbar.sm{height:6px;margin:0 0 8px}
+.mrteam{margin:18px 0 8px;font-size:.8rem;color:#42536a;
+  border-top:1px solid #e6ebf2;padding-top:12px}
+@keyframes mrowin{from{opacity:0;transform:translateY(5px)}to{opacity:1}}
+@keyframes mrowpop{0%{transform:scale(1)}30%{transform:scale(1.015)}
+  100%{transform:scale(1)}}
+@keyframes mrdot{0%{transform:scale(1)}35%{transform:scale(2.1)}
+  100%{transform:scale(1)}}
+@media (max-width:640px){
+  .rmeta{font-size:.68rem}
+  .rst{display:none}      /* the colour already says it, at this width */
+}
+
 /* Most of the team is on a phone in a corridor, so the two columns become
    one rather than squeezing to half a screen wide. */
 @media (max-width:700px){
@@ -149,6 +193,14 @@ mine = assignments.match_name(hk_names, me_display, me_user)
 can_browse = auth.can("can_manage_users")
 role = st.session_state.get("role", "")
 
+# An RQS comes here for their team, not for rooms of their own. Matching them
+# against the inspectors on today's charts is what decides that -- the role on
+# the account is not enough, because an RQS who is not on duty today has no
+# team to show.
+_insp_names = sorted({g.get("inspector", "") for g in charts
+                      if g.get("inspector")})
+my_insp = assignments.match_name(_insp_names, me_display, me_user)
+
 if can_browse:
     mine = st.selectbox(
         T("rooms.whose"), hk_names,
@@ -157,17 +209,17 @@ elif mine is None and role == "housekeeper":
     # Her name is on the schedule in some other spelling; let her find it
     # rather than telling her she has no work.
     mine = st.selectbox(T("rooms.not_matched"), hk_names, key="mr_person")
-elif mine is None:
+elif mine is None and not my_insp:
     st.markdown(f'<div class="mrcard"><div class="mrroom">'
                 f'{e(T("rooms.none_today"))}</div>'
                 f'<div class="mrmeta">{e(T("rooms.none_body"))}</div></div>',
                 unsafe_allow_html=True)
     st.stop()
 
-my_charts = [g for g in charts if g.get("housekeeper") == mine]
+my_charts = [g for g in charts if mine and g.get("housekeeper") == mine]
 my_rooms = [(g, r) for g in my_charts for r in (g.get("rooms") or [])]
 
-greet = str(mine).split()[0].title() if mine else ""
+greet = str(mine or my_insp or "").split()[0].title()
 done_n = sum(1 for _g, r in my_rooms
              if _rst.is_clean(
                  (statuses.get(str(r.get("room", ""))) or {}).get("status")))
@@ -183,7 +235,7 @@ st.markdown(
     f'<div class="mrcount">{e(T("rooms.progress", done=done_n, total=total_n))}'
     f'</div></div>', unsafe_allow_html=True)
 
-if not my_rooms:
+if not my_rooms and not my_insp:
     st.markdown(f'<div class="mrcard"><div class="mrroom">'
                 f'{e(T("rooms.none_today"))}</div>'
                 f'<div class="mrmeta">{e(T("rooms.none_body"))}</div></div>',
@@ -202,7 +254,7 @@ def _fingerprint(chs, sts, who):
     return hashlib.sha1(sig.encode("utf-8")).hexdigest()
 
 
-fp_now = _fingerprint(charts, statuses, mine)
+fp_now = _fingerprint(charts, statuses, mine or my_insp)
 st.session_state["mr_fp"] = fp_now
 
 
@@ -238,9 +290,17 @@ if done_n and done_n == total_n:
 
 
 # ── marking a room ───────────────────────────────────────────────────────────
-def _mark(room, chart, new_status):
+ALREADY_CLEAN_K = ALREADY
+
+def _mark(room, chart, new_status, who=None):
+    """Record where a room has got to.
+
+    `who` is whose room it is, which is not always the person pressing the
+    button: an RQS marks on behalf of a housekeeper who has her hands full.
+    The row keeps the housekeeper's name and records who actually pressed it.
+    """
     now = clock.stamp()
-    fields = {"status": new_status, "housekeeper": mine,
+    fields = {"status": new_status, "housekeeper": who or mine,
               "group_label": chart.get("label", ""),
               "inspector": chart.get("inspector", "") or "",
               "updated_by": me_user or me_display}
@@ -249,6 +309,8 @@ def _mark(room, chart, new_status):
         fields["cleaned_at"] = None
     elif new_status == CLEANED:
         fields["cleaned_at"] = now
+    elif new_status == INSPECTED:
+        fields["inspected_at"] = now
     elif new_status == NOT_STARTED:
         fields["started_at"] = None
         fields["cleaned_at"] = None
@@ -266,85 +328,80 @@ if st.session_state.pop("mr_error", None):
 
 flash = st.session_state.pop("mr_flash", None)
 
-# Two across on a laptop, one on a phone (see the media query above).
-cols = st.columns(2, gap="small")
-for i, (g, r) in enumerate(sorted(
-        my_rooms, key=lambda x: str(x[1].get("room", "")))):
+
+def _room_row(g, r, key_prefix, owner, editable=True):
+    """One room, on one line.
+
+    The card this replaces took a fifth of a phone screen for a room number,
+    so eight rooms meant scrolling to find out what was left. A line carries
+    the four things the decision needs -- which room, whose name is on it, how
+    long it takes, and who will inspect it -- and everything else is a tap away.
+    """
     code = str(r.get("room", ""))
     rec = statuses.get(code) or {}
     cur = _rst.normalise(rec.get("status"))
     bg, ink, accent = STATUS_STYLE.get(cur, STATUS_STYLE[NOT_STARTED])
-    svc = i18n.service(g.get("service_type", ""))
-
-    bits = []
-    if r.get("bld"):
-        bits.append(T("rooms.building", b=r["bld"]))
-    if r.get("floor"):
-        bits.append(T("rooms.floor", f=r["floor"]))
-    bits.append(f'{r.get("time", 0)} min')
-
-    tags = ""
-    if str(r.get("pet", "")).strip():
-        tags += f'<span class="mrtag pet">🐾 {e(T("rooms.pet"))}</span>'
-    if r.get("late_checkout"):
-        tags += f'<span class="mrtag late">🕔 {e(T("rooms.checkout"))}</span>'
-    if g.get("label"):
-        tags += f'<span class="mrtag">{e(g["label"])}</span>'
-
+    guest = str(r.get("guest", "") or "").strip()
+    if guest.lower() in ("unallocated", "---", "room, walk", "deposit, deposit"):
+        guest = ""
+    insp = g.get("inspector", "") or ""
+    flags = ("🐾" if str(r.get("pet", "")).strip() else "") + \
+            ("🕔" if r.get("late_checkout") else "")
     note = rec.get("notes") or ""
-    with cols[i % 2]:
+
+    c_txt, c_act, c_more = st.columns([5.2, 1.5, 0.9], vertical_alignment="center")
+    with c_txt:
         st.markdown(
-            f'<div class="mrcard{" just" if code == flash else ""}'
-            f'{" working" if cur == IN_PROGRESS else ""}" '
+            f'<div class="mrow{" just" if code == flash else ""}'
+            f'{" working" if cur == IN_PROGRESS else ""}'
+            f'{" gone" if cur in (CLEANED, INSPECTED, ALREADY) else ""}" '
             f'style="border-left-color:{accent};background:{bg}">'
-            f'<div class="mrroom">{e(code)}</div>'
-            f'<div class="mrmeta">{e(svc)} · {e(" · ".join(bits))}</div>'
-            f'<span class="mrpill" style="background:{accent};color:#fff">'
-            f'{STATUS_ICON.get(cur, "")} {e(T(STATUS_KEY.get(cur, "st.not_started")))}'
-            f'</span>{tags}'
-            + (f'<div class="mrnote">📝 {e(note)}</div>' if note else "")
+            f'<span class="rdot" style="background:{accent}"></span>'
+            f'<span class="rroom">{e(code)}</span>'
+            f'<span class="rguest">{e(guest) or "&nbsp;"}</span>'
+            f'<span class="rmeta">{r.get("time", 0)}m'
+            f'{" · " + e(insp) if insp else ""}{" " + flags if flags else ""}</span>'
+            f'<span class="rst" style="color:{ink}">'
+            f'{e(T(STATUS_KEY.get(cur, "st.not_started")))}</span>'
+            + (f'<span class="rnote" title="{e(note)}">📝</span>' if note else "")
             + '</div>', unsafe_allow_html=True)
-
-        # Two buttons, then everything else behind one menu -- this is read
-        # at arm's length on a phone. Done never hides behind Start: someone
-        # who cleaned a room without tapping Start still has to be able to
-        # say so, and a missing start time is worth less than a missing room.
-        if cur in (CLEANED, INSPECTED, ALREADY):
-            primary = [("act.undo", IN_PROGRESS, "secondary")]
-            more = [("act.help", HELP), ("act.dnd", DND)]
+    with c_act:
+        if not editable:
+            st.write("")
+        elif cur in (CLEANED, INSPECTED, ALREADY):
+            if st.button(T("act.undo"), key=f"{key_prefix}_undo_{code}",
+                         use_container_width=True):
+                _mark(code, g, IN_PROGRESS, owner)
         elif cur == IN_PROGRESS:
-            primary = [("act.done", CLEANED, "primary"),
-                       ("act.undo", NOT_STARTED, "secondary")]
-            more = [("act.help", HELP), ("act.dnd", DND)]
+            if st.button(T("act.done"), key=f"{key_prefix}_done_{code}",
+                         type="primary", use_container_width=True):
+                _mark(code, g, CLEANED, owner)
         else:
-            primary = [("act.start", IN_PROGRESS, "secondary"),
-                       ("act.done", CLEANED, "primary")]
-            more = ([("act.dnd", DND), ("act.help", HELP)]
-                    if cur == NOT_STARTED else
-                    [("act.undo", NOT_STARTED), ("act.help", HELP)])
-
-        bcols = st.columns(len(primary) + 1, gap="small")
-        for (label_key, target, kind), bc in zip(primary, bcols):
-            with bc:
-                if st.button(T(label_key), key=f"mr_{target}_{code}",
-                             type=kind, use_container_width=True):
-                    _mark(code, g, target)
-        with bcols[-1]:
+            if st.button(T("act.start"), key=f"{key_prefix}_start_{code}",
+                         use_container_width=True):
+                _mark(code, g, IN_PROGRESS, owner)
+    with c_more:
+        if editable:
             with st.popover("⋯", use_container_width=True):
-                for label_key, target in more:
-                    if st.button(T(label_key), key=f"mrx_{target}_{code}",
+                st.markdown(f'**{e(code)}**'
+                            + (f' · {e(guest)}' if guest else ""))
+                for lbl, target in (("act.done", CLEANED),
+                                    ("act.start", IN_PROGRESS),
+                                    ("st.already_clean", ALREADY_CLEAN_K),
+                                    ("act.dnd", DND), ("act.help", HELP),
+                                    ("act.undo", NOT_STARTED)):
+                    if st.button(T(lbl), key=f"{key_prefix}x_{target}_{code}",
                                  use_container_width=True):
-                        _mark(code, g, target)
-                st.markdown(f'**{e(T("act.note"))}**')
+                        _mark(code, g, target, owner)
                 txt = st.text_area(T("act.note_ph"), value=note,
-                                   key=f"mr_note_{code}", height=90,
+                                   key=f"{key_prefix}_note_{code}", height=80,
                                    label_visibility="collapsed",
                                    placeholder=T("act.note_ph"))
-                if st.button(T("act.save"), key=f"mr_notebtn_{code}",
+                if st.button(T("act.save"), key=f"{key_prefix}_nb_{code}",
                              type="primary", use_container_width=True):
                     try:
                         db.upsert_room_status(code, {
-                            "notes": txt, "housekeeper": mine,
+                            "notes": txt, "housekeeper": owner,
                             "group_label": g.get("label", ""),
                             "updated_by": me_user or me_display})
                         st.session_state["mr_flash"] = code
@@ -352,3 +409,49 @@ for i, (g, r) in enumerate(sorted(
                         print(f"[my_rooms] note failed for {code}: {ex}")
                         st.session_state["mr_error"] = code
                     st.rerun()
+
+
+for _g, _r in sorted(my_rooms, key=lambda x: str(x[1].get("room", ""))):
+    _room_row(_g, _r, "mr", mine)
+
+
+# ── an RQS sees their whole team, and can mark for them ──────────────────────
+_team_of = my_insp or mine
+_my_team = sorted({g.get("housekeeper", "") for g in charts
+                   if _team_of and g.get("inspector") == _team_of
+                   and g.get("housekeeper")
+                   and not str(g.get("housekeeper", "")).startswith("Need")
+                   and g.get("housekeeper") != mine})
+if _my_team:
+    st.markdown(f'<div class="mrteam"><b>{len(_my_team)}</b> '
+                f'{T("rooms.team_note")}</div>', unsafe_allow_html=True)
+    for _hk in _my_team:
+        _hk_charts = [g for g in charts if g.get("housekeeper") == _hk]
+        _hk_rooms = [(g, r) for g in _hk_charts for r in (g.get("rooms") or [])]
+        _hk_done = sum(1 for _g, r in _hk_rooms
+                       if _rst.is_clean((statuses.get(str(r.get("room", "")))
+                                         or {}).get("status")))
+        _pct = int(round(100 * _hk_done / max(len(_hk_rooms), 1)))
+        with st.expander(f"{_hk} — {_hk_done}/{len(_hk_rooms)}", expanded=False):
+            st.markdown(f'<div class="mrbar sm"><i style="width:{_pct}%"></i></div>',
+                        unsafe_allow_html=True)
+            _left = [(g, r) for g, r in _hk_rooms
+                     if not _rst.is_clean((statuses.get(str(r.get("room", "")))
+                                           or {}).get("status"))]
+            if _left and st.button(T("rooms.mark_rest"), key=f"allrest_{_hk}",
+                                   use_container_width=True):
+                _snap = None
+                for g, r in _left:
+                    try:
+                        db.upsert_room_status(str(r.get("room", "")), {
+                            "status": CLEANED, "housekeeper": _hk,
+                            "group_label": g.get("label", ""),
+                            "inspector": g.get("inspector", "") or "",
+                            "cleaned_at": clock.stamp(),
+                            "updated_by": me_user or me_display})
+                    except Exception as ex:
+                        print(f"[my_rooms] bulk mark failed: {ex}")
+                st.rerun()
+            for _g2, _r2 in sorted(_hk_rooms,
+                                   key=lambda x: str(x[1].get("room", ""))):
+                _room_row(_g2, _r2, f"t{_hk}", _hk)
