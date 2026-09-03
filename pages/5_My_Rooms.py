@@ -112,47 +112,76 @@ div[data-testid="stButton"] button:hover{transform:translateY(-1px);
 div[data-testid="stButton"] button:active{transform:scale(.97)}
 
 
-/* ── One room, one line ──
-   The cards these replace took a fifth of a phone screen each, so eight rooms
-   could not be seen at once and the answer to "what is left" needed scrolling.
-   A row is 40px: a status dot, the room, the guest, the minutes and the RQS. */
-.mrow{display:flex;align-items:center;gap:9px;min-height:40px;
-  border:1px solid #e2e8f1;border-left-width:6px;border-radius:11px;
-  padding:6px 11px;margin:0;font-size:.82rem;overflow:hidden;
+/* ── One room, one card ──
+   Modelled on the handheld the team already uses: the room and the guest
+   carry the line, what changes the approach sits underneath as chips, and the
+   one thing you press is a circle on the right, big enough for a thumb in a
+   corridor. */
+.tk{display:flex;align-items:center;gap:11px;min-height:66px;
+  border:1px solid #e2e8f1;border-left-width:6px;border-radius:13px;
+  padding:9px 13px;background:#fff;
+  box-shadow:0 1px 2px rgba(16,26,42,.05);
   transition:background .35s ease,border-color .35s ease,opacity .3s ease;
-  animation:mrowin .3s cubic-bezier(.2,.8,.25,1) both}
-.rdot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;
+  animation:tkin .32s cubic-bezier(.2,.8,.25,1) both}
+.tkico{font-size:1.5rem;flex:0 0 auto;opacity:.75;line-height:1}
+.tkmain{flex:1 1 auto;min-width:0}
+.tkline1{display:flex;align-items:baseline;gap:9px}
+.tkroom{font-weight:800;font-size:1.06rem;color:#16202e;
+  font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.tkmins{font-size:.74rem;color:#5b6b7e;white-space:nowrap}
+.tknote{font-size:.75rem}
+.tkguest{font-size:.86rem;color:#42536a;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.tkarr{font-size:.72rem;color:#7b8798;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.tkfoot{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:4px}
+.tkrqs{margin-left:auto;font-size:.72rem;color:#5b6b7e;white-space:nowrap}
+.tkdot{width:11px;height:11px;border-radius:50%;flex:0 0 auto;
   transition:background .35s ease,transform .3s ease}
-.rroom{font-weight:800;font-size:.92rem;color:#16202e;flex:0 0 auto;
-  font-variant-numeric:tabular-nums}
-.rguest{flex:1 1 auto;color:#42536a;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;min-width:0}
-.rmeta{flex:0 0 auto;color:#7b8798;font-size:.74rem;white-space:nowrap}
-.rst{flex:0 0 auto;font-size:.7rem;font-weight:800;text-transform:uppercase;
-  letter-spacing:.04em;white-space:nowrap}
-.rnote{flex:0 0 auto;font-size:.72rem}
-/* Finished rooms recede rather than disappear -- still countable, no longer
-   competing for attention with the ones left to do. */
-.mrow.gone .rroom,.mrow.gone .rguest{opacity:.55}
-.mrow.gone .rroom{text-decoration:line-through;text-decoration-thickness:1px}
-/* The one just touched flashes, so a tap on a phone is visibly received. */
-.mrow.just{animation:mrowpop .55s cubic-bezier(.2,1.2,.3,1) both}
-.mrow.just .rdot{animation:mrdot .6s ease both}
-.mrow.working{position:relative}
-.mrow.working:after{content:"";position:absolute;inset:0;pointer-events:none;
-  background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.55) 50%,
+.tkchip{font-size:.6rem;font-weight:800;letter-spacing:.05em;
+  border-radius:6px;padding:2px 6px;background:#eef2f7;color:#42536a}
+.tkchip.owner{background:#fff3cd;color:#7a5200}
+.tkchip.vip{background:#ffe0ef;color:#9b1c48}
+.tkchip.early{background:#dbeafe;color:#12447e}
+.tkchip.pet{background:#fff0e0;color:#8a4b00}
+.tkchip.late{background:#fde8ef;color:#9b1c48}
+/* Finished rooms recede rather than vanish -- still countable, no longer
+   competing with what is left. */
+.tk.gone{background:#fafcfa}
+.tk.gone .tkroom,.tk.gone .tkguest{opacity:.5}
+.tk.gone .tkroom{text-decoration:line-through;text-decoration-thickness:1px}
+.tk.just{animation:tkpop .55s cubic-bezier(.2,1.2,.3,1) both}
+.tk.just .tkdot{animation:tkdot .6s ease both}
+.tk.working{position:relative;overflow:hidden}
+.tk.working:after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.5) 50%,
   transparent 65%);animation:mrsweep 2.6s linear infinite}
+
+/* The circle. Streamlit gives a keyed widget a st-key- class, which is the
+   only handle there is on one particular button. */
+[class*="st-key-"][class*="_go_"] button{
+  border-radius:50% !important;width:54px !important;height:54px !important;
+  min-height:54px !important;padding:0 !important;
+  font-size:1.35rem !important;line-height:1 !important;
+  border:3px solid #cfd9e5 !important;background:#fff !important;
+  transition:transform .15s ease,border-color .2s ease,box-shadow .2s ease}
+[class*="st-key-"][class*="_go_"] button:hover{
+  border-color:#2f9169 !important;transform:scale(1.06);
+  box-shadow:0 6px 16px rgba(47,145,105,.22) !important}
+[class*="st-key-"][class*="_go_"] button:active{transform:scale(.94)}
+
 .mrbar.sm{height:6px;margin:0 0 8px}
 .mrteam{margin:18px 0 8px;font-size:.8rem;color:#42536a;
   border-top:1px solid #e6ebf2;padding-top:12px}
-@keyframes mrowin{from{opacity:0;transform:translateY(5px)}to{opacity:1}}
-@keyframes mrowpop{0%{transform:scale(1)}30%{transform:scale(1.015)}
+@keyframes tkin{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
+@keyframes tkpop{0%{transform:scale(1)}30%{transform:scale(1.012)}
   100%{transform:scale(1)}}
-@keyframes mrdot{0%{transform:scale(1)}35%{transform:scale(2.1)}
+@keyframes tkdot{0%{transform:scale(1)}35%{transform:scale(2.2)}
   100%{transform:scale(1)}}
 @media (max-width:640px){
-  .rmeta{font-size:.68rem}
-  .rst{display:none}      /* the colour already says it, at this width */
+  .tkarr{display:none}
+  .tkico{font-size:1.25rem}
+  .tkroom{font-size:1rem}
 }
 
 /* Most of the team is on a phone in a corridor, so the two columns become
@@ -320,7 +349,8 @@ def _mark(room, chart, new_status, who=None):
     except Exception as ex:
         print(f"[my_rooms] save failed for {room}: {ex}")
         st.session_state["mr_error"] = room
-    st.rerun()
+    # No st.rerun() here: this runs as a button callback, and Streamlit already
+    # reruns after one. Calling it again threw the run away mid-flight.
 
 
 if st.session_state.pop("mr_error", None):
@@ -329,14 +359,50 @@ if st.session_state.pop("mr_error", None):
 flash = st.session_state.pop("mr_flash", None)
 
 
-def _room_row(g, r, key_prefix, owner, editable=True):
-    """One room, on one line.
+def _flags_for(r):
+    """The things about a room that change how it is approached.
 
-    The card this replaces took a fifth of a phone screen for a room number,
-    so eight rooms meant scrolling to find out what was left. A line carries
-    the four things the decision needs -- which room, whose name is on it, how
-    long it takes, and who will inspect it -- and everything else is a tap away.
+    Drawn from what the sheet actually carries rather than a wish list: an
+    owner's unit is the VIP case at a timeshare, an arriving guest means the
+    room has a deadline, and the notes are scanned for the words people
+    actually type when a room needs special handling.
     """
+    out = []
+    res = str(r.get("res_type", "") or "")
+    if "owner" in res.lower():
+        out.append(("owner", "OWNER"))
+    note = " ".join(str(r.get(k, "") or "") for k in ("notes", "service"))
+    low = note.lower()
+    if "vip" in low:
+        out.append(("vip", "VIP"))
+    if "priority" in low or "rush" in low:
+        out.append(("vip", "PRIORITY"))
+    if "early" in low:
+        out.append(("early", "EARLY IN"))
+    if str(r.get("arriving", "") or "").strip() and not any(
+            k == "early" for k, _ in out):
+        out.append(("early", "ARRIVING"))
+    if str(r.get("pet", "") or "").strip():
+        out.append(("pet", "PET"))
+    if r.get("late_checkout"):
+        out.append(("late", "LATE OUT"))
+    return out
+
+
+#: What the room is, at a glance, before reading anything.
+_SVC_ICON = {"Full Clean": "🧳", "Full Clean (IH)": "🧳",
+             "Daily Service": "🛏", "Dust n Vac": "🧹"}
+
+#: Tapping the circle moves the room on one step. The glyph is where it is
+#: now; the ring is the colour of that state.
+_NEXT = {NOT_STARTED: (IN_PROGRESS, "○"), IN_PROGRESS: (CLEANED, "◐"),
+         CLEANED: (IN_PROGRESS, "✓"), INSPECTED: (IN_PROGRESS, "★"),
+         ALREADY: (IN_PROGRESS, "✓"), DND: (IN_PROGRESS, "⏸"),
+         HELP: (IN_PROGRESS, "!")}
+
+
+def _room_row(g, r, key_prefix, owner, editable=True):
+    """One room, as a line you can act on without reading twice."""
     code = str(r.get("room", ""))
     rec = statuses.get(code) or {}
     cur = _rst.normalise(rec.get("status"))
@@ -344,55 +410,51 @@ def _room_row(g, r, key_prefix, owner, editable=True):
     guest = str(r.get("guest", "") or "").strip()
     if guest.lower() in ("unallocated", "---", "room, walk", "deposit, deposit"):
         guest = ""
+    arriving = str(r.get("arriving", "") or "").strip()
     insp = g.get("inspector", "") or ""
-    flags = ("🐾" if str(r.get("pet", "")).strip() else "") + \
-            ("🕔" if r.get("late_checkout") else "")
     note = rec.get("notes") or ""
+    icon = _SVC_ICON.get(g.get("service_type", ""), "🧳")
+    nxt, glyph = _NEXT.get(cur, (IN_PROGRESS, "○"))
 
-    c_txt, c_act, c_more = st.columns([5.2, 1.5, 0.9], vertical_alignment="center")
+    chips = "".join(
+        f'<span class="tkchip {kind}">{lbl}</span>' for kind, lbl in _flags_for(r))
+
+    c_txt, c_btn = st.columns([6.4, 1.15], vertical_alignment="center")
     with c_txt:
         st.markdown(
-            f'<div class="mrow{" just" if code == flash else ""}'
+            f'<div class="tk{" just" if code == flash else ""}'
             f'{" working" if cur == IN_PROGRESS else ""}'
             f'{" gone" if cur in (CLEANED, INSPECTED, ALREADY) else ""}" '
-            f'style="border-left-color:{accent};background:{bg}">'
-            f'<span class="rdot" style="background:{accent}"></span>'
-            f'<span class="rroom">{e(code)}</span>'
-            f'<span class="rguest">{e(guest) or "&nbsp;"}</span>'
-            f'<span class="rmeta">{r.get("time", 0)}m'
-            f'{" · " + e(insp) if insp else ""}{" " + flags if flags else ""}</span>'
-            f'<span class="rst" style="color:{ink}">'
-            f'{e(T(STATUS_KEY.get(cur, "st.not_started")))}</span>'
-            + (f'<span class="rnote" title="{e(note)}">📝</span>' if note else "")
-            + '</div>', unsafe_allow_html=True)
-    with c_act:
-        if not editable:
-            st.write("")
-        elif cur in (CLEANED, INSPECTED, ALREADY):
-            if st.button(T("act.undo"), key=f"{key_prefix}_undo_{code}",
-                         use_container_width=True):
-                _mark(code, g, IN_PROGRESS, owner)
-        elif cur == IN_PROGRESS:
-            if st.button(T("act.done"), key=f"{key_prefix}_done_{code}",
-                         type="primary", use_container_width=True):
-                _mark(code, g, CLEANED, owner)
-        else:
-            if st.button(T("act.start"), key=f"{key_prefix}_start_{code}",
-                         use_container_width=True):
-                _mark(code, g, IN_PROGRESS, owner)
-    with c_more:
+            f'style="border-left-color:{accent}">'
+            f'<div class="tkico">{icon}</div>'
+            f'<div class="tkmain">'
+            f'<div class="tkline1"><span class="tkroom">{e(code)}</span>'
+            f'<span class="tkmins">⚑ {r.get("time", 0)}m</span>'
+            f'{"<span class=tknote>📝</span>" if note else ""}</div>'
+            f'<div class="tkguest">{e(guest) or "—"}</div>'
+            + (f'<div class="tkarr">→ {e(arriving)}</div>' if arriving else "")
+            + f'<div class="tkfoot">{chips}'
+            f'<span class="tkrqs">👤 {e(insp) or "—"}</span></div>'
+            f'</div>'
+            f'<div class="tkdot" style="background:{accent}"></div>'
+            f'</div>', unsafe_allow_html=True)
+    with c_btn:
         if editable:
+            st.button(glyph, key=f"{key_prefix}_go_{code}",
+                      help=T(STATUS_KEY.get(cur, "st.not_started")),
+                      use_container_width=True,
+                      on_click=_mark, args=(code, g, nxt, owner))
             with st.popover("⋯", use_container_width=True):
-                st.markdown(f'**{e(code)}**'
-                            + (f' · {e(guest)}' if guest else ""))
+                st.markdown(f'**{e(code)}**' + (f' · {e(guest)}' if guest else ""))
                 for lbl, target in (("act.done", CLEANED),
                                     ("act.start", IN_PROGRESS),
-                                    ("st.already_clean", ALREADY_CLEAN_K),
+                                    ("st.already_clean", ALREADY),
+                                    ("st.inspected", INSPECTED),
                                     ("act.dnd", DND), ("act.help", HELP),
                                     ("act.undo", NOT_STARTED)):
-                    if st.button(T(lbl), key=f"{key_prefix}x_{target}_{code}",
-                                 use_container_width=True):
-                        _mark(code, g, target, owner)
+                    st.button(T(lbl), key=f"{key_prefix}x_{target}_{code}",
+                              use_container_width=True,
+                              on_click=_mark, args=(code, g, target, owner))
                 txt = st.text_area(T("act.note_ph"), value=note,
                                    key=f"{key_prefix}_note_{code}", height=80,
                                    label_visibility="collapsed",
