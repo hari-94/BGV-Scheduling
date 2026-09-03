@@ -914,6 +914,121 @@ table{min-width:0;width:100%;border-collapse:collapse;}
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
+def _snapshot_for_undo(note=""):
+    """Remember the charts as they are, before something changes them.
+
+    Every move on the boards is a judgement call made quickly, and the fastest
+    way to undo a wrong one used to be to generate the whole schedule again.
+    Ten steps is plenty: this is for taking back the move you just made, not
+    for browsing the day's history.
+    """
+    import copy as _copy
+    stack = st.session_state.get("_undo_stack") or []
+    stack.append({
+        "groups": _copy.deepcopy(st.session_state.get("groups_data") or []),
+        "inspectors": _copy.deepcopy(st.session_state.get("inspectors_data") or []),
+        "used": set(st.session_state.get("used_hk_set") or set()),
+        "note": note,
+        "at": _now_iso(),
+    })
+    st.session_state["_undo_stack"] = stack[-10:]
+
+
+def _undo_last():
+    """Put the charts back the way they were before the last change."""
+    stack = st.session_state.get("_undo_stack") or []
+    if not stack:
+        return None
+    prev = stack.pop()
+    st.session_state["_undo_stack"] = stack
+    st.session_state["groups_data"] = prev["groups"]
+    st.session_state["inspectors_data"] = prev["inspectors"]
+    st.session_state["used_hk_set"] = prev["used"]
+    try:
+        db.save_full_schedule({
+            "groups_data": prev["groups"],
+            "total_rooms": st.session_state.get("total_rooms", 0),
+            "inspectors_data": prev["inspectors"],
+            "used_hk_set": list(prev["used"]),
+            "hk_roster": dict(st.session_state.get("hk_roster", {})),
+            "generated_by": st.session_state.get("username", "unknown"),
+        })
+    except Exception as ex:
+        print(f"[app] undo could not be saved: {ex}")
+    return prev.get("note") or "last change"
+
+
+def _set_aside_rooms(fg):
+    """Rooms nobody was given: stayovers, P/U models, unallocated names.
+
+    The generator deliberately leaves these out of the round -- a stayover is
+    not a clean, a P/U model is a showroom, and a room with no guest on it may
+    not need touching at all. That is the right call, but it used to mean they
+    only existed inside a chart labelled "verify" that nothing drew attention
+    to, so they were found at four in the afternoon or not at all.
+    """
+    out = []
+    for g in fg:
+        if not (g.get("verify_group") or g.get("dv_rqs2")):
+            continue
+        kind = "Dust n Vac" if g.get("dv_rqs2") else "Set aside"
+        for r in (g.get("rooms") or []):
+            guest = str(r.get("guest", "") or "").strip()
+            low = guest.lower()
+            if g.get("dv_rqs2"):
+                why = "Dust n Vac"
+            elif "stayover" in str(r.get("notes", "")).lower():
+                why = "Stayover"
+            elif "model" in low or "p/u" in low or "p/u" in str(
+                    r.get("service", "")).lower():
+                why = "P/U model"
+            elif low in ("unallocated", "---", "room, walk", "",
+                         "deposit, deposit"):
+                why = "No guest"
+            else:
+                why = "Needs a look"
+            out.append({"room": str(r.get("room", "")), "why": why,
+                        "kind": kind, "label": g.get("label", ""),
+                        "guest": guest, "bld": r.get("bld", ""),
+                        "time": r.get("time", 0), "group": g})
+    return out
+
+
+def _render_set_aside(rows, where):
+    """Draw the set-aside rooms, grouped by why they were set aside."""
+    if not rows:
+        return
+    st.markdown('<p class="sec">Set aside — stayovers, P/U models, '
+                'no-guest rooms</p>', unsafe_allow_html=True)
+    st.caption("Left out of the round on purpose. They are listed here so they "
+               "are seen, with the chart each belongs to — assign one if it "
+               "does need cleaning after all.")
+    by = {}
+    for r in rows:
+        by.setdefault(r["why"], []).append(r)
+    TONE = {"Stayover": ("#fff4d6", "#8a5a00"), "P/U model": ("#e8e0ff", "#4c2a95"),
+            "No guest": ("#eef2f7", "#5a6675"), "Dust n Vac": ("#fdeccd", "#8a5a00"),
+            "Needs a look": ("#ffe6e6", "#8a1c1c")}
+    for why in sorted(by):
+        bg, ink = TONE.get(why, ("#eef2f7", "#42536a"))
+        chips = "".join(
+            f'<span class="sarm" style="background:{bg};color:{ink}">'
+            f'<b>{e(r["room"])}</b>'
+            f'{" · " + e(r["label"]) if r["label"] else ""}'
+            f'{" · " + e(r["guest"][:18]) if r["guest"] else ""}</span>'
+            for r in sorted(by[why], key=lambda x: x["room"]))
+        st.markdown(f'<div class="sagrp"><span class="sawhy">{e(why)}'
+                    f' <b>{len(by[why])}</b></span>{chips}</div>',
+                    unsafe_allow_html=True)
+    st.markdown("""<style>
+    .sagrp{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px}
+    .sawhy{font-family:'DM Mono',monospace;font-size:.62rem;text-transform:uppercase;
+      letter-spacing:.1em;color:#5b6b7e;min-width:104px}
+    .sarm{border-radius:8px;padding:3px 9px;font-size:.72rem;line-height:1.4}
+    .sarm b{font-weight:800}
+    </style>""", unsafe_allow_html=True)
+
+
 def _save_reassignment(fg):
     """Persist a manual housekeeper/RQS change.
 
@@ -3156,6 +3271,13 @@ def group_card_html(g, idx):
         # Short-staffed Daily Service: keep the numbered placeholder as the name
         # so the manager can see exactly how many bodies are missing.
         unassigned_badge = f'<span style="background:rgba(245,158,11,.2);color:#fcd34d;border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:700;border:1px solid rgba(245,158,11,.4);letter-spacing:.03em"> NEED HK</span>'
+    elif g.get("dv_rqs2"):
+        # Dust n Vac is RQS 2's own round and never wanted a housekeeper, so
+        # "Unassigned" in red reads as a problem where nothing is wrong. It
+        # carries the RQS 2 name instead.
+        unassigned_badge = ""
+        hk_raw = (g.get("inspector") or st.session_state.get("rqs2")
+                  or "RQS 2")
     elif no_hk:
         unassigned_badge = f'<span style="background:rgba(244,63,94,.2);color:#fb7185;border-radius:5px;padding:1px 8px;font-size:.66rem;font-weight:700;border:1px solid rgba(244,63,94,.35);letter-spacing:.03em"> NO HK</span>'
         hk_raw = hk_raw.replace("No HK available","Unassigned") if hk_raw else "Unassigned"
@@ -4749,6 +4871,40 @@ td{{transition:background .15s ease}}
         # every number appeared to have changed.
         KB_SORTS = ["Busiest first", "Lightest first", "Most rooms first",
                     "Building", "Name (A-Z)"]
+        # Taking a move back. The browser's own Ctrl+Z cannot reach a Streamlit
+        # button, so the shortcut is wired by hand below; the button is the
+        # part that always works.
+        _undo_stack = st.session_state.get("_undo_stack") or []
+        _uc1, _uc2 = st.columns([1.1, 4])
+        with _uc1:
+            if st.button(f"↶ Undo ({len(_undo_stack)})", key="btn_undo_move",
+                         disabled=not _undo_stack, use_container_width=True,
+                         help="Take back the last change to the charts — Ctrl+Z"):
+                _what = _undo_last()
+                st.session_state["_live_toast"] = f"Undone: {_what}"
+                st.rerun()
+        with _uc2:
+            if _undo_stack:
+                st.caption(f"Last change: {_undo_stack[-1].get('note','')} — "
+                           f"Ctrl+Z or the button takes it back.")
+        components.html(
+            """<script>
+            const d = window.parent.document;
+            if (!d.__bgvUndoBound) {
+              d.__bgvUndoBound = true;
+              d.addEventListener('keydown', function (ev) {
+                if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+                  const tag = (d.activeElement && d.activeElement.tagName) || '';
+                  // Never steal Ctrl+Z from somebody typing in a box.
+                  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                  const b = Array.from(d.querySelectorAll('button'))
+                    .find(x => x.innerText && x.innerText.trim().startsWith('↶ Undo'));
+                  if (b && !b.disabled) { ev.preventDefault(); b.click(); }
+                }
+              });
+            }
+            </script>""", height=0, width=0)
+
         # Filters narrow what the board shows without touching the schedule.
         # An empty filter means everything, so the board opens complete.
         _all_blds = sorted({b for g in fg for b in (g.get("blds") or set())
@@ -4825,6 +4981,25 @@ td{{transition:background .15s ease}}
             else:                   block = "🟥"      # badly short
             filled = max(0, min(width, round(width * mins / max(target, 1))))
             return block * filled + "⬜" * (width - filled)
+
+        def _guest_label(r, cap=22):
+            """The guest on a room card, short enough not to burst the box.
+
+            The sheet writes "Surname, Firstname"; the surname alone is what
+            anyone actually says out loud, so a long entry keeps that and
+            loses the rest rather than being cut mid-word.
+            """
+            g = str(r.get("guest", "") or "").strip()
+            if not g or g.lower() in ("unallocated", "---", "room, walk",
+                                      "deposit, deposit", "p/u models"):
+                return ""
+            g = re.sub(r"\s+", " ", g)
+            if len(g) <= cap:
+                return g
+            head = g.split(",")[0].strip()
+            if head and len(head) <= cap:
+                return head
+            return g[:cap - 1].rstrip() + "…"
 
         def _rooms_of(g, cap=6):
             names = [str(r.get("room", "")).strip() for r in (g.get("rooms") or [])
@@ -4919,10 +5094,15 @@ td{{transition:background .15s ease}}
             """
             r1 = st.session_state.get("rqs1")
             r2 = st.session_state.get("rqs2")
-            lead = [n for n in (r1, r2) if n and n in names]
+            tail = [n for n in (r2, r1) if n and n in names]
             rest = sorted((n for n in names
-                           if n != UNASSIGNED and n not in lead), key=str.lower)
-            return lead + rest + [UNASSIGNED]
+                           if n != UNASSIGNED and n not in tail), key=str.lower)
+            # The two on RQS duty sit at the end -- RQS 2 then RQS 1 -- because
+            # their columns are the ones being moved *into*, and it is easier
+            # to drag rightwards onto a fixed target than to hunt for it in
+            # the middle. Everyone else is alphabetical, and the holding pen
+            # stays last of all.
+            return rest + tail + [UNASSIGNED]
 
         def _kept(hk):
             """Whether this housekeeper survives the filters."""
@@ -5073,6 +5253,7 @@ td{{transition:background .15s ease}}
                         f'color:#1c4a78">{len(pending)} change(s) waiting:<br>{rows}</div>',
                         unsafe_allow_html=True)
             if st.button("Apply these moves", type="primary", key="btn_apply_moves"):
+                _snapshot_for_undo(f"{len(pending)} housekeeper move(s)")
                 n = 0
                 for hk, (_froms, to) in pending.items():
                     for _g in hk_charts.get(hk, []):
@@ -5111,10 +5292,16 @@ td{{transition:background .15s ease}}
                     return lbl
             return f"{pre}-{len(fg) + 1}"
 
-        def _move_room(code, src_hk, dst_hk):
-            """Move one room across housekeepers, or return why it could not."""
-            src = next((g for g in fg if g.get("housekeeper") == src_hk
-                        and any(str(r.get("room")) == code for r in g["rooms"])), None)
+        def _move_room(code, src_hk, dst_hk, src=None):
+            """Move one room across housekeepers, or return why it could not.
+
+            `src` names the chart outright, for rooms that are not on anybody
+            -- the set-aside ones, which have no housekeeper to look up by.
+            """
+            if src is None:
+                src = next((g for g in fg if g.get("housekeeper") == src_hk
+                            and any(str(r.get("room")) == code
+                                    for r in g["rooms"])), None)
             if src is None:
                 return f"{code}: no longer on {src_hk}"
             room = next(r for r in src["rooms"] if str(r.get("room")) == code)
@@ -5139,23 +5326,28 @@ td{{transition:background .15s ease}}
             _rechart(src); _rechart(dst)
             return None
 
-        # Every housekeeper on the property is a column, whoever inspects
-        # them - a room is just as likely to belong next door under another
-        # RQS as under its own. The filter narrows a crowded board; it does
-        # not fence the move.
+        # Everybody who is in today is a column, whether or not the generator
+        # gave them anything. Somebody with no rooms is exactly who you are
+        # looking for when a chart needs shedding, so an empty column is the
+        # point rather than clutter -- it is a drop target.
+        _board_pool = sorted(
+            {hk for hk in hk_charts if not is_unassigned_hk(hk)}
+            | {n for n in present_hk if n and n != "Manager"})
         rb1, rb2 = st.columns([3, 2])
         with rb1:
+            # Filtering by housekeeper, not by RQS: the question here is "where
+            # is this room going", and that is answered by a name. Whose RQS
+            # they are under is still written on every card.
             room_scope = st.multiselect(
-                "Inspectors shown", _rqs_names + [UNASSIGNED],
-                default=_rqs_names + [UNASSIGNED], key="room_scope")
+                "Housekeepers shown", _board_pool, default=[],
+                placeholder="All housekeepers", key="room_scope")
         with rb2:
-            room_hide_empty = st.checkbox("Hide empty housekeepers", value=True,
+            room_hide_empty = st.checkbox("Hide empty housekeepers", value=False,
                                           key="room_hide_empty")
-        scope = set(room_scope) or set(_rqs_names) | {UNASSIGNED}
+        scope = set(room_scope) or set(_board_pool)
 
-        scope_hks = _card_order([hk for hk in hk_charts
-                                 if home_of.get(hk, UNASSIGNED) in scope
-                                 and not is_unassigned_hk(hk)], ds_last=True)
+        scope_hks = _card_order([hk for hk in _board_pool if hk in scope],
+                                ds_last=True)
         if not scope_hks:
             st.caption("No housekeepers under the inspectors you picked.")
         else:
@@ -5169,10 +5361,17 @@ td{{transition:background .15s ease}}
                         code = str(r.get("room", ""))
                         if not code:
                             continue
+                        # The guest is what tells you whether two rooms can
+                        # swap -- a party booked together should not be split
+                        # across two housekeepers. Kept to its own line and
+                        # clipped, because a long name pushed the card wider
+                        # than its column and broke the grid.
+                        _gn = _guest_label(r)
                         card = (f"{code}\n"
                                 f"{SVC_SHORT.get(g.get('service_type', ''), '?')} · "
                                 f"{r.get('time', 0)}m"
-                                + (" · 🐾" if str(r.get("pet", "")).strip() else ""))
+                                + (" · 🐾" if str(r.get("pet", "")).strip() else "")
+                                + (f"\n{_gn}" if _gn else ""))
                         room_cards[card] = (code, _hk)
                         items.append(card)
                 if items or not room_hide_empty:
@@ -5286,6 +5485,7 @@ td{{transition:background .15s ease}}
                                 f'color:#1c4a78">{len(room_pending)} room move(s) waiting:'
                                 f'<br>{rows}</div>', unsafe_allow_html=True)
                     if st.button("Apply room moves", type="primary", key="btn_apply_rooms"):
+                        _snapshot_for_undo(f"{len(room_pending)} room move(s)")
                         problems = [p for p in
                                     (_move_room(c, a, b) for c, a, b in room_pending) if p]
                         # A chart emptied by the move is dropped, the same as
@@ -5299,6 +5499,34 @@ td{{transition:background .15s ease}}
                         st.rerun()
                 else:
                     st.caption("No room moves pending.")
+
+        _render_set_aside(_set_aside_rooms(fg), "reassign")
+        _aside = _set_aside_rooms(fg)
+        if _aside:
+            _ac1, _ac2, _ac3 = st.columns([2, 2, 1.2])
+            with _ac1:
+                _pick_rm = st.selectbox(
+                    "Room to hand out", [r["room"] for r in _aside],
+                    key="aside_room")
+            with _ac2:
+                _pick_hk = st.selectbox(
+                    "Give it to", ["— nobody —"] + sorted(
+                        {hk for hk in hk_charts} | {n for n in present_hk}),
+                    key="aside_hk")
+            with _ac3:
+                st.markdown("<div style='height:26px'></div>",
+                            unsafe_allow_html=True)
+                if st.button("Hand it over", key="btn_aside_assign",
+                             use_container_width=True,
+                             disabled=_pick_hk == "— nobody —"):
+                    _src = next(r for r in _aside if r["room"] == _pick_rm)
+                    _snapshot_for_undo(f"{_pick_rm} → {_pick_hk}")
+                    _err = _move_room(_pick_rm, None, _pick_hk, src=_src["group"])
+                    st.session_state["groups_data"] = [g for g in fg if g["rooms"]]
+                    _save_reassignment(st.session_state["groups_data"])
+                    st.session_state["_live_toast"] = (
+                        _err or f"{_pick_rm} → {_pick_hk}")
+                    st.rerun()
 
         # ── Gaps: charts nobody is on ─────────────────────────────────────────
         st.markdown('<p class="sec">Charts still needing someone</p>',
@@ -5329,6 +5557,7 @@ td{{transition:background .15s ease}}
                         f'Bldg {",".join(str(b) for b in sorted(_g["blds"]))} · {_g["time"]}m',
                         opts, key=f"fillhk_{lbl}")
                     if pick != opts[0] and st.button("Assign", key=f"fillhk_btn_{lbl}"):
+                        _snapshot_for_undo(f"{lbl} → {pick}")
                         _g["housekeeper"] = pick
                         st.session_state["used_hk_set"] = (
                             set(st.session_state.get("used_hk_set") or set()) | {pick})
@@ -5348,6 +5577,7 @@ td{{transition:background .15s ease}}
                         f'{_g.get("housekeeper","") or "no housekeeper"}',
                         opts, key=f"fillrqs_{lbl}")
                     if pick != opts[0] and st.button("Assign", key=f"fillrqs_btn_{lbl}"):
+                        _snapshot_for_undo(f"{lbl} → {pick}")
                         _g["inspector"] = pick
                         _save_reassignment(fg)
                         st.success(f"{lbl} → {pick}")
