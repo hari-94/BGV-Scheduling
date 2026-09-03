@@ -39,15 +39,8 @@ HELP = _rst.HELP
 ALREADY = _rst.ALREADY_CLEAN
 
 # (background, ink, accent) — the accent is the stripe down the card's edge.
-STATUS_STYLE = {
-    NOT_STARTED: ("#f4f7fb", "#4a5768", "#c3cedd"),
-    IN_PROGRESS: ("#fff5d9", "#7a5200", "#f0b429"),
-    CLEANED:     ("#dcfbe7", "#0a5c32", "#22b365"),
-    INSPECTED:   ("#dbeafe", "#12447e", "#2f80ed"),
-    ALREADY:     ("#d8fbe8", "#0a5c32", "#10b981"),
-    DND:         ("#ede9fe", "#4c1d95", "#8b5cf6"),
-    HELP:        ("#ffe1e1", "#8a1c1c", "#e5484d"),
-}
+# Taken from roomstatus so the board and the handset colour a room the same.
+STATUS_STYLE = {k: (v[3], v[4], v[2]) for k, v in _rst.META.items()}
 STATUS_KEY = {NOT_STARTED: "st.not_started", IN_PROGRESS: "st.in_progress",
               ALREADY: "st.already_clean",
               CLEANED: "st.cleaned", INSPECTED: "st.inspected",
@@ -393,12 +386,22 @@ def _flags_for(r):
 _SVC_ICON = {"Full Clean": "🧳", "Full Clean (IH)": "🧳",
              "Daily Service": "🛏", "Dust n Vac": "🧹"}
 
-#: Tapping the circle moves the room on one step. The glyph is where it is
-#: now; the ring is the colour of that state.
-_NEXT = {NOT_STARTED: (IN_PROGRESS, "○"), IN_PROGRESS: (CLEANED, "◐"),
-         CLEANED: (IN_PROGRESS, "✓"), INSPECTED: (IN_PROGRESS, "★"),
-         ALREADY: (IN_PROGRESS, "✓"), DND: (IN_PROGRESS, "⏸"),
-         HELP: (IN_PROGRESS, "!")}
+#: The glyph is where the room is now; tapping moves it one step on.
+_GLYPH = {NOT_STARTED: "○", IN_PROGRESS: "◐", CLEANED: "✓", INSPECTED: "★",
+          ALREADY: "✓", DND: "⏸", HELP: "!"}
+
+#: Who may close a room. A housekeeper hands it over; the RQS signs it off.
+can_inspect = auth.can("can_view_insp_tab")
+
+
+def _step(cur):
+    """The next step for this room, and why it might not be takeable."""
+    nxt = _rst.NEXT.get(cur)
+    if nxt is None:
+        return None, T("rooms.done_here")
+    if nxt in _rst.RQS_ONLY and not can_inspect:
+        return None, T("rooms.awaiting_rqs")
+    return nxt, ""
 
 
 def _room_row(g, r, key_prefix, owner, editable=True):
@@ -414,7 +417,8 @@ def _room_row(g, r, key_prefix, owner, editable=True):
     insp = g.get("inspector", "") or ""
     note = rec.get("notes") or ""
     icon = _SVC_ICON.get(g.get("service_type", ""), "🧳")
-    nxt, glyph = _NEXT.get(cur, (IN_PROGRESS, "○"))
+    glyph = _GLYPH.get(cur, "○")
+    nxt, why_not = _step(cur)
 
     chips = "".join(
         f'<span class="tkchip {kind}">{lbl}</span>' for kind, lbl in _flags_for(r))
@@ -440,18 +444,20 @@ def _room_row(g, r, key_prefix, owner, editable=True):
             f'</div>', unsafe_allow_html=True)
     with c_btn:
         if editable:
+            _now = T(STATUS_KEY.get(cur, "st.not_started"))
             st.button(glyph, key=f"{key_prefix}_go_{code}",
-                      help=T(STATUS_KEY.get(cur, "st.not_started")),
-                      use_container_width=True,
-                      on_click=_mark, args=(code, g, nxt, owner))
+                      help=_now + (f" — {why_not}" if why_not else ""),
+                      use_container_width=True, disabled=nxt is None,
+                      on_click=_mark, args=(code, g, nxt or cur, owner))
             with st.popover("⋯", use_container_width=True):
                 st.markdown(f'**{e(code)}**' + (f' · {e(guest)}' if guest else ""))
-                for lbl, target in (("act.done", CLEANED),
-                                    ("act.start", IN_PROGRESS),
-                                    ("st.already_clean", ALREADY),
-                                    ("st.inspected", INSPECTED),
-                                    ("act.dnd", DND), ("act.help", HELP),
-                                    ("act.undo", NOT_STARTED)):
+                _opts = [("act.done", CLEANED), ("act.start", IN_PROGRESS),
+                         ("st.already_clean", ALREADY)]
+                if can_inspect:
+                    _opts.append(("st.inspected", INSPECTED))
+                _opts += [("act.dnd", DND), ("act.help", HELP),
+                          ("act.undo", NOT_STARTED)]
+                for lbl, target in _opts:
                     st.button(T(lbl), key=f"{key_prefix}x_{target}_{code}",
                               use_container_width=True,
                               on_click=_mark, args=(code, g, target, owner))

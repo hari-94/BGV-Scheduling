@@ -63,9 +63,13 @@ STRINGS = {
     "rooms.team_note":    ("housekeepers you are inspecting today — you can mark a room for any of them",
                            "camaristas que inspeccionas hoy — puedes marcar un cuarto por cualquiera de ellas"),
     "rooms.mark_rest":    ("Mark the rest done", "Marcar el resto como terminado"),
+    "rooms.awaiting_rqs": ("waiting for the RQS to inspect",
+                           "esperando la inspección del RQS"),
+    "rooms.done_here":    ("nothing left to do on this one",
+                           "ya no queda nada por hacer aquí"),
 
     # ── statuses ─────────────────────────────────────────────────────────
-    "st.not_started":     ("Not started", "Sin empezar"),
+    "st.not_started":     ("Waiting to clean", "Esperando limpieza"),
     "st.in_progress":     ("Cleaning", "Limpiando"),
     "st.cleaned":         ("Ready for RQS", "Listo para RQS"),
     "st.inspected":       ("Inspected", "Inspeccionado"),

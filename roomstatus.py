@@ -37,15 +37,30 @@ ALIASES = {
 }
 
 #: label, short label, dot colour, card background, ink
+#:
+#: The four steps of the round are meant to be read as a journey, so their
+#: colours travel too: grey while it waits, amber while it is being done,
+#: blue once it is someone else's turn to look, and a dark, settled green
+#: when the RQS has passed it. Nothing else is green, so green means finished
+#: and finished means inspected.
 META = {
-    PENDING:       ("Not started",   "Waiting",   "#94a3b8", "#f1f5f9", "#475569"),
-    ALREADY_CLEAN: ("Already clean", "Clean",     "#10b981", "#dcfce7", "#065f46"),
-    STARTED:       ("Cleaning",      "Cleaning",  "#f59e0b", "#fef3c7", "#92400e"),
-    DONE:          ("Ready for RQS", "Ready",     "#3b82f6", "#dbeafe", "#1e40af"),
-    INSPECTED:     ("Inspected",     "Inspected", "#8b5cf6", "#ede9fe", "#5b21b6"),
-    DND:           ("Do not disturb", "DND",      "#a855f7", "#f3e8ff", "#6b21a8"),
-    HELP:          ("Needs help",    "Help",      "#ef4444", "#fee2e2", "#991b1b"),
+    PENDING:       ("Waiting to clean", "Waiting", "#94a3b8", "#f1f5f9", "#475569"),
+    STARTED:       ("Cleaning",       "Cleaning",  "#f59e0b", "#fef3c7", "#92400e"),
+    DONE:          ("Ready for RQS",  "Ready",     "#2f80ed", "#dbeafe", "#1e40af"),
+    INSPECTED:     ("Inspected",      "Inspected", "#15803d", "#dcfce7", "#14532d"),
+    ALREADY_CLEAN: ("Already clean",  "Clean",     "#0ea5e9", "#e0f2fe", "#075985"),
+    DND:           ("Do not disturb", "DND",       "#a855f7", "#f3e8ff", "#6b21a8"),
+    HELP:          ("Needs help",     "Help",      "#ef4444", "#fee2e2", "#991b1b"),
 }
+
+#: The one road through the day. Anything else -- do not disturb, needs help,
+#: already clean -- is a detour off it, not a step along it.
+NEXT = {PENDING: STARTED, STARTED: DONE, DONE: INSPECTED}
+
+#: Only an RQS closes a room. A housekeeper saying "ready for RQS" is the
+#: whole point of the handover; letting her also say "inspected" would make
+#: the inspection unprovable.
+RQS_ONLY = (INSPECTED,)
 
 #: Counted as no longer needing a housekeeper.
 CLEANED = (ALREADY_CLEAN, DONE, INSPECTED)
