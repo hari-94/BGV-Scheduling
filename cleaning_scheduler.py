@@ -4953,6 +4953,9 @@ td{{transition:background .15s ease}}
                 hk_insp[_hk][_g["inspector"]] = hk_insp[_hk].get(_g["inspector"], 0) + 1
 
         UNASSIGNED = "— no RQS —"
+        #: The column holding rooms nobody was given. Named, not blank, so it
+        #: reads as a place rather than a gap.
+        SET_ASIDE = "Set aside"
         _rqs_names = sorted({g.get("inspector", "") for g in fg if g.get("inspector")}
                             | set(present_insp))
 
@@ -5298,6 +5301,12 @@ td{{transition:background .15s ease}}
             `src` names the chart outright, for rooms that are not on anybody
             -- the set-aside ones, which have no housekeeper to look up by.
             """
+            if src is None and src_hk == SET_ASIDE:
+                # Nobody holds it, so it is found by the room itself.
+                src = next((g for g in fg
+                            if (g.get("verify_group") or g.get("dv_rqs2"))
+                            and any(str(r.get("room")) == code
+                                    for r in g["rooms"])), None)
             if src is None:
                 src = next((g for g in fg if g.get("housekeeper") == src_hk
                             and any(str(r.get("room")) == code
@@ -5377,7 +5386,25 @@ td{{transition:background .15s ease}}
                 if items or not room_hide_empty:
                     room_home[_hk] = items
 
+            # The set-aside rooms get a column of their own on the same board,
+            # so one can be dragged straight onto whoever should take it. A
+            # separate surface would have meant dragging between two boards,
+            # which is not a thing you can do.
+            _aside_now = _set_aside_rooms(fg)
+            if _aside_now:
+                _acards = []
+                for _a in sorted(_aside_now, key=lambda x: x["room"]):
+                    _c = (f'{_a["room"]}\n{_a["why"]}'
+                          + (f'\n{_guest_label({"guest": _a["guest"]})}'
+                             if _a["guest"] else ""))
+                    room_cards[_c] = (_a["room"], SET_ASIDE)
+                    _acards.append(_c)
+                room_home[SET_ASIDE] = _acards
+
             def _room_header(hk, items):
+                if hk == SET_ASIDE:
+                    return (f"{SET_ASIDE}\nstayover · P/U · no guest\n"
+                            f"{len(items)} rm")
                 mins = sum(g["time"] for g in hk_charts.get(hk, []))
                 insp = home_of.get(hk, UNASSIGNED)
                 blds = sorted({b for g in hk_charts.get(hk, [])
@@ -5472,6 +5499,12 @@ td{{transition:background .15s ease}}
                     for card in cards:
                         got = room_cards.get(card)
                         if got and got[1] != dst_hk:
+                            # Dropping a room back into the set-aside column is
+                            # not a move we can make -- there is no "unassign"
+                            # that keeps a chart honest -- so it is ignored
+                            # rather than half-done.
+                            if dst_hk == SET_ASIDE:
+                                continue
                             room_pending.append((got[0], got[1], dst_hk))
                 if room_pending:
                     rows = "<br>".join(
@@ -5502,6 +5535,10 @@ td{{transition:background .15s ease}}
 
         _render_set_aside(_set_aside_rooms(fg), "reassign")
         _aside = _set_aside_rooms(fg)
+        if _aside:
+            st.caption("These also sit in a **Set aside** column on the room "
+                       "board above — drag one onto a housekeeper, or use the "
+                       "picker here.")
         if _aside:
             _ac1, _ac2, _ac3 = st.columns([2, 2, 1.2])
             with _ac1:
