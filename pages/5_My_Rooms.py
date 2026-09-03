@@ -163,6 +163,18 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
   box-shadow:0 6px 16px rgba(47,145,105,.22) !important}
 [class*="st-key-"][class*="_go_"] button:active{transform:scale(.94)}
 
+.dlghead{font-size:1.02rem;margin:0 0 10px;display:flex;align-items:center;
+  gap:9px;flex-wrap:wrap}
+.dlgnow{margin-left:auto;border-radius:99px;padding:3px 11px;font-size:.7rem;
+  font-weight:800;letter-spacing:.03em}
+.dlgdot{width:14px;height:14px;border-radius:50%;margin:0 auto}
+/* A housekeeper's rooms sit under their name, indented, always open. */
+.tmhead{display:flex;align-items:center;gap:10px;margin:16px 0 6px}
+.tmname{font-weight:800;font-size:.92rem;color:#16202e}
+.tmcount{font-size:.76rem;color:#5b6b7e;font-variant-numeric:tabular-nums}
+.tmbar{flex:1;height:6px;border-radius:99px;background:#e6ebf2;overflow:hidden}
+.tmbar i{display:block;height:100%;border-radius:99px;
+  background:linear-gradient(90deg,#2f9169,#46b184);transition:width .6s ease}
 .mrbar.sm{height:6px;margin:0 0 8px}
 .mrteam{margin:18px 0 8px;font-size:.8rem;color:#42536a;
   border-top:1px solid #e6ebf2;padding-top:12px}
@@ -404,6 +416,89 @@ def _step(cur):
     return nxt, ""
 
 
+def _open_marker(code, owner):
+    """Remember which room was tapped; the dialog opens on the next run."""
+    st.session_state["mr_open"] = {"room": code, "owner": owner}
+
+
+@st.dialog("Mark this room")
+def _marker(code, g, r, owner):
+    """Every option for one room, on one screen.
+
+    A dialog rather than a dropdown: a dropdown had to be dismissed by hand
+    and did not always go, so a second tap landed on whatever was underneath
+    it. This closes itself the moment something is chosen.
+    """
+    rec = statuses.get(code) or {}
+    cur = _rst.normalise(rec.get("status"))
+    guest = str(r.get("guest", "") or "").strip()
+    st.markdown(f'<div class="dlghead"><b>{e(code)}</b>'
+                f'{" · " + e(guest) if guest else ""}'
+                f'<span class="dlgnow" style="background:{_rst.META[cur][3]};'
+                f'color:{_rst.META[cur][4]}">{e(T(STATUS_KEY[cur]))}</span></div>',
+                unsafe_allow_html=True)
+
+    def _pick(target):
+        _mark(code, g, target, owner)
+        st.session_state.pop("mr_open", None)
+        st.rerun()
+
+    # The road first, in order, so the next step is where the eye lands.
+    st.caption(T("rooms.the_round"))
+    for target in (NOT_STARTED, IN_PROGRESS, CLEANED, INSPECTED):
+        if target in _rst.RQS_ONLY and not can_inspect:
+            continue
+        dot = _rst.META[target][2]
+        here = target == cur
+        c1, c2 = st.columns([0.5, 6], vertical_alignment="center")
+        with c1:
+            st.markdown(f'<div class="dlgdot" style="background:{dot}"></div>',
+                        unsafe_allow_html=True)
+        with c2:
+            st.button(T(STATUS_KEY[target]) + ("  ✓" if here else ""),
+                      key=f"dlg_{target}_{code}", use_container_width=True,
+                      disabled=here,
+                      type="primary" if target == _rst.NEXT.get(cur) else "secondary",
+                      on_click=_pick, args=(target,))
+
+    # Then the ways off it.
+    st.caption(T("rooms.other_ways"))
+    d1, d2, d3 = st.columns(3)
+    for col, (lbl, target) in zip((d1, d2, d3),
+                                  (("st.already_clean", ALREADY),
+                                   ("act.dnd", DND), ("act.help", HELP))):
+        with col:
+            st.button(T(lbl), key=f"dlg_{target}_{code}",
+                      use_container_width=True, disabled=target == cur,
+                      on_click=_pick, args=(target,))
+
+    st.caption(T("act.note"))
+    txt = st.text_area(T("act.note_ph"), value=rec.get("notes") or "",
+                       key=f"dlg_note_{code}", height=90,
+                       label_visibility="collapsed",
+                       placeholder=T("act.note_ph"))
+    n1, n2 = st.columns([1, 1])
+    with n1:
+        if st.button(T("act.save"), key=f"dlg_nb_{code}", type="primary",
+                     use_container_width=True):
+            try:
+                db.upsert_room_status(code, {
+                    "notes": txt, "housekeeper": owner,
+                    "group_label": g.get("label", ""),
+                    "updated_by": me_user or me_display})
+                st.session_state["mr_flash"] = code
+            except Exception as ex:
+                print(f"[my_rooms] note failed for {code}: {ex}")
+                st.session_state["mr_error"] = code
+            st.session_state.pop("mr_open", None)
+            st.rerun()
+    with n2:
+        if st.button(T("rooms.close"), key=f"dlg_x_{code}",
+                     use_container_width=True):
+            st.session_state.pop("mr_open", None)
+            st.rerun()
+
+
 def _room_row(g, r, key_prefix, owner, editable=True):
     """One room, as a line you can act on without reading twice."""
     code = str(r.get("room", ""))
@@ -444,43 +539,27 @@ def _room_row(g, r, key_prefix, owner, editable=True):
             f'</div>', unsafe_allow_html=True)
     with c_btn:
         if editable:
-            _now = T(STATUS_KEY.get(cur, "st.not_started"))
+            # One control, not two. The circle shows where the room is and
+            # opens the full list of what it could be -- a menu beside it was
+            # a second thing to learn and a second thing to miss.
             st.button(glyph, key=f"{key_prefix}_go_{code}",
-                      help=_now + (f" — {why_not}" if why_not else ""),
-                      use_container_width=True, disabled=nxt is None,
-                      on_click=_mark, args=(code, g, nxt or cur, owner))
-            with st.popover("⋯", use_container_width=True):
-                st.markdown(f'**{e(code)}**' + (f' · {e(guest)}' if guest else ""))
-                _opts = [("act.done", CLEANED), ("act.start", IN_PROGRESS),
-                         ("st.already_clean", ALREADY)]
-                if can_inspect:
-                    _opts.append(("st.inspected", INSPECTED))
-                _opts += [("act.dnd", DND), ("act.help", HELP),
-                          ("act.undo", NOT_STARTED)]
-                for lbl, target in _opts:
-                    st.button(T(lbl), key=f"{key_prefix}x_{target}_{code}",
-                              use_container_width=True,
-                              on_click=_mark, args=(code, g, target, owner))
-                txt = st.text_area(T("act.note_ph"), value=note,
-                                   key=f"{key_prefix}_note_{code}", height=80,
-                                   label_visibility="collapsed",
-                                   placeholder=T("act.note_ph"))
-                if st.button(T("act.save"), key=f"{key_prefix}_nb_{code}",
-                             type="primary", use_container_width=True):
-                    try:
-                        db.upsert_room_status(code, {
-                            "notes": txt, "housekeeper": owner,
-                            "group_label": g.get("label", ""),
-                            "updated_by": me_user or me_display})
-                        st.session_state["mr_flash"] = code
-                    except Exception as ex:
-                        print(f"[my_rooms] note failed for {code}: {ex}")
-                        st.session_state["mr_error"] = code
-                    st.rerun()
+                      help=T(STATUS_KEY.get(cur, "st.not_started")),
+                      use_container_width=True,
+                      on_click=_open_marker, args=(code, owner))
 
 
 for _g, _r in sorted(my_rooms, key=lambda x: str(x[1].get("room", ""))):
     _room_row(_g, _r, "mr", mine)
+
+
+_pending = st.session_state.get("mr_open")
+if _pending:
+    _hit = next(((g, r) for g in charts for r in (g.get("rooms") or [])
+                 if str(r.get("room", "")) == _pending["room"]), None)
+    if _hit:
+        _marker(_pending["room"], _hit[0], _hit[1], _pending["owner"])
+    else:
+        st.session_state.pop("mr_open", None)
 
 
 # ── an RQS sees their whole team, and can mark for them ──────────────────────
@@ -500,9 +579,14 @@ if _my_team:
                        if _rst.is_clean((statuses.get(str(r.get("room", "")))
                                          or {}).get("status")))
         _pct = int(round(100 * _hk_done / max(len(_hk_rooms), 1)))
-        with st.expander(f"{_hk} — {_hk_done}/{len(_hk_rooms)}", expanded=False):
-            st.markdown(f'<div class="mrbar sm"><i style="width:{_pct}%"></i></div>',
-                        unsafe_allow_html=True)
+        # Always open. A supervisor walking the floor wants the rooms in front
+        # of them, not a row of closed drawers to remember to open.
+        st.markdown(
+            f'<div class="tmhead"><span class="tmname">{e(_hk)}</span>'
+            f'<span class="tmcount">{_hk_done}/{len(_hk_rooms)}</span>'
+            f'<span class="tmbar"><i style="width:{_pct}%"></i></span></div>',
+            unsafe_allow_html=True)
+        with st.container():
             _left = [(g, r) for g, r in _hk_rooms
                      if not _rst.is_clean((statuses.get(str(r.get("room", "")))
                                            or {}).get("status"))]

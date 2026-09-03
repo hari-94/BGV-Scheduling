@@ -65,6 +65,9 @@ STRINGS = {
     "rooms.mark_rest":    ("Mark the rest done", "Marcar el resto como terminado"),
     "rooms.awaiting_rqs": ("waiting for the RQS to inspect",
                            "esperando la inspección del RQS"),
+    "rooms.the_round":    ("The round", "El recorrido"),
+    "rooms.other_ways":   ("Something else", "Otra cosa"),
+    "rooms.close":        ("Close", "Cerrar"),
     "rooms.done_here":    ("nothing left to do on this one",
                            "ya no queda nada por hacer aquí"),
 
