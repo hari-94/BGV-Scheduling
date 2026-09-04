@@ -5455,18 +5455,32 @@ td{{transition:background .15s ease}}
             # per-column class, so they are addressed by position -- as
             # div:nth-of-type, which skips the <style> tag the component
             # renders as its own first child.
-            ds_cols = [i + 1 for i, hk in enumerate(room_home) if _is_ds_hk(hk)]
+            # A Daily Service round and the set-aside pile are both far longer
+            # than anybody's Full Clean list -- 36 rooms in one column is a
+            # scroll, not a view. Both run full width with their rooms flowing
+            # across instead.
+            ds_cols = [i + 1 for i, hk in enumerate(room_home)
+                       if _is_ds_hk(hk) or hk == SET_ASIDE]
             if ds_cols:
                 def _sel(suffix=""):
                     return ",".join(
                         f".sortable-component > div:nth-of-type({i}){suffix}"
                         for i in ds_cols)
+                _aside_i = [i + 1 for i, hk in enumerate(room_home)
+                            if hk == SET_ASIDE]
+                _aside_sel = ",".join(
+                    f".sortable-component > div:nth-of-type({i})"
+                    for i in _aside_i) or ".sortable-component > div:nth-of-type(0)"
                 ROOM_CSS += f"""
                 {_sel()}{{grid-column:1/-1;width:100% !important;
                     background:#e8f0f9;border-color:#cbdff2}}
                 {_sel(" .sortable-container-header")}{{
                     background:linear-gradient(135deg,#1d6b52 0%,#2f9169 60%,#46b184 100%);
                     box-shadow:0 3px 9px rgba(29,107,82,.22)}}
+                {_aside_sel}{{background:#f6f1e7;border-color:#e3d6bd}}
+                {_aside_sel} .sortable-container-header{{
+                    background:linear-gradient(135deg,#7a5a1e 0%,#a8802f 60%,#c99a45 100%);
+                    box-shadow:0 3px 9px rgba(122,90,30,.22)}}
                 {_sel(" .sortable-container-body")}{{display:flex !important;
                     flex-wrap:wrap;gap:6px;min-height:52px;align-content:flex-start}}
                 {_sel(" .sortable-item")}{{width:auto !important;
