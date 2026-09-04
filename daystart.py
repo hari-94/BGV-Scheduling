@@ -95,6 +95,29 @@ def release_minute(room) -> int | None:
     return h * 60 + mi
 
 
+def late_out_at(room) -> str | None:
+    """The time on a late checkout as a person would read it, or None.
+
+    Deliberately not the same as `release_minute`. That one falls back to
+    BARE_LATE_OUT when the sheet says only "Late Out", which is the right
+    assumption to *schedule* against but a guess -- and a guess must never be
+    shown to a housekeeper as though the front desk had said it. If there is
+    no time on the sheet, there is no time on the card.
+    """
+    raw = str(room.get("late_checkout") or "").strip()
+    if not raw:
+        return None
+    m = _LATE.search(raw)
+    if not m:
+        return None
+    h, mi, ap = int(m.group(1)), int(m.group(2)), m.group(3).lower()
+    if ap == "p" and h != 12:
+        h += 12
+    if ap == "a" and h == 12:
+        h = 0
+    return hhmm(h * 60 + mi)
+
+
 def _text(room) -> str:
     return " ".join(str(room.get(k) or "") for k in
                     ("notes", "res_type", "status", "service")).lower()

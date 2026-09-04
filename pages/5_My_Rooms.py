@@ -134,7 +134,8 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .tkdot{width:11px;height:11px;border-radius:50%;flex:0 0 auto;
   transition:background .35s ease,transform .3s ease}
 .tkchip{font-size:.6rem;font-weight:800;letter-spacing:.05em;
-  border-radius:6px;padding:2px 6px;background:#eef2f7;color:#42536a}
+  border-radius:6px;padding:2px 6px;background:#eef2f7;color:#42536a;
+  white-space:nowrap}
 .tkchip.owner{background:#fff3cd;color:#7a5200}
 .tkchip.vip{background:#ffe0ef;color:#9b1c48}
 .tkchip.early{background:#dbeafe;color:#12447e}
@@ -542,7 +543,10 @@ def _flags_for(r):
     if str(r.get("pet", "") or "").strip():
         out.append(("pet", "PET"))
     if r.get("late_checkout"):
-        out.append(("late", "LATE OUT"))
+        # The time is the whole point of the flag -- "LATE OUT" on its own
+        # tells somebody to skip the room, not when to come back for it.
+        at = _day.late_out_at(r)
+        out.append(("late", f"LATE OUT {at}" if at else "LATE OUT"))
     return out
 
 
@@ -678,6 +682,9 @@ def _detail_html(g, r, rec, owner):
         + _row(T("rooms.guest_next"), arr)
         + _row(T("rooms.res_type"), res)
         + _row(T("rooms.occupancy"), occ)
+        # Under Arrival, because it is the other half of the same question:
+        # can this room be done now, or does it have to wait?
+        + _row(T("rooms.late_out"), str(r.get("late_checkout") or "").strip())
         + f'<div class="dthead">{e(T("rooms.the_room"))}</div>'
         + _row(T("rooms.building_l"), r.get("bld"))
         + _row(T("rooms.floor_l"), r.get("floor"))

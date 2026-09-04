@@ -108,6 +108,7 @@ STRINGS = {
     "rooms.guest_next":   ("Arriving", "Va a llegar"),
     "rooms.res_type":     ("Booking", "Tipo de reserva"),
     "rooms.occupancy":    ("Occupancy", "Ocupación"),
+    "rooms.late_out":     ("Late checkout", "Salida tardía"),
     "rooms.building_l":   ("Building", "Edificio"),
     "rooms.floor_l":      ("Floor", "Piso"),
     "rooms.service_l":    ("Service", "Servicio"),
