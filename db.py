@@ -671,6 +671,31 @@ def get_room_statuses(date_str: str = None) -> dict:
         print(f"[db] get_room_statuses error: {ex}")
         return {}
 
+def all_known_rooms() -> list:
+    """Every room code that has ever appeared on a chart.
+
+    The property has no room table — the inventory is whatever the morning
+    sheets have carried. Reading every stored day is the only way to get the
+    whole building, and it is stable enough to cache for an hour: 245 rooms,
+    unchanged across all the days on record.
+    """
+    try:
+        r = _client().table("schedule_full").select("payload").execute()
+        rooms = set()
+        for row in (r.data or []):
+            p = row.get("payload")
+            if isinstance(p, str):
+                p = json.loads(p)
+            for g in ((p or {}).get("groups_data") or []):
+                for rm in (g.get("rooms") or []):
+                    code = str(rm.get("room", "")).strip().upper()
+                    if code:
+                        rooms.add(code)
+        return sorted(rooms)
+    except Exception as ex:
+        print(f"[db] all_known_rooms error: {ex}")
+        return []
+
 def upsert_room_status(room: str, fields: dict, date_str: str = None):
     """
     Upsert a room's status record for today.

@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, i18n
 import assignments
 import roomstatus as _rst
+import property_map as pmap
+import daystart as _day
 import ui
 
 st.set_page_config(page_title="My Rooms", page_icon="🛎️", layout="wide")
@@ -138,6 +140,32 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .tkchip.early{background:#dbeafe;color:#12447e}
 .tkchip.pet{background:#fff0e0;color:#8a4b00}
 .tkchip.late{background:#fde8ef;color:#9b1c48}
+.tkwhen{font-size:.72rem;font-weight:800;color:#12447e;background:#e8effa;
+  border-radius:6px;padding:1px 6px;white-space:nowrap;font-variant-numeric:tabular-nums}
+/* The day, as a shape. One strip from the first cart out to the last room
+   finished, so the crunch is visible before it arrives rather than at 3pm. */
+.dayw{background:#fff;border:1px solid #e3e8ef;border-radius:14px;
+  padding:12px 14px 10px;margin:2px 0 12px}
+.dayh{display:flex;align-items:baseline;gap:8px;margin-bottom:9px;flex-wrap:wrap}
+.dayh b{font-size:.82rem;font-weight:800;letter-spacing:.04em;color:#42536a}
+.dayh .fin{margin-left:auto;font-size:.8rem;font-weight:800;
+  font-variant-numeric:tabular-nums;color:#166534}
+.dayh .fin.over{color:#9b1c48}
+.daytrack{position:relative;height:26px;border-radius:7px;background:#f1f4f8;
+  overflow:hidden;display:flex}
+.daytrack i{display:block;height:100%}
+.daytrack i.go{background:repeating-linear-gradient(135deg,#cbd5e1 0 3px,#dbe2ea 3px 6px)}
+.daytrack i.wait{background:repeating-linear-gradient(135deg,#fbcfe8 0 4px,#fde8ef 4px 8px)}
+.daytrack i.job{background:#93b4e6}
+.daytrack i.job.u2{background:#5b8cd6}
+.daytrack i.job.u3{background:#2f6fc4}
+.daytrack i.job.late{background:#e59ab8}
+.daymark{position:absolute;top:0;bottom:0;width:2px;background:#9b1c48;opacity:.75}
+.daymark.soft{background:#94a3b8;opacity:.6}
+.dayax{display:flex;justify-content:space-between;margin-top:4px;
+  font-size:.64rem;color:#8a94a4;font-variant-numeric:tabular-nums}
+.daysum{margin-top:7px;font-size:.72rem;color:#6b7789}
+.daysum b{color:#42536a}
 /* Finished rooms recede rather than vanish -- still countable, no longer
    competing with what is left. */
 /* A finished room goes darker rather than crossed out. A line through a room
@@ -655,7 +683,7 @@ def _detail_html(g, r, rec, owner):
         + '</div>')
 
 
-def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
+def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False, when=None):
     """One room, as a line you can act on without reading twice."""
     code = str(r.get("room", ""))
     rec = statuses.get(code) or {}
@@ -684,7 +712,8 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
             f'<div class="tkico">{icon}</div>'
             f'<div class="tkmain">'
             f'<div class="tkline1"><span class="tkroom">{e(code)}</span>'
-            f'<span class="tkmins">⚑ {r.get("time", 0)}m</span>'
+            + (f'<span class="tkwhen">{e(when)}</span>' if when else "")
+            + f'<span class="tkmins">⚑ {r.get("time", 0)}m</span>'
             f'{"<span class=tknote>📝</span>" if note else ""}</div>'
             f'<div class="tkguest">{e(guest) or "—"}</div>'
             + (f'<div class="tkarr">→ {e(arriving)}</div>' if arriving else "")
@@ -793,12 +822,118 @@ if _my_team:
                   f'<span class="pgnum">{_dn}/{len(_rs)}</span></div>')
     st.markdown(f'<div class="pgwrap">{_bars}</div>', unsafe_allow_html=True)
 
-# One list, ordered by housekeeper then room, so a person's rooms still sit
-# together without a heading between them.
-_flat = sorted(shown_rooms,
-               key=lambda x: (str(x[0].get("housekeeper", "")),
-                              str(x[1].get("room", ""))))
+# One list per person, in the order the day should actually be worked: an
+# early check-in first even if it is in the wrong building, a late checkout
+# only once the guest has gone, and everything between walked as little as
+# possible. Room-code order looks tidy but sends somebody past the same
+# service elevator three times and knocks on a door at ten past ten that is
+# not empty until noon.
+_plan, _seatmap = {}, {}
+for _g, _r in shown_rooms:
+    _plan.setdefault(str(_g.get("housekeeper", "")), []).append(_r)
+for _hk in list(_plan):
+    try:
+        _blocks = _day.plan_day(_plan[_hk])
+    except Exception:
+        _blocks = []          # an unmappable room must never blank the page
+    _plan[_hk] = _blocks
+    _seatmap[_hk] = {b["room"]: (i, b) for i, b in enumerate(_blocks)}
+
+
+def _seat(item):
+    g, r = item
+    hk = str(g.get("housekeeper", ""))
+    code = str(r.get("room", "")).strip().upper()
+    return (hk, _seatmap.get(hk, {}).get(code, (999, None))[0], code)
+
+
+def _day_strip(blocks):
+    """The whole day as one proportional bar, with the deadlines drawn on it."""
+    if not blocks:
+        return ""
+    s = _day.summary(blocks)
+    begin = _day._mins(_day.DAY_START)
+    finish = s["finish"]
+    span = max(finish, _day._mins(_day.CHECKIN)) - begin
+    if span <= 0:
+        return ""
+
+    def pct(m):
+        return 100.0 * m / span
+
+    segs, cur = "", begin
+    for b in blocks:
+        if b["travel"] > 0:
+            segs += f'<i class="go" style="width:{pct(b["travel"]):.3f}%"></i>'
+        if b["wait"] > 0:
+            segs += f'<i class="wait" style="width:{pct(b["wait"]):.3f}%"></i>'
+        klass = "job"
+        if b["release"] is not None:
+            klass += " late"
+        elif b["urgency"] >= 100:
+            klass += " u3"
+        elif b["urgency"] >= 50:
+            klass += " u2"
+        segs += (f'<i class="{klass}" style="width:{pct(b["minutes"]):.3f}%" '
+                 f'title="{e(b["room"])} · {b["minutes"]:.0f}m"></i>')
+        cur = b["end"]
+
+    tgt = pct(_day._mins(_day.TARGET_END) - begin)
+    chk = pct(_day._mins(_day.CHECKIN) - begin)
+    # Pacing lands most charts exactly on the target, where the overrun is a
+    # rounding sliver. Half a minute is not late; showing "0m over" is.
+    over = s["over"] > 0.5
+    fin_txt = _day.hhmm(finish) + (" · %.0fm over" % s["over"] if over else " ✓")
+    return (
+        f'<div class="dayw">'
+        f'<div class="dayh"><b>{e(T("rooms.yourday"))}</b>'
+        f'<span class="fin{" over" if over else ""}">{e(fin_txt)}</span></div>'
+        f'<div class="daytrack">{segs}'
+        f'<span class="daymark soft" style="left:{tgt:.2f}%"></span>'
+        f'<span class="daymark" style="left:{chk:.2f}%"></span>'
+        f'</div>'
+        f'<div class="dayax"><span>{_day.hhmm(begin)}</span>'
+        f'<span>3:30 ▏ 4:00</span></div>'
+        f'<div class="daysum">'
+        f'<b>{s["rooms"]}</b> rooms · <b>{s["clean"]:.0f}m</b> cleaning · '
+        f'<b>{s["travel"]:.0f}m</b> walking'
+        # The sheet's minutes are standards the floor beats. Say by how much
+        # rather than silently quoting times nobody can trace back.
+        + (f' · paced <b>{(1 - s["pace"]) * 100:.0f}%</b> under the sheet'
+           if s["pace"] < 0.995 else "")
+        + (f' · <b>{s["wait"]:.0f}m</b> waiting on a guest' if s["wait"] > 0 else "")
+        + (f' · <b>{s["late_rooms"]}</b> late checkout'
+           + ("s" if s["late_rooms"] != 1 else "") if s["late_rooms"] else "")
+        # Never present a guess as a plan: if the sheet carried no minutes for
+        # some rooms, the finish time is an estimate and has to say so.
+        + (f' · <b>{s["untimed"]}</b> with no time on the sheet, estimated'
+           if s["untimed"] else "")
+        + f'</div></div>')
+
+
+_flat = sorted(shown_rooms, key=_seat)
 _mixed = len({g.get("housekeeper") for g, _ in _flat}) > 1
+
+# The day's shape goes above the rooms it describes. An RQS looking at a whole
+# team gets one strip per person, so a chart that cannot finish is visible from
+# the top of the page instead of at three in the afternoon.
+_drawn = set()
 for _g, _r in _flat:
+    _hk = str(_g.get("housekeeper", ""))
+    if _hk not in _drawn:
+        _drawn.add(_hk)
+        _strip = _day_strip(_plan.get(_hk) or [])
+        if _strip:
+            if _mixed and _hk:
+                st.markdown(f'<div class="pgname" style="margin:14px 0 2px;'
+                            f'font-weight:800">🧹 {e(_hk)}</div>',
+                            unsafe_allow_html=True)
+            st.markdown(_strip, unsafe_allow_html=True)
+    _blk = _seatmap.get(_hk, {}).get(str(_r.get("room", "")).strip().upper(),
+                                     (999, None))[1]
+    # The done-by time, not the start time. "Be finished here by 11:45" is
+    # something a person can pace against mid-room; "start at 10:07" stops
+    # being useful the moment the day slips by ten minutes.
     _room_row(_g, _r, "mr", _g.get("housekeeper") or mine,
-              show_owner=_mixed)
+              show_owner=_mixed,
+              when=(T("rooms.by") + " " + _day.hhmm(_blk["end"])) if _blk else None)

@@ -19,6 +19,7 @@ st.set_page_config(
 
 # Import local modules after set_page_config
 import auth, db
+import property_map as pmap
 import ui
 
 # ── Hide Streamlit's auto-generated page navigation IMMEDIATELY ───────────────
@@ -3302,10 +3303,30 @@ def group_card_html(g, idx):
     priority_badge = badge("Priority","rgba(234,179,8,.15)","#fde047","rgba(234,179,8,.3)") if g.get("priority_hk") else ""
     cross_badge = badge("Cross-bld","rgba(168,85,247,.15)","#d8b4fe","rgba(168,85,247,.3)") if (g.get("cross_bld") and not is_verify) else ""
 
+    # How far this chart makes somebody walk, and the order that walks least.
+    # A chart can be perfectly balanced on minutes and still cost twenty of
+    # them in corridor — the minutes column has no way of showing that, and
+    # two rooms in different buildings look the same there as two next door.
+    try:
+        _codes = [r.get("room","") for r in g["rooms"]]
+        _walk_min = pmap.chart_travel(_codes) / 60.0
+        _seat = {c: i for i, c in enumerate(pmap.best_order(_codes))}
+    except Exception:
+        _walk_min, _seat = 0.0, {}
+    if _walk_min >= 12:
+        walk_badge = badge(f"{_walk_min:.0f} min walk","rgba(244,63,94,.15)","#fda4af","rgba(244,63,94,.3)")
+    elif _walk_min > 0:
+        walk_badge = badge(f"{_walk_min:.0f} min walk","rgba(148,163,184,.12)","#94a3b8","rgba(148,163,184,.25)")
+    else:
+        walk_badge = ""
+
     t_col = "#4ade80" if pct<=87 else ("#fbbf24" if pct<=95 else "#f87171")
 
     rows = ""
-    for i, r in enumerate(g["rooms"]):
+    _ordered = sorted(g["rooms"],
+                      key=lambda r: (_seat.get(str(r.get("room","")).strip().upper(), 999),
+                                     str(r.get("room",""))))
+    for i, r in enumerate(_ordered):
         notes_lower = r.get("notes","").lower()
         is_stayover = "stayover" in notes_lower or "stay over" in notes_lower
         row_bg = "rgba(34,211,238,.06)" if (r.get("uncertain") and is_stayover) else "rgba(245,158,11,.06)" if r.get("uncertain") else "transparent"
@@ -3370,7 +3391,7 @@ def group_card_html(g, idx):
     <div style="flex:1;min-width:0">
       <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
         <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:.88rem;color:{_C["txt"]}">{title_text}</span>
-        {svc_badge} {overflow_badge} {priority_badge} {cross_badge} {unassigned_badge}
+        {svc_badge} {overflow_badge} {priority_badge} {cross_badge} {walk_badge} {unassigned_badge}
       </div>
       {meta_line}
     </div>

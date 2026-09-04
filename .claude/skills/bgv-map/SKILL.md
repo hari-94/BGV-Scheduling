@@ -51,6 +51,57 @@ pages reload the module if it looks stale.
 Staffing numbers are in `staffing.py`; the daily-service rotation is
 `roster_import.suggest_daily_service`.
 
+## Where rooms are in the building
+`property_map.py` — no Streamlit, so it is testable alone.
+
+| want to change | go to |
+|---|---|
+| the floor plans | `B1_TOWER`, `B1_STRIP`, `B2_TOWER`, `B3_PLATE` — `(row, x)` in door-widths |
+| what a walk costs | the constants block: `SLOT_SECONDS`, `ELEVATOR_WAIT`, `BRIDGE_CROSS`… |
+| which levels bridge to which | `BRIDGES` |
+| the order rooms are cleaned in | `best_order` — nearest neighbour then 2-opt |
+| where the day starts | `OFFICE_BLD` / `OFFICE_LEVEL` — building 2, Terrace |
+
+The room code lies twice: digit 0 is Plaza **and** Terrace split by room number, and
+building 3 renumbers the same doors on its low levels (`_canon`). Buildings 2 and 3
+have no bridge — everything between them goes through building 1.
+
+Ordering is applied in two places: `group_card_html` (`_seat`) and the phone page's
+`_flat`. Both fall back to code order if a room is not on the plans, so a new room
+code degrades the order without blanking the page.
+
+## What to clean first, and the timeline
+`daystart.py` — no Streamlit, testable alone.
+
+| want to change | go to |
+|---|---|
+| the working day's clock | `DAY_START` 10:00, `TARGET_END` 15:30, `CHECKIN` 16:00 |
+| how the day is paced to fit | the fitting loop in `plan_day`; `MIN_PACE` is the floor |
+| one pass at a fixed pace | `_simulate` — `plan_day` calls it until the pace settles |
+| what counts as urgent | `urgency` — early in 100, VIP 70, arriving 50, owner 30, stayover 5 |
+| how hard urgency pulls | `URGENCY_SECONDS` — seconds of detour one rank is worth |
+| reading a late checkout | `release_minute` / `BARE_LATE_OUT` |
+| rooms with no minutes | `UNTIMED_MINUTES`; `summary()["untimed"]` counts them |
+| the reason shown on a card | `why` |
+
+The order is a forward simulation, not a sort: waiting for a guest counts as
+cost, which is what sends late checkouts to the back on its own. Do not replace
+it with a tiered sort — that throws the travel saving away.
+
+The timeline strip is `_day_strip` in `pages/5_My_Rooms.py`, drawn once per
+housekeeper above their rooms; the per-card start time is the `when` argument to
+`_room_row`.
+
+## The property page
+`pages/6_Property.py` — gated on `can_view_insp_tab` (admin + RQS).
+
+Three.js from cdnjs, fed by `pmap.layout(codes)` and `pmap.bridge_spans()`.
+Geometry constants (`DOOR_W`, `LEVEL_H`, `HALL_D`, `BLD_GAP`, `BLD_ORDER`) live
+in `property_map.py`, not the page. `layout` needs explicit room codes — a plate
+is shared between levels, so it cannot know which rooms a level has;
+`db.all_known_rooms()` supplies them. Colours come from `roomstatus.META`, never
+invented locally, or the legend stops matching the phone in somebody's hand.
+
 ## Everything else
 
 - **Roles and access**: `auth.py`. `can_manage_users` is admin only; `can_view_insp_tab` is admin + rqs.

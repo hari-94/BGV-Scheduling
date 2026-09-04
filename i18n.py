@@ -69,6 +69,29 @@ STRINGS = {
                            "{n} nota(s) nueva(s) de tu equipo"),
     "rooms.notes_read":   ("Mark the notes as read", "Marcar las notas como leídas"),
     "rooms.more":         ("Details", "Detalles"),
+    "rooms.yourday":      ("YOUR DAY", "TU DÍA"),
+    "rooms.startwith":    ("Start with", "Empieza con"),
+    "rooms.by":           ("by", "para las"),
+    "nav.property":       ("Property", "Propiedad"),
+    "prop.no_access":     ("This page is for managers and RQS.",
+                           "Esta página es para gerentes y RQS."),
+    "prop.no_rooms":      ("No schedule has been saved yet, so there are no rooms to place.",
+                           "Aún no se ha guardado ningún horario, así que no hay cuartos que ubicar."),
+    "prop.colour":        ("Colour by", "Color por"),
+    "prop.by_status":     ("Cleaning status", "Estado de limpieza"),
+    "prop.by_building":   ("Building", "Edificio"),
+    "prop.refresh":       ("Refresh status", "Actualizar estado"),
+    "prop.getting_around": ("Getting around the property", "Moverse por la propiedad"),
+    "prop.bridges_title": ("Where the bridges are", "Dónde están los puentes"),
+    "prop.costs_title":   ("What a walk costs", "Cuánto cuesta caminar"),
+    "prop.caveat":        ("Every room sits at its true building, level and place along "
+                           "the corridor, and each bridge is drawn at the level it crosses. "
+                           "The plans carry no measurements, so the proportions are taken "
+                           "off the drawings rather than surveyed.",
+                           "Cada cuarto está en su edificio, nivel y lugar real del pasillo, "
+                           "y cada puente se dibuja en el nivel que cruza. Los planos no "
+                           "traen medidas, así que las proporciones se tomaron de los dibujos, "
+                           "no de un levantamiento."),
     "rooms.arrival":      ("Arrival", "Llegada"),
     "rooms.the_room":     ("The room", "El cuarto"),
     "rooms.guest_now":    ("Guest now", "Huésped actual"),

@@ -41,6 +41,9 @@ several of them read the *real* schedule to test against a real day.
 | `auth.py` | 155 | roles and permissions |
 | `roomstatus.py` | 105 | the one vocabulary for a room's state |
 | `assignments.py` | 92 | who is on which rooms today (shared by the page and the nav) |
+| `pages/6_Property.py` | 300 | the property in 3-D, coloured by status — admin and RQS only |
+| `property_map.py` | 400 | where every room is and what it costs to walk between two |
+| `daystart.py` | 210 | what to clean first, and when each room is reached |
 | `clock.py` | 35 | property-local time |
 
 ### Inside `cleaning_scheduler.py`
@@ -82,6 +85,67 @@ swapped_from, updated_by, updated_at`.
 → inspected`, with `already_clean`, `dnd` and `help` off to the side. `NEXT` is the
 road, `RQS_ONLY` is the sign-off, `META` is the label and colours. Change a colour or
 a label there and both the phone page and the Live board follow.
+
+## The building
+
+`property_map.py` holds the property's shape, taken off the floor plans posted by
+the service elevators and checked against all 245 rooms that have ever appeared on
+a chart. Three things in the room code are not what they look like:
+
+- **The level digit is not the level.** Digit 0 is *two* levels — Plaza and Terrace —
+  split by room number, in buildings 1 and 3.
+- **Building 1 has no rooms on level 1** (lobby, pool, spa) and **building 2 has none
+  on Plaza or Terrace** (parking, and the housekeeping office).
+- **Building 3 renumbers the same plate on its low levels.** 3240A, 3020A and 3010A
+  are the same door on three levels. `_canon` undoes it so one floor plan serves the
+  whole stack.
+
+Buildings 2 and 3 **do not touch**. Building 1 is the link: bridges to 2 at Plaza,
+Terrace, 1 and 2; to 3 at Plaza and 1 only. A chart holding rooms in both 2 and 3
+costs two bridge crossings, and that is the single most expensive thing a chart can
+do — about eight minutes a round trip.
+
+`travel_seconds(a, b)`, `best_order(rooms)`, `chart_travel(rooms)`, `spread(rooms)`.
+The seconds are estimates with names (`ELEVATOR_WAIT`, `BRIDGE_CROSS`…) so they can
+be tuned once somebody times a real trip; what matters is their ratio. Rooms are
+ordered by route on the chart card and on the phone page — the order a housekeeper
+reads down her list is the order that walks least.
+
+## The day
+
+`daystart.py` decides what to clean first. The order is not a sort — it is a
+simulation of the day from ten in the morning, choosing at each step the room
+that costs least to reach *and* is worth doing next, where **waiting for a guest
+to leave counts as cost**. That one idea is what pushes late checkouts to the
+back without a rule saying so, and it is why the module is a loop rather than a
+`sorted(key=...)`.
+
+HP's clock: **carts roll at 10:00, the floor should be done by 15:30, guests
+check in at 16:00.**
+
+**The 70/120/140 on a chart are standards, not durations.** HP says the floor
+beats them, and the numbers agree: Full Clean charts run a median of 350 minutes
+against a 330-minute window. So `plan_day` paces — it takes whatever is left of
+the window once walking and waiting are removed and spreads it across the rooms
+in proportion to their sheet minutes, giving each room a **done-by** time. That
+is what the card shows, because "be finished here by 11:45" survives the day
+slipping and "start at 10:07" does not.
+
+Pacing runs *after* ordering and iterates, because the two depend on each other:
+compress the morning and a late-checkout room gets reached before the guest has
+gone, which changes the waiting, which changes the pace. It never exceeds 1.0 —
+a light chart finishes early, and stretching rooms to fill the day would be a
+fiction — and never drops below `MIN_PACE`, below which the chart genuinely does
+not fit and is left visibly overrunning instead. Measured over every stored day:
+**95% of charts land on 15:30, median pace 0.92**; the 5% that cannot fit at
+`MIN_PACE` overrun on screen where somebody can see them.
+
+Signals actually in the data (checked, not assumed): `late_checkout` carries real
+times ("Late Out: 10:30 am"), `notes` carry **"early in"** and "vip", `arriving`
+holds the incoming guest's name — not a time, so there is no per-room deadline,
+only "somebody is checking in here today". Dust n Vac rooms carry **no minutes at
+all**; `UNTIMED_MINUTES` is a stated guess and `summary()["untimed"]` counts the
+rooms it was applied to so the page can say the finish time is an estimate.
 
 ## Traps — each of these has already bitten
 
