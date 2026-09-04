@@ -79,6 +79,7 @@ code degrades the order without blanking the page.
 | how the day is paced to fit | the fitting loop in `plan_day`; `MIN_PACE` is the floor |
 | one pass at a fixed pace | `_simulate` — `plan_day` calls it until the pace settles |
 | what counts as urgent | `urgency` — early in 100, VIP 70, arriving 50, owner 30, stayover 5 |
+| big rooms going first | `SIZE_SECONDS` — 1.0; above that costs walking and changes no order |
 | how hard urgency pulls | `URGENCY_SECONDS` — seconds of detour one rank is worth |
 | reading a late checkout | `release_minute` / `BARE_LATE_OUT` |
 | rooms with no minutes | `UNTIMED_MINUTES`; `summary()["untimed"]` counts them |
@@ -97,7 +98,16 @@ housekeeper above their rooms; the per-card start time is the `when` argument to
 
 Three.js from cdnjs, fed by `pmap.layout(codes)` and `pmap.bridge_spans()`.
 Geometry constants (`DOOR_W`, `LEVEL_H`, `HALL_D`, `BLD_GAP`, `BLD_ORDER`) live
-in `property_map.py`, not the page. `layout` needs explicit room codes — a plate
+in `property_map.py`, not the page. Boxes are sized by the room's cleaning time
+and grown *away* from the corridor, never across it — the x positions are real
+door positions, so a wider box goes through its neighbour. Two rules keep the
+drawing from self-intersecting, and both were found by a collision test, not by
+eye: **`RW` must stay under 0.74 of a door width** (the tightest real pair of
+doors is 0.8 apart), and the rooms in `WINGS` — the short wings across a
+corridor's end, 1220G/H/I and friends — are placed by their `row` instead,
+because a side-based placement lands two of them on the same spot. `WINGS` is a
+list off the plans on purpose: 1220I sits at row 1.2 and passes any positional
+test for "south row". `layout` needs explicit room codes — a plate
 is shared between levels, so it cannot know which rooms a level has;
 `db.all_known_rooms()` supplies them. Colours come from `roomstatus.META`, never
 invented locally, or the legend stops matching the phone in somebody's hand.

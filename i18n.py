@@ -79,7 +79,15 @@ STRINGS = {
                            "Aún no se ha guardado ningún horario, así que no hay cuartos que ubicar."),
     "prop.colour":        ("Colour by", "Color por"),
     "prop.by_status":     ("Cleaning status", "Estado de limpieza"),
+    "prop.by_service":    ("Service", "Servicio"),
     "prop.by_building":   ("Building", "Edificio"),
+    "prop.off_today":     ("Not on a chart today", "Sin hoja hoy"),
+    "prop.size_note":     ("Box depth is the room's cleaning time — a 140 is deeper "
+                           "than a 120, and a 70 deeper than a Dust n Vac. The room "
+                           "number and its service are printed on the top of each box.",
+                           "La profundidad de cada caja es el tiempo de limpieza: un 140 "
+                           "es más profundo que un 120, y un 70 más que un Dust n Vac. "
+                           "El número del cuarto y su servicio van impresos arriba."),
     "prop.refresh":       ("Refresh status", "Actualizar estado"),
     "prop.getting_around": ("Getting around the property", "Moverse por la propiedad"),
     "prop.bridges_title": ("Where the bridges are", "Dónde están los puentes"),

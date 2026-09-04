@@ -113,8 +113,10 @@ B3_PLATE = {
     ("49", "F"): (0, 5.5), ("49", "E"): (0, 6.3),
     ("49", "G"): (0, 7.2), ("49", "H"): (0, 8.0),
     ("47", "A"): (0, 9.6), ("45", "A"): (0, 10.4),
-    # Level 3 splits the 45/43 stretch into 43B and 43A and has no 45A.
-    ("43", "B"): (0, 10.5), ("43", "A"): (0, 11.2),
+    # Level 3 splits the 45/43 stretch into 43B and 43A and has no 45A, so 43B
+    # can take 45A's ground: at 10.5 it sat 0.7 from 43A, closer than any real
+    # pair of doors, and the two drew through each other.
+    ("43", "B"): (0, 10.3), ("43", "A"): (0, 11.2),
     ("41", "B"): (0, 12.7), ("41", "A"): (0, 13.6),
     ("46", "H"): (1, 0.5), ("46", "I"): (1, 1.4),
     ("44", "A"): (1, 2.2), ("44", "B"): (1, 3.1),
@@ -127,6 +129,18 @@ B3_PLATE_ELEV = (1.5, 4.2)
 # The day starts and ends at the housekeeping office: building 2, Terrace.
 OFFICE_BLD = 2
 OFFICE_LEVEL = "Terrace"
+
+# The rooms that are not on either side of the corridor but in a short wing
+# running across its end. Taken off the plans, not inferred: their row is what
+# separates them from each other, so a drawing that pushes them out to a side
+# lands two of them on the same spot. 1220I sits at row 1.2 and would pass any
+# "is it near the south row" test, which is why this is a list and not a rule.
+WINGS = {
+    (1, "20", "G"), (1, "20", "H"), (1, "20", "I"),
+    (1, "20", "A"), (1, "20", "B"),
+    (2, "31", "A"), (2, "31", "B"),
+    (3, "46", "E"), (3, "46", "G"), (3, "46", "H"),
+}
 
 Loc = namedtuple("Loc", "code bld level level_ix num unit row x elev")
 
@@ -345,10 +359,10 @@ def spread(rooms):
 # taken off the drawings: a door is about seven metres of corridor, a level is
 # about three metres, and the corridor is about six metres across. The shape is
 # right and the topology is exact; the measurements are not survey data.
-DOOR_W = 3.0
+DOOR_W = 3.6
 LEVEL_H = 4.2
-HALL_D = 7.0
-BLD_GAP = 62.0
+HALL_D = 13.0          # the corridor itself, wide enough to read down
+BLD_GAP = 74.0
 BLD_ORDER = [3, 1, 2]          # west to east, building 1 in the middle
 
 
@@ -371,6 +385,13 @@ def layout(codes):
             continue
         out.append({"code": loc.code, "bld": loc.bld, "level": loc.level,
                     "num": loc.num, "unit": loc.unit,
+                    # `row` and `side` go out too: a room's depth depends on
+                    # how long it takes to clean, which this module has no way
+                    # of knowing, so the drawing grows each box away from the
+                    # corridor itself. Without the side it would grow across it.
+                    "row": loc.row,
+                    "side": -1 if loc.row < 0.6 else 1,
+                    "wing": (loc.bld, loc.num, loc.unit) in WINGS,
                     "x": round(_bld_offset(loc.bld) + loc.x * DOOR_W, 2),
                     "y": round(loc.level_ix * LEVEL_H, 2),
                     "z": round(loc.row * HALL_D, 2)})

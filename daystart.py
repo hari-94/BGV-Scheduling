@@ -44,6 +44,20 @@ BARE_LATE_OUT = time(11, 0)
 # only when it is nearly free.
 URGENCY_SECONDS = 6.0
 
+# How much a room's own length pulls it earlier, in seconds of detour per
+# minute of cleaning. HP's rule: the big rooms go first unless a late checkout
+# says otherwise. The reason is the shape of the day rather than the room -- a
+# 140 found at two in the afternoon cannot be finished by half three, and a 70
+# can.
+#
+# 1.0 because the effect saturates there. Measured over all 1,387 stored
+# charts, it puts the 140s a third of the way through the day, the 120s at the
+# half and the 70s at three quarters -- and 2.0, 3.0 and 5.0 all produce that
+# same order while walking 2%, 4% and 8% further. Anything above 1.0 is paying
+# for an ordering already bought. It stays well under an early check-in's 600,
+# so a promise made at the front desk still outranks a big room.
+SIZE_SECONDS = 1.0
+
 _LATE = re.compile(r"(\d{1,2})[:.](\d{2})\s*([ap])\.?m", re.I)
 
 
@@ -168,7 +182,9 @@ def _simulate(rooms, start, from_office, scale):
             rel = release_minute(r)
             arrive = now + travel / 60.0
             wait = max(0.0, (rel - arrive) * 60.0) if rel is not None else 0.0
-            score = travel + wait - urgency(r) * URGENCY_SECONDS
+            score = (travel + wait
+                     - urgency(r) * URGENCY_SECONDS
+                     - _clean_minutes(r) * SIZE_SECONDS)
             if best_score is None or score < best_score:
                 best, best_score, best_travel, best_wait = r, score, travel, wait
         remaining.remove(best)

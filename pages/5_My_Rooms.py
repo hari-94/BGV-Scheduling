@@ -151,13 +151,24 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .dayh .fin{margin-left:auto;font-size:.8rem;font-weight:800;
   font-variant-numeric:tabular-nums;color:#166534}
 .dayh .fin.over{color:#9b1c48}
-.daytrack{position:relative;height:26px;border-radius:7px;background:#f1f4f8;
+.daytrack{position:relative;height:30px;border-radius:7px;background:#f1f4f8;
   overflow:hidden;display:flex}
-.daytrack i{display:block;height:100%}
+.daytrack i{display:block;height:100%;overflow:hidden;
+  display:flex;align-items:center;justify-content:center}
+/* The room number lives in its own block on the bar. A segment too narrow to
+   hold it clips to nothing rather than spilling over its neighbour, so a Dust
+   n Vac round of forty short rooms stays a bar instead of a smear of text. */
+.daytrack i b{font-size:.63rem;font-weight:800;color:#fff;letter-spacing:.01em;
+  white-space:nowrap;font-variant-numeric:tabular-nums;
+  text-shadow:0 1px 2px rgba(16,32,52,.4)}
+.daytrack i.job.u0 b,.daytrack i.job.late b{color:#1c2b3d;text-shadow:none}
 .daytrack i.go{background:repeating-linear-gradient(135deg,#cbd5e1 0 3px,#dbe2ea 3px 6px)}
 .daytrack i.wait{background:repeating-linear-gradient(135deg,#fbcfe8 0 4px,#fde8ef 4px 8px)}
+/* Four segment colours, each paired with the text colour that actually reads
+   on it at 4.5:1 or better. u2 used to be #5b8cd6, which failed both ways --
+   3.4:1 against white and 4.2:1 against dark -- so it is darker now. */
 .daytrack i.job{background:#93b4e6}
-.daytrack i.job.u2{background:#5b8cd6}
+.daytrack i.job.u2{background:#3d72c0}
 .daytrack i.job.u3{background:#2f6fc4}
 .daytrack i.job.late{background:#e59ab8}
 .daymark{position:absolute;top:0;bottom:0;width:2px;background:#9b1c48;opacity:.75}
@@ -867,15 +878,20 @@ def _day_strip(blocks):
             segs += f'<i class="go" style="width:{pct(b["travel"]):.3f}%"></i>'
         if b["wait"] > 0:
             segs += f'<i class="wait" style="width:{pct(b["wait"]):.3f}%"></i>'
-        klass = "job"
+        # The lightest segment carries dark text; the three darker ones carry
+        # white. Room numbers on a bar are only worth putting there if they can
+        # be read at arm's length in a corridor.
         if b["release"] is not None:
-            klass += " late"
+            klass = "job late"
         elif b["urgency"] >= 100:
-            klass += " u3"
+            klass = "job u3"
         elif b["urgency"] >= 50:
-            klass += " u2"
+            klass = "job u2"
+        else:
+            klass = "job u0"
         segs += (f'<i class="{klass}" style="width:{pct(b["minutes"]):.3f}%" '
-                 f'title="{e(b["room"])} · {b["minutes"]:.0f}m"></i>')
+                 f'title="{e(b["room"])} · {b["minutes"]:.0f}m · done by '
+                 f'{_day.hhmm(b["end"])}"><b>{e(b["room"])}</b></i>')
         cur = b["end"]
 
     tgt = pct(_day._mins(_day.TARGET_END) - begin)

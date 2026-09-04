@@ -40,6 +40,33 @@ def _statuses(_gen):
     return db.get_room_statuses()
 
 
+@st.cache_data(ttl=20, show_spinner=False)
+def _today(_gen):
+    """What each room is actually down for today: service, minutes, who has it.
+
+    The inventory says the building exists; only the day's schedule says a room
+    is a 140-minute Full Clean rather than a Dust n Vac touch-up, and that is
+    what the boxes are sized and labelled by.
+    """
+    sched = db.load_full_schedule() or {}
+    out = {}
+    for g in (sched.get("groups_data") or []):
+        for r in (g.get("rooms") or []):
+            code = str(r.get("room", "")).strip().upper()
+            if not code:
+                continue
+            try:
+                mins = float(r.get("time") or 0)
+            except (TypeError, ValueError):
+                mins = 0.0
+            out[code] = {"service": g.get("service_type", ""),
+                         "minutes": mins,
+                         "hk": g.get("housekeeper", "") or "",
+                         "rqs": g.get("inspector", "") or "",
+                         "label": g.get("label", "")}
+    return out
+
+
 rooms = _inventory()
 if not rooms:
     st.info(T("prop.no_rooms"))
@@ -47,18 +74,22 @@ if not rooms:
 
 boxes = pmap.layout(rooms)
 spans = pmap.bridge_spans()
-statuses = _statuses(st.session_state.get("prop_gen", 0))
+gen = st.session_state.get("prop_gen", 0)
+statuses = _statuses(gen)
+today = _today(gen)
 
 # ---------------------------------------------------------------- controls
-c1, c2, c3 = st.columns([1.5, 1.5, 3])
+c1, c2, c3 = st.columns([2.6, 1.2, 2.6])
 with c1:
     colour_by = st.radio(T("prop.colour"),
-                         [T("prop.by_status"), T("prop.by_building")],
+                         [T("prop.by_status"), T("prop.by_service"),
+                          T("prop.by_building")],
                          horizontal=True, key="prop_colour")
 with c2:
     if st.button(T("prop.refresh"), use_container_width=True):
         st.session_state["prop_gen"] = st.session_state.get("prop_gen", 0) + 1
         _statuses.clear()
+        _today.clear()
         st.rerun()
 with c3:
     done = sum(1 for b in boxes
@@ -66,23 +97,64 @@ with c3:
                in (_rst.INSPECTED, _rst.DONE, _rst.ALREADY_CLEAN))
     st.markdown(
         f'<div style="padding-top:6px;color:#5b6b7e;font-size:.86rem">'
-        f'<b>{len(boxes)}</b> rooms placed · <b>{len(spans)}</b> bridges · '
-        f'<b>{done}</b> finished today</div>', unsafe_allow_html=True)
+        f'<b>{len(boxes)}</b> rooms · <b>{len(today)}</b> on a chart today · '
+        f'<b>{done}</b> finished · <b>{len(spans)}</b> bridges</div>',
+        unsafe_allow_html=True)
 
-BY_STATUS = colour_by == T("prop.by_status")
+MODE = ("status" if colour_by == T("prop.by_status")
+        else "service" if colour_by == T("prop.by_service") else "bld")
 
 # roomstatus owns the vocabulary and the colours; the model must not invent
 # its own or the legend here stops matching the phone in somebody's hand.
 STATUS_COLOUR = {k: v[2] for k, v in _rst.META.items()}
 BLD_COLOUR = {1: "#5b8cd6", 2: "#c07a3e", 3: "#4e9e78"}
+SVC_COLOUR = {"Full Clean": "#2563a8", "Full Clean (IH)": "#6d5bb5",
+              "Daily Service": "#0f766e", "Dust n Vac": "#b45309"}
+SVC_SHORT = {"Full Clean": "FC", "Full Clean (IH)": "IH",
+             "Daily Service": "DS", "Dust n Vac": "DV"}
+OFF_TODAY = "#c3ccd8"        # in the building, not on a chart today
+
+
+def _depth(mins):
+    """How deep a room is drawn. A 140 is not the same room as a 70.
+
+    Depth rather than width, because the x positions are the real door
+    positions along the corridor — widening a box would push it through its
+    neighbour, while depth grows away from the hallway, which is also the way
+    the bigger units genuinely run.
+    """
+    if not mins:
+        return 0.62
+    if mins <= 45:
+        return 0.68
+    if mins <= 80:
+        return 0.92
+    if mins <= 125:
+        return 1.22
+    return 1.46
+
 
 for b in boxes:
     rec = statuses.get(b["code"]) or {}
     cur = _rst.normalise(rec.get("status"))
+    day = today.get(b["code"]) or {}
+    svc = day.get("service", "")
     b["status"] = cur
-    b["colour"] = (STATUS_COLOUR.get(cur, "#94a3b8") if BY_STATUS
-                   else BLD_COLOUR.get(b["bld"], "#94a3b8"))
-    b["hk"] = rec.get("housekeeper") or ""
+    b["svc"] = svc
+    b["svc_short"] = SVC_SHORT.get(svc, "")
+    b["mins"] = day.get("minutes", 0)
+    b["depth"] = _depth(b["mins"])
+    b["on_chart"] = bool(day)
+    b["hk"] = rec.get("housekeeper") or day.get("hk", "")
+    b["rqs"] = day.get("rqs", "")
+    if not day:
+        b["colour"] = OFF_TODAY
+    elif MODE == "status":
+        b["colour"] = STATUS_COLOUR.get(cur, "#94a3b8")
+    elif MODE == "service":
+        b["colour"] = SVC_COLOUR.get(svc, "#94a3b8")
+    else:
+        b["colour"] = BLD_COLOUR.get(b["bld"], "#94a3b8")
 
 payload = json.dumps({"boxes": boxes, "spans": spans,
                       "levels": pmap.LEVELS,
@@ -148,13 +220,16 @@ DATA.boxes.forEach(b=>{
   minY=Math.min(minY,b.y); maxY=Math.max(maxY,b.y);
   minZ=Math.min(minZ,b.z); maxZ=Math.max(maxZ,b.z);
 });
-const cx=(minX+maxX)/2, cy=(minY+maxY)/2, cz=(minZ+maxZ)/2;
+/* the corridor centreline is the true middle in z, whatever the boxes do */
+const cx=(minX+maxX)/2, cy=(minY+maxY)/2, cz=DATA.hallD*0.5;
 const root = new THREE.Group();
 root.position.set(-cx,-cy,-cz);
 scene.add(root);
 
-const RW = DATA.doorW*0.86, RH = DATA.levelH*0.62, RD = DATA.hallD*0.74;
-const geo = new THREE.BoxGeometry(RW, RH, RD);
+/* 0.74 of a door width, not 0.88: the tightest pair of doors on any plate is
+   0.8 apart, and a box wider than that gap grows through its neighbour. */
+const RW = DATA.doorW*0.74, RH = DATA.levelH*0.6, RD = DATA.hallD*0.42;
+const HALF_HALL = DATA.hallD*0.30;   /* clear corridor down the middle */
 const mats = {};
 function mat(hex, op){
   const k = hex+"|"+op;
@@ -163,14 +238,63 @@ function mat(hex, op){
   return mats[k];
 }
 
+/* The room number is painted onto the top face of its own box. Held as a
+   texture rather than an HTML overlay because 245 absolutely-positioned divs
+   reprojected every frame is what makes a page like this crawl on a phone,
+   and because a label stuck to the box cannot drift off it. */
+const labelCache = {};
+function labelMat(code, svc, hex){
+  const k = code+"|"+svc+"|"+hex;
+  if(labelCache[k]) return labelCache[k];
+  const c = document.createElement("canvas");
+  c.width = 256; c.height = 128;
+  const g = c.getContext("2d");
+  g.fillStyle = hex; g.fillRect(0,0,256,128);
+  /* dark ink on a light box, white on a dark one, decided per box */
+  const col = new THREE.Color(hex);
+  const lum = 0.2126*srgb(col.r) + 0.7152*srgb(col.g) + 0.0722*srgb(col.b);
+  g.fillStyle = lum > 0.34 ? "#15202e" : "#ffffff";
+  g.textAlign = "center";
+  g.font = "bold 62px ui-monospace,Menlo,Consolas,monospace";
+  g.fillText(code, 128, svc ? 66 : 84);
+  if(svc){
+    g.globalAlpha = 0.72;
+    g.font = "bold 40px system-ui,-apple-system,sans-serif";
+    g.fillText(svc, 128, 112);
+    g.globalAlpha = 1;
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 4;
+  const m = new THREE.MeshLambertMaterial({map:t});
+  labelCache[k] = m;
+  return m;
+}
+function srgb(v){ return v <= 0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); }
+
 const meshes = [];
 DATA.boxes.forEach(b=>{
-  const m = new THREE.Mesh(geo, mat(b.colour, 0.94));
-  m.position.set(b.x, b.y, b.z);
+  const d = RD * b.depth;
+  let geo, z;
+  if(b.wing){
+    /* an end wing sits across the corridor line; its row is what separates it
+       from its neighbours, so it keeps that and shows its size along x -- and
+       only gently, or it reaches the main row beside it */
+    geo = new THREE.BoxGeometry(RW*(0.85 + 0.3*(b.depth-0.62)/0.84), RH, RD*0.92);
+    z = b.row * DATA.hallD;
+  } else {
+    /* grow away from the corridor, never across it */
+    geo = new THREE.BoxGeometry(RW, RH, d);
+    z = DATA.hallD*0.5 + b.side * (HALF_HALL + d*0.5);
+  }
+  const plain = mat(b.colour, b.on_chart ? 0.96 : 0.55);
+  const top = labelMat(b.code, b.svc_short, b.colour);
+  /* BoxGeometry material order is +X -X +Y -Y +Z -Z; only the lid is lettered */
+  const m = new THREE.Mesh(geo, [plain,plain,top,plain,plain,plain]);
+  m.position.set(b.x, b.y, z);
   m.userData = b;
   root.add(m); meshes.push(m);
   const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
-    new THREE.LineBasicMaterial({color:0x2b3a4a, transparent:true, opacity:0.16}));
+    new THREE.LineBasicMaterial({color:0x2b3a4a, transparent:true, opacity:0.2}));
   e.position.copy(m.position); root.add(e);
 });
 
@@ -184,8 +308,9 @@ DATA.boxes.forEach(b=>{
 });
 Object.values(byPlate).forEach(p=>{
   const w = (p.x1-p.x0)+RW*2.2;
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(w, DATA.levelH*0.09, RD*2.9),
-    mat("#b9c6d6", 0.5));
+  const depth = (HALF_HALL + RD*1.5) * 2;
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(w, DATA.levelH*0.08, depth),
+    mat("#b9c6d6", 0.42));
   slab.position.set((p.x0+p.x1)/2, p.y-RH*0.62, DATA.hallD*0.5);
   root.add(slab);
 });
@@ -255,10 +380,18 @@ cv.addEventListener("click", e=>{
     pick.innerHTML = "<b>Bridge</b> <span>building "+d.a+" &harr; "+d.b+
       " &middot; "+(isNaN(d.level)?d.level:"level "+d.level)+"</span>";
   } else {
-    pick.innerHTML = "<b>"+d.code+"</b> <span>building "+d.bld+" &middot; "+
-      (isNaN(d.level)?d.level:"level "+d.level)+
-      (d.hk ? " &middot; "+d.hk : "")+"</span>"+
-      (d.status ? "<br><span>"+d.status.replace(/_/g," ")+"</span>" : "");
+    const where = "building "+d.bld+" &middot; "+
+      (isNaN(d.level)?d.level:"level "+d.level);
+    let line2 = "";
+    if(d.on_chart){
+      line2 = "<br><span>"+(d.svc||"")+(d.mins?" &middot; "+d.mins+" min":"")+
+              (d.hk?" &middot; "+d.hk:"")+
+              (d.rqs?" &middot; RQS "+d.rqs:"")+"</span>";
+      if(d.status) line2 += "<br><span>"+d.status.replace(/_/g," ")+"</span>";
+    } else {
+      line2 = "<br><span>not on a chart today</span>";
+    }
+    pick.innerHTML = "<b>"+d.code+"</b> <span>"+where+"</span>"+line2;
   }
 });
 
@@ -313,25 +446,26 @@ size();
 components.html(HTML.replace("__PAYLOAD__", payload), height=640, scrolling=False)
 
 # ---------------------------------------------------------------- legend
-if BY_STATUS:
-    chips = "".join(
-        f'<span style="display:inline-flex;align-items:center;gap:6px;'
-        f'margin-right:14px;font-size:.78rem;color:#42536a">'
-        f'<i style="width:11px;height:11px;border-radius:3px;'
-        f'background:{v[2]};display:inline-block"></i>{v[0]}'
-        f'</span>' for k, v in _rst.META.items())
+def _chip(colour, label):
+    return (f'<span style="display:inline-flex;align-items:center;gap:6px;'
+            f'margin-right:14px;font-size:.78rem;color:#42536a">'
+            f'<i style="width:11px;height:11px;border-radius:3px;'
+            f'background:{colour};display:inline-block"></i>{label}</span>')
+
+
+if MODE == "status":
+    chips = "".join(_chip(v[2], v[0]) for v in _rst.META.values())
+elif MODE == "service":
+    chips = "".join(_chip(c, f"{SVC_SHORT.get(s, s)} — {s}")
+                    for s, c in SVC_COLOUR.items())
 else:
-    chips = "".join(
-        f'<span style="display:inline-flex;align-items:center;gap:6px;'
-        f'margin-right:14px;font-size:.78rem;color:#42536a">'
-        f'<i style="width:11px;height:11px;border-radius:3px;'
-        f'background:{c};display:inline-block"></i>Building {b}</span>'
-        for b, c in BLD_COLOUR.items())
-chips += ('<span style="display:inline-flex;align-items:center;gap:6px;'
-          'font-size:.78rem;color:#42536a">'
-          '<i style="width:11px;height:11px;border-radius:3px;'
-          'background:#12764a;display:inline-block"></i>Bridge</span>')
-st.markdown(f'<div style="margin:6px 0 18px">{chips}</div>', unsafe_allow_html=True)
+    chips = "".join(_chip(c, f"Building {b}") for b, c in BLD_COLOUR.items())
+chips += _chip(OFF_TODAY, T("prop.off_today"))
+chips += _chip("#12764a", "Bridge")
+st.markdown(f'<div style="margin:6px 0 4px">{chips}</div>', unsafe_allow_html=True)
+st.markdown(
+    f'<div style="margin:0 0 18px;font-size:.76rem;color:#7b8798">'
+    f'{T("prop.size_note")}</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------------- the facts
 st.markdown("#### " + T("prop.getting_around"))

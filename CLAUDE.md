@@ -140,6 +140,14 @@ not fit and is left visibly overrunning instead. Measured over every stored day:
 **95% of charts land on 15:30, median pace 0.92**; the 5% that cannot fit at
 `MIN_PACE` overrun on screen where somebody can see them.
 
+**Big rooms first**, HP's rule, is `SIZE_SECONDS` — and it is 1.0 because the
+effect saturates there. Measured over all 1,387 charts it lands the 140s a third
+of the way through the day, the 120s at the half and the 70s at three quarters;
+2.0, 3.0 and 5.0 give that same order while walking 2%, 4% and 8% further. It
+sits well under an early check-in's 600, so a promise made at the front desk
+still outranks a big room, and a late checkout still overrides both because
+waiting is priced.
+
 Signals actually in the data (checked, not assumed): `late_checkout` carries real
 times ("Late Out: 10:30 am"), `notes` carry **"early in"** and "vip", `arriving`
 holds the incoming guest's name — not a time, so there is no per-room deadline,
