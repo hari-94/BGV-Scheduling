@@ -45,23 +45,27 @@ the menu stays open and the page shows stale data for up to five seconds.
 ## The dashboard
 `pages/1_Dashboard.py` — gated on `can_view_dashboard` (admin + RQS).
 
-Built from `db.load_schedule_history()`, **not** from the snapshot log. The log
-records only what was handed out — rooms and minutes per person — so it cannot
-answer whether a day fits in a day, where the work is, or who is being sent
-across the property. `load_history()` flattens every stored day into two frames,
-`CH` (one row per chart) and `RM` (one row per room), and every filter, chart and
-table is a slice of those two.
+Two tabs and two questions: **Today** (where the floor is now) and **People**
+(how each person is doing over time). It briefly answered a dozen more and was
+unreadable for it; anything interesting once rather than every morning was taken
+out, not folded into an expander.
 
 | want to change | go to |
 |---|---|
-| the filter bar | the `f1..f4` columns and `_window` |
-| the top numbers | the `kpi-row` block after `_window` |
-| chart styling | `_lay` — one place for the plotly layout |
-| the day's yardsticks | `DAY_MINUTES` 330, `CAP_MINUTES` 380 |
+| the look | the single `<style>` block — one ink, one accent, one surface |
+| today's ring and bars | the `hero` / `plist` HTML in the Today tab |
+| the people chart | the one `go.Bar` in the People tab |
+| the day's yardstick | `DAY_MINUTES` 330 |
+| where the data comes from | `load_history` — one row per room, cached |
+
+The per-person progress bars are hand-written HTML, not a chart library: they
+are crisper, need no library, and style with the rest of the page. Keep the
+plotly surface small — `requirements.txt` allows anything from 5.18 up, so
+avoid features newer than that (bar `cornerradius`, for one).
 
 `room_status` holds only ~55 rows over 9 days — live marking is barely taken up,
-so the Today tab says so rather than drawing a confident empty chart. Do not
-build history on `room_status` until that changes.
+so the Today tab says so plainly when nothing has been marked rather than
+showing empty bars with no explanation.
 
 ## The staff sheet
 `pages/3_Roster_Import.py` for the screens, `roster_import.py` for the parsing.
