@@ -31,6 +31,8 @@ STRINGS = {
     "rooms.title":        ("My Rooms", "Mis Cuartos"),
     "rooms.hello":        ("Hello, {name}", "Hola, {name}"),
     "rooms.subtitle":     ("Your rooms for today", "Tus cuartos de hoy"),
+    "rooms.subtitle_team": ("The rooms you are inspecting today",
+                            "Los cuartos que inspeccionas hoy"),
     "rooms.none_today":   ("No rooms for you today",
                            "No tienes cuartos hoy"),
     "rooms.none_body":    ("Nothing has been assigned to you yet. If you think "

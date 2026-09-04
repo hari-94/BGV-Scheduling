@@ -301,17 +301,35 @@ elif mine is None and not my_insp:
 my_charts = [g for g in charts if mine and g.get("housekeeper") == mine]
 my_rooms = [(g, r) for g in my_charts for r in (g.get("rooms") or [])]
 
+# Who this page is answering for. An RQS is here for their team, so the team
+# has to be worked out before the header, not after it: the header counts what
+# is on the page, and for an inspector with no rooms of their own that used to
+# be nothing at all -- "0 of 0 done" sitting above a housekeeper reading 4/4.
+_team_of = my_insp or mine
+_my_team = sorted({g.get("housekeeper", "") for g in charts
+                   if _team_of and g.get("inspector") == _team_of
+                   and g.get("housekeeper")
+                   and not str(g.get("housekeeper", "")).startswith("Need")
+                   and g.get("housekeeper") != mine})
+_team_rooms = [(g, r) for g in charts
+               if g.get("housekeeper") in _my_team
+               for r in (g.get("rooms") or [])]
+#: Every room this person can act on, theirs and their team's.
+shown_rooms = my_rooms + _team_rooms
+
 greet = str(mine or my_insp or "").split()[0].title()
-done_n = sum(1 for _g, r in my_rooms
+done_n = sum(1 for _g, r in shown_rooms
              if _rst.is_clean(
                  (statuses.get(str(r.get("room", ""))) or {}).get("status")))
-total_n = len(my_rooms)
-mins = sum(g.get("time", 0) for g in my_charts)
+total_n = len(shown_rooms)
+mins = sum(g.get("time", 0) for g in my_charts) or sum(
+    r.get("time", 0) for _g, r in shown_rooms)
 pct = int(round(100 * done_n / total_n)) if total_n else 0
 
 st.markdown(
     f'<div class="mrhero"><h1>{e(T("rooms.hello", name=greet))}</h1>'
-    f'<p>{e(T("rooms.subtitle"))} · {e(today.strftime("%A, %d %B %Y"))}'
+    f'<p>{e(T("rooms.subtitle") if my_rooms else T("rooms.subtitle_team"))}'
+    f' · {e(today.strftime("%A, %d %B %Y"))}'
     f'{" · " + e(T("rooms.total_time", mins=mins)) if mins else ""}</p>'
     f'<div class="mrbar"><i style="width:{pct}%"></i></div>'
     f'<div class="mrcount">{e(T("rooms.progress", done=done_n, total=total_n))}'
@@ -578,12 +596,6 @@ for _g, _r in sorted(my_rooms, key=lambda x: str(x[1].get("room", ""))):
 
 
 # ── an RQS sees their whole team, and can mark for them ──────────────────────
-_team_of = my_insp or mine
-_my_team = sorted({g.get("housekeeper", "") for g in charts
-                   if _team_of and g.get("inspector") == _team_of
-                   and g.get("housekeeper")
-                   and not str(g.get("housekeeper", "")).startswith("Need")
-                   and g.get("housekeeper") != mine})
 if _my_team:
     st.markdown(f'<div class="mrteam"><b>{len(_my_team)}</b> '
                 f'{T("rooms.team_note")}</div>', unsafe_allow_html=True)
