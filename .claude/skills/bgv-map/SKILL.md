@@ -45,27 +45,28 @@ the menu stays open and the page shows stale data for up to five seconds.
 ## The dashboard
 `pages/1_Dashboard.py` — gated on `can_view_dashboard` (admin + RQS).
 
-Two tabs and two questions: **Today** (where the floor is now) and **People**
-(how each person is doing over time). It briefly answered a dozen more and was
-unreadable for it; anything interesting once rather than every morning was taken
-out, not folded into an expander.
+Today only, as a timeline. One bar per room, from when it should be started to
+when it should be finished, coloured by what has been marked. The plan comes
+from `daystart.plan_day`, built per housekeeper exactly as the phone page builds
+it — a second, prettier plan for the office to look at would be worse than
+useless.
 
 | want to change | go to |
 |---|---|
-| the look | the single `<style>` block — one ink, one accent, one surface |
-| today's ring and bars | the `hero` / `plist` HTML in the Today tab |
-| the people chart | the one `go.Bar` in the People tab |
-| the day's yardstick | `DAY_MINUTES` 330 |
-| where the data comes from | `load_history` — one row per room, cached |
+| where the bars come from | `today_plan` — one row per room, 20s cache |
+| the bar itself | the two `go.Bar` traces: pale lead-in, then the clean |
+| filters and sort | the `c1..c4` columns and the `order` block |
+| the ring and counts | the `hero` / `krow` HTML |
 
-The per-person progress bars are hand-written HTML, not a chart library: they
-are crisper, need no library, and style with the rest of the page. Keep the
-plotly surface small — `requirements.txt` allows anything from 5.18 up, so
-avoid features newer than that (bar `cornerradius`, for one).
+Two traps here, both already paid for. **Plotly draws the first row at the
+bottom**, so every sort is applied *descending* on purpose — the list then reads
+top-down the way it was asked for. And **an unmarked room is `""`, never
+`None`**: a column of `None` comes back out of pandas as `NaN`, `NaN is not
+None`, and the status lookup goes hunting for a status called nan.
 
 `room_status` holds only ~55 rows over 9 days — live marking is barely taken up,
-so the Today tab says so plainly when nothing has been marked rather than
-showing empty bars with no explanation.
+so the page says the bars are the plan rather than the floor when nothing has
+been marked.
 
 ## The staff sheet
 `pages/3_Roster_Import.py` for the screens, `roster_import.py` for the parsing.
