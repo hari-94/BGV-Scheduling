@@ -120,6 +120,15 @@ toolbar hid the button. Empty the toolbar by name instead of switching it off.
 **Test what a person does.** Two bugs survived a passing test because the test
 committed a value with a rerun before clicking, which nobody does.
 
+## Agreed but not built
+
+`docs/inspection-scoring.md` — the RQS inspection checklist and the per-housekeeper
+score that rolls up weekly, monthly and yearly. Two lists (studio for 70-minute rooms,
+one shared list for 120 and 140), yes/no and 1-to-5 questions. HP is writing the
+questions; the shape is settled, the content is not, and the doc lists the six
+questions to ask before starting. It needs a real Supabase table, which is the one
+part somebody has to run SQL for.
+
 ## Conventions
 
 Language: `i18n.install()` in `ui.py` wraps Streamlit's text calls, so a label in

@@ -74,6 +74,13 @@ An unknown field makes PostgREST reject the whole write (`PGRST204`) and the fai
 looks like "could not save". Anything else belongs in `app_settings` via
 `db._upsert_key`.
 
+## Asked for, not built
+
+**Inspection scoring** — read `docs/inspection-scoring.md` first. Waiting on HP's
+checklist. Hangs off the existing `inspected` step in `pages/5_My_Rooms.py` (gated by
+`roomstatus.RQS_ONLY` / `can_inspect`), rolls up in `pages/1_Dashboard.py`, and needs a
+new `room_inspection` table — `room_status` cannot take it.
+
 ## Traps
 
 - `on_click` arguments are bound when the widget is drawn. Pass a widget **key** and
