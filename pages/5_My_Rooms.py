@@ -150,8 +150,29 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
   background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.5) 50%,
   transparent 65%);animation:mrsweep 2.6s linear infinite}
 
-/* The circle. Streamlit gives a keyed widget a st-key- class, which is the
-   only handle there is on one particular button. */
+/* ── The menu the circle opens ──
+   Modelled on the handheld: a short column of choices, the words on the left
+   and a coloured icon on the right, each row tall enough to hit without
+   looking. Streamlit gives a keyed widget a st-key- class, which is the only
+   handle there is on one particular widget. */
+[class*="st-key-pop_"] [data-testid="stPopoverBody"]{min-width:236px;padding:6px}
+[class*="st-key-pop_"] [data-testid="stPopoverBody"] .stButton>button{
+  justify-content:space-between !important;text-align:left !important;
+  font-size:.92rem !important;font-weight:600 !important;
+  padding:11px 14px !important;min-height:46px !important;
+  border:none !important;background:transparent !important;
+  border-radius:9px !important}
+[class*="st-key-pop_"] [data-testid="stPopoverBody"] .stButton>button:hover{
+  background:#f2f6fb !important}
+[class*="st-key-pop_"] [data-testid="stPopoverBody"] .stButton>button:disabled{
+  opacity:.45 !important}
+/* The step the room would naturally take next is the one that is filled in. */
+[class*="st-key-pop_"] [data-testid="stPopoverBody"]
+  .stButton>button[kind="primary"]{background:#eaf4ff !important;
+  color:#12447e !important}
+
+/* The circle itself. */
+[class*="st-key-pop_"]>div>button,
 [class*="st-key-"][class*="_go_"] button{
   border-radius:50% !important;width:54px !important;height:54px !important;
   min-height:54px !important;padding:0 !important;
@@ -205,9 +226,20 @@ today = clock.today()
 
 
 # ── today's published schedule ───────────────────────────────────────────────
-_load = assignments.todays_charts
+@st.cache_data(ttl=5, show_spinner=False)
+def _fresh(_tick=0):
+    """Today's charts and statuses, held for a few seconds.
 
-charts, statuses = _load()
+    Every tap reruns the page, and reading the schedule and the whole status
+    table again each time is what made marking a room feel like waiting. Five
+    seconds is short enough that a change made upstairs still arrives on the
+    next poll, and the cache is dropped outright the moment this page writes
+    anything, so your own marks never lag.
+    """
+    return assignments.todays_charts()
+
+
+charts, statuses = _fresh()
 
 if not charts:
     st.markdown(f'<div class="mrhero"><h1>{e(T("rooms.no_schedule"))}</h1>'
@@ -301,7 +333,7 @@ def _watch():
     halfway through marking a room.
     """
     try:
-        chs, sts = _load()
+        chs, sts = assignments.todays_charts()
     except Exception:
         return
     if _fingerprint(chs, sts, mine) != st.session_state.get("mr_fp"):
@@ -351,6 +383,11 @@ def _mark(room, chart, new_status, who=None):
     try:
         db.upsert_room_status(room, fields)
         st.session_state["mr_flash"] = room
+        # A new generation shuts every open menu, and the cache is dropped so
+        # the change is on screen in the same breath rather than up to five
+        # seconds later.
+        st.session_state["mr_gen"] = st.session_state.get("mr_gen", 0) + 1
+        _fresh.clear()
     except Exception as ex:
         print(f"[my_rooms] save failed for {room}: {ex}")
         st.session_state["mr_error"] = room
@@ -416,87 +453,62 @@ def _step(cur):
     return nxt, ""
 
 
-def _open_marker(code, owner):
-    """Remember which room was tapped; the dialog opens on the next run."""
-    st.session_state["mr_open"] = {"room": code, "owner": owner}
+#: Label, and the icon that carries it. The icon is what the eye finds on a
+#: list read at arm's length; the words are for the first week.
+_OPTIONS = [
+    (NOT_STARTED, "⏳"), (IN_PROGRESS, "🧹"), (CLEANED, "🔍"), (INSPECTED, "✅"),
+    (ALREADY, "✨"), (DND, "🚪"), (HELP, "❗"),
+]
 
 
-@st.dialog("Mark this room")
-def _marker(code, g, r, owner):
-    """Every option for one room, on one screen.
+def _menu(code, g, owner, key_prefix, cur):
+    """The options for one room, opened from its circle.
 
-    A dialog rather than a dropdown: a dropdown had to be dismissed by hand
-    and did not always go, so a second tap landed on whatever was underneath
-    it. This closes itself the moment something is chosen.
+    A popover rather than a dialog: a dialog has to ask the server before it
+    can even open, which on a phone at the end of a corridor is a wait before
+    every single mark. This opens in the browser the moment it is touched.
+
+    Its key carries a counter that moves on after every change, so the next
+    render is a different widget and the menu is shut. That is what closes
+    it -- the old one had to be dismissed by hand and often was not, so the
+    following tap landed on whatever was underneath.
     """
-    rec = statuses.get(code) or {}
-    cur = _rst.normalise(rec.get("status"))
-    guest = str(r.get("guest", "") or "").strip()
-    st.markdown(f'<div class="dlghead"><b>{e(code)}</b>'
-                f'{" · " + e(guest) if guest else ""}'
-                f'<span class="dlgnow" style="background:{_rst.META[cur][3]};'
-                f'color:{_rst.META[cur][4]}">{e(T(STATUS_KEY[cur]))}</span></div>',
-                unsafe_allow_html=True)
+    gen = st.session_state.get("mr_gen", 0)
+    with st.popover(_GLYPH.get(cur, "○"), use_container_width=True,
+                    key=f"pop_{key_prefix}_{code}_{gen}"):
+        for target, icon in _OPTIONS:
+            if target in _rst.RQS_ONLY and not can_inspect:
+                continue
+            here = target == cur
+            st.button(f"{T(STATUS_KEY[target])}\u2003{icon}",
+                      key=f"m{gen}_{key_prefix}_{target}_{code}",
+                      use_container_width=True, disabled=here,
+                      type="primary" if target == _rst.NEXT.get(cur)
+                      else "secondary",
+                      on_click=_mark, args=(code, g, target, owner))
+        with st.popover(f'{T("act.note")} 📝', use_container_width=True):
+            txt = st.text_area(T("act.note_ph"),
+                               value=(statuses.get(code) or {}).get("notes") or "",
+                               key=f"n{gen}_{key_prefix}_{code}", height=80,
+                               label_visibility="collapsed",
+                               placeholder=T("act.note_ph"))
+            st.button(T("act.save"), key=f"nb{gen}_{key_prefix}_{code}",
+                      type="primary", use_container_width=True,
+                      on_click=_save_note, args=(code, g, owner, txt))
 
-    def _pick(target):
-        _mark(code, g, target, owner)
-        st.session_state.pop("mr_open", None)
-        st.rerun()
 
-    # The road first, in order, so the next step is where the eye lands.
-    st.caption(T("rooms.the_round"))
-    for target in (NOT_STARTED, IN_PROGRESS, CLEANED, INSPECTED):
-        if target in _rst.RQS_ONLY and not can_inspect:
-            continue
-        dot = _rst.META[target][2]
-        here = target == cur
-        c1, c2 = st.columns([0.5, 6], vertical_alignment="center")
-        with c1:
-            st.markdown(f'<div class="dlgdot" style="background:{dot}"></div>',
-                        unsafe_allow_html=True)
-        with c2:
-            st.button(T(STATUS_KEY[target]) + ("  ✓" if here else ""),
-                      key=f"dlg_{target}_{code}", use_container_width=True,
-                      disabled=here,
-                      type="primary" if target == _rst.NEXT.get(cur) else "secondary",
-                      on_click=_pick, args=(target,))
-
-    # Then the ways off it.
-    st.caption(T("rooms.other_ways"))
-    d1, d2, d3 = st.columns(3)
-    for col, (lbl, target) in zip((d1, d2, d3),
-                                  (("st.already_clean", ALREADY),
-                                   ("act.dnd", DND), ("act.help", HELP))):
-        with col:
-            st.button(T(lbl), key=f"dlg_{target}_{code}",
-                      use_container_width=True, disabled=target == cur,
-                      on_click=_pick, args=(target,))
-
-    st.caption(T("act.note"))
-    txt = st.text_area(T("act.note_ph"), value=rec.get("notes") or "",
-                       key=f"dlg_note_{code}", height=90,
-                       label_visibility="collapsed",
-                       placeholder=T("act.note_ph"))
-    n1, n2 = st.columns([1, 1])
-    with n1:
-        if st.button(T("act.save"), key=f"dlg_nb_{code}", type="primary",
-                     use_container_width=True):
-            try:
-                db.upsert_room_status(code, {
-                    "notes": txt, "housekeeper": owner,
-                    "group_label": g.get("label", ""),
-                    "updated_by": me_user or me_display})
-                st.session_state["mr_flash"] = code
-            except Exception as ex:
-                print(f"[my_rooms] note failed for {code}: {ex}")
-                st.session_state["mr_error"] = code
-            st.session_state.pop("mr_open", None)
-            st.rerun()
-    with n2:
-        if st.button(T("rooms.close"), key=f"dlg_x_{code}",
-                     use_container_width=True):
-            st.session_state.pop("mr_open", None)
-            st.rerun()
+def _save_note(code, g, owner, txt):
+    try:
+        db.upsert_room_status(code, {
+            "notes": txt, "housekeeper": owner,
+            "group_label": g.get("label", ""),
+            "updated_by": me_user or me_display})
+        st.session_state["mr_flash"] = code
+        st.session_state["mr_gen"] = st.session_state.get("mr_gen", 0) + 1
+        _fresh.clear()
+    except Exception as ex:
+        print(f"[my_rooms] note failed for {code}: {ex}")
+        st.session_state["mr_error"] = code
 
 
 def _room_row(g, r, key_prefix, owner, editable=True):
@@ -512,7 +524,6 @@ def _room_row(g, r, key_prefix, owner, editable=True):
     insp = g.get("inspector", "") or ""
     note = rec.get("notes") or ""
     icon = _SVC_ICON.get(g.get("service_type", ""), "🧳")
-    glyph = _GLYPH.get(cur, "○")
     nxt, why_not = _step(cur)
 
     chips = "".join(
@@ -539,27 +550,11 @@ def _room_row(g, r, key_prefix, owner, editable=True):
             f'</div>', unsafe_allow_html=True)
     with c_btn:
         if editable:
-            # One control, not two. The circle shows where the room is and
-            # opens the full list of what it could be -- a menu beside it was
-            # a second thing to learn and a second thing to miss.
-            st.button(glyph, key=f"{key_prefix}_go_{code}",
-                      help=T(STATUS_KEY.get(cur, "st.not_started")),
-                      use_container_width=True,
-                      on_click=_open_marker, args=(code, owner))
+            _menu(code, g, owner, key_prefix, cur)
 
 
 for _g, _r in sorted(my_rooms, key=lambda x: str(x[1].get("room", ""))):
     _room_row(_g, _r, "mr", mine)
-
-
-_pending = st.session_state.get("mr_open")
-if _pending:
-    _hit = next(((g, r) for g in charts for r in (g.get("rooms") or [])
-                 if str(r.get("room", "")) == _pending["room"]), None)
-    if _hit:
-        _marker(_pending["room"], _hit[0], _hit[1], _pending["owner"])
-    else:
-        st.session_state.pop("mr_open", None)
 
 
 # ── an RQS sees their whole team, and can mark for them ──────────────────────
