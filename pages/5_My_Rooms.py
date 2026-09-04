@@ -546,17 +546,25 @@ def _menu(code, g, owner, key_prefix, cur):
                       else "secondary",
                       on_click=_mark, args=(code, g, target, owner))
         with st.popover(f'{T("act.note")} 📝', use_container_width=True):
-            txt = st.text_area(T("act.note_ph"),
-                               value=(statuses.get(code) or {}).get("notes") or "",
-                               key=f"n{gen}_{key_prefix}_{code}", height=80,
-                               label_visibility="collapsed",
-                               placeholder=T("act.note_ph"))
+            _nkey = f"n{gen}_{key_prefix}_{code}"
+            st.text_area(T("act.note_ph"),
+                         value=(statuses.get(code) or {}).get("notes") or "",
+                         key=_nkey, height=80, label_visibility="collapsed",
+                         placeholder=T("act.note_ph"))
+            # The KEY goes to the callback, not the text. Arguments are bound
+            # when the button is drawn, so passing the text handed the callback
+            # whatever the box held on the previous run -- which, for somebody
+            # who types and then presses Save, is nothing. Every note written
+            # on the floor was being saved as an empty string.
             st.button(T("act.save"), key=f"nb{gen}_{key_prefix}_{code}",
                       type="primary", use_container_width=True,
-                      on_click=_save_note, args=(code, g, owner, txt))
+                      on_click=_save_note, args=(code, g, owner, _nkey))
 
 
-def _save_note(code, g, owner, txt):
+def _save_note(code, g, owner, note_key):
+    """Store a note. The text is read from the widget at the moment the
+    button is pressed, which is the only way to get what was just typed."""
+    txt = str(st.session_state.get(note_key, "") or "").strip()
     try:
         db.upsert_room_status(code, {
             "notes": txt, "housekeeper": owner,
