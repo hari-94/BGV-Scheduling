@@ -96,7 +96,23 @@ housekeeper above their rooms; the per-card start time is the `when` argument to
 ## The property page
 `pages/6_Property.py` — gated on `can_view_insp_tab` (admin + RQS).
 
-Three.js from cdnjs, fed by `pmap.layout(codes)` and `pmap.bridge_spans()`.
+Three.js from cdnjs, fed by `pmap.layout(codes)`, `pmap.bridge_spans()`,
+`pmap.facilities(levels)` and `pmap.service_cores(levels)`.
+
+Everything that is not a guest room lives in `TOWER_SERVICES` (the service core
+that repeats on every guest level of a building) and `LEVEL_SERVICES` (what sits
+on one level only, including the whole of Plaza, Terrace and building 1's level
+1, where the lifts are not where the tower's are). `EXTRA_LEVELS` names the
+levels that hold no guest rooms but plainly exist. Positions are in the plates'
+own x/row coordinates, so a new one can be read straight off the plans.
+
+Facilities past the south row (`row > 1.2` — the service lift, the chute, the
+refill closets) are placed beyond the deepest room a level can hold, not at
+their raw row: a 140 reaches further out than the plan's row for the lift, and
+drawing it there put the lift inside fifteen rooms. The shaft in
+`service_cores` is placed by the same formula or it floats off its own cars.
+`service_cores` must be given the real levels — `_plate` hands back a plate for
+any level of a building, so deriving them from it grows building 2 a level 5.
 Geometry constants (`DOOR_W`, `LEVEL_H`, `HALL_D`, `BLD_GAP`, `BLD_ORDER`) live
 in `property_map.py`, not the page. Boxes are sized by the room's cleaning time
 and grown *away* from the corridor, never across it — the x positions are real

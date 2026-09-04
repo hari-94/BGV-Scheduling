@@ -86,6 +86,7 @@ with c1:
                           T("prop.by_building")],
                          horizontal=True, key="prop_colour")
 with c2:
+    show_extras = st.toggle(T("prop.show_amenities"), value=True, key="prop_extras")
     if st.button(T("prop.refresh"), use_container_width=True):
         st.session_state["prop_gen"] = st.session_state.get("prop_gen", 0) + 1
         _statuses.clear()
@@ -156,7 +157,17 @@ for b in boxes:
     else:
         b["colour"] = BLD_COLOUR.get(b["bld"], "#94a3b8")
 
+# Everything that is not a guest room. The service core is what a housekeeper's
+# day is actually spent walking between, so it is drawn by default; the amenity
+# volumes are what make the levels with no guest rooms stop being blank rows.
+_levels = {(b["bld"], b["level"]) for b in boxes}
+facils = pmap.facilities(_levels)
+cores = pmap.service_cores(_levels)
+if not show_extras:
+    facils = [f for f in facils if f["kind"] != "amenity"]
+
 payload = json.dumps({"boxes": boxes, "spans": spans,
+                      "facils": facils, "cores": cores,
                       "levels": pmap.LEVELS,
                       "doorW": pmap.DOOR_W, "levelH": pmap.LEVEL_H,
                       "hallD": pmap.HALL_D}, separators=(",", ":"))
@@ -206,11 +217,21 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, 1, 1, 4000);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.72));
-const key = new THREE.DirectionalLight(0xffffff, 0.62);
-key.position.set(120, 220, 160); scene.add(key);
-const rim = new THREE.DirectionalLight(0xbcd2ee, 0.34);
-rim.position.set(-160, 90, -120); scene.add(rim);
+/* A hemisphere light does most of the work: warm from above, cool bounce from
+   below, which is what stops a box model reading as flat coloured cardboard.
+   The key light casts real shadows so the stack of levels has depth. */
+scene.add(new THREE.HemisphereLight(0xfdfbf7, 0x9aa8bb, 0.78));
+const key = new THREE.DirectionalLight(0xfff4e2, 0.78);
+key.position.set(150, 260, 170);
+key.castShadow = true;
+key.shadow.mapSize.width = 2048;
+key.shadow.mapSize.height = 2048;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xbcd2ee, 0.3);
+rim.position.set(-180, 70, -140); scene.add(rim);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+scene.fog = new THREE.Fog(0xdfe7f1, 380, 1000);
 
 /* centre the whole property on the origin so orbiting feels like turning a
    model on a table rather than swinging around one corner of it */
@@ -243,28 +264,36 @@ function mat(hex, op){
    reprojected every frame is what makes a page like this crawl on a phone,
    and because a label stuck to the box cannot drift off it. */
 const labelCache = {};
-function labelMat(code, svc, hex){
-  const k = code+"|"+svc+"|"+hex;
+function labelMat(code, svc, hex, forceDark){
+  const k = code+"|"+svc+"|"+hex+"|"+(forceDark||0);
   if(labelCache[k]) return labelCache[k];
   const c = document.createElement("canvas");
-  c.width = 256; c.height = 128;
+  c.width = 512; c.height = 256;   /* generous, so text stays sharp zoomed in */
   const g = c.getContext("2d");
-  g.fillStyle = hex; g.fillRect(0,0,256,128);
-  /* dark ink on a light box, white on a dark one, decided per box */
+  g.fillStyle = hex; g.fillRect(0,0,512,256);
   const col = new THREE.Color(hex);
   const lum = 0.2126*srgb(col.r) + 0.7152*srgb(col.g) + 0.0722*srgb(col.b);
-  g.fillStyle = lum > 0.34 ? "#15202e" : "#ffffff";
+  g.fillStyle = (forceDark || lum > 0.34) ? "#15202e" : "#ffffff";
   g.textAlign = "center";
-  g.font = "bold 62px ui-monospace,Menlo,Consolas,monospace";
-  g.fillText(code, 128, svc ? 66 : 84);
+  const mono = /^[0-9]{4}[A-Z]?$/.test(code);
+  /* shrink to fit rather than spill: "Housekeeping office" is not a room code */
+  let size = mono ? 124 : 92;
+  do {
+    g.font = "bold "+size+"px " +
+      (mono ? "ui-monospace,Menlo,Consolas,monospace"
+            : "system-ui,-apple-system,'Segoe UI',sans-serif");
+    if(g.measureText(code).width <= 470) break;
+    size -= 6;
+  } while(size > 34);
+  g.fillText(code, 256, svc ? 132 : 168);
   if(svc){
     g.globalAlpha = 0.72;
-    g.font = "bold 40px system-ui,-apple-system,sans-serif";
-    g.fillText(svc, 128, 112);
+    g.font = "bold 80px system-ui,-apple-system,sans-serif";
+    g.fillText(svc, 256, 224);
     g.globalAlpha = 1;
   }
   const t = new THREE.CanvasTexture(c);
-  t.anisotropy = 4;
+  t.anisotropy = 8;
   const m = new THREE.MeshLambertMaterial({map:t});
   labelCache[k] = m;
   return m;
@@ -291,10 +320,72 @@ DATA.boxes.forEach(b=>{
   /* BoxGeometry material order is +X -X +Y -Y +Z -Z; only the lid is lettered */
   const m = new THREE.Mesh(geo, [plain,plain,top,plain,plain,plain]);
   m.position.set(b.x, b.y, z);
+  m.castShadow = true; m.receiveShadow = true;
   m.userData = b;
   root.add(m); meshes.push(m);
   const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
     new THREE.LineBasicMaterial({color:0x2b3a4a, transparent:true, opacity:0.2}));
+  e.position.copy(m.position); root.add(e);
+});
+
+/* ---- everything that is not a guest room ---------------------------------
+   Distinct colour and silhouette per kind, because on a model this size a
+   legend colour alone is not enough to pick a linen room out of a corridor. */
+const FAC = {
+  lift_svc:   {c:"#334759", h:1.00, d:0.85, label:1},
+  lift_guest: {c:"#5a6f85", h:1.00, d:0.80, label:1},
+  trash:      {c:"#7a6a55", h:0.72, d:0.55, label:0},
+  laundry:    {c:"#b06fb0", h:0.72, d:0.80, label:1},
+  closet:     {c:"#2f8f86", h:0.66, d:0.72, label:1},
+  office:     {c:"#c2452f", h:0.80, d:0.85, label:1},
+  breakroom:  {c:"#c98a2e", h:0.72, d:0.90, label:1},
+  lockers:    {c:"#a8862f", h:0.62, d:0.75, label:0},
+  stairs:     {c:"#8895a5", h:0.56, d:0.60, label:0},
+  amenity:    {c:"#9fb4c9", h:0.34, d:1.30, label:1}
+};
+(DATA.facils||[]).forEach(f=>{
+  const spec = FAC[f.kind] || FAC.closet;
+  const w = DATA.doorW * f.width * 0.9;
+  const h = RH * spec.h;
+  const d = RD * spec.d;
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const isAmenity = f.kind === "amenity";
+  const plain = mat(spec.c, isAmenity ? 0.42 : 0.95);
+  let mats6 = plain;
+  if(spec.label && w > DATA.doorW*0.7){
+    const top = labelMat(f.label, "", spec.c, isAmenity ? 1 : 0);
+    mats6 = [plain,plain,top,plain,plain,plain];
+  }
+  const m = new THREE.Mesh(geo, mats6);
+  /* Anything past the south row -- the service lift, the chute, the refill
+     closets -- has to clear the deepest room a level can hold, not sit at its
+     raw row. A 140 reaches further out than the plan's row for the lift, so
+     drawing it there put the lift inside fifteen rooms. Beyond that edge the
+     rows keep their relative spacing so the core still reads in plan order. */
+  const southEdge = DATA.hallD*0.5 + HALF_HALL + RD*1.46 + RD*0.12;
+  const fz = f.row > 1.2
+    ? southEdge + d*0.5 + (f.row - 1.3) * DATA.hallD * 0.5
+    : f.z;
+  m.position.set(f.x, f.y - RH*0.5 + h*0.5, fz);
+  m.castShadow = !isAmenity; m.receiveShadow = true;
+  m.userData = {facility:true, label:f.label, kind:f.kind,
+                bld:f.bld, level:f.level};
+  root.add(m); meshes.push(m);
+});
+
+/* ---- the service lift shafts, drawn as the one line they really are ---- */
+(DATA.cores||[]).forEach(c=>{
+  const h = (c.y1 - c.y0) + RH*1.6;
+  const geo = new THREE.BoxGeometry(DATA.doorW*0.85, h, RD*0.8);
+  const m = new THREE.Mesh(geo, mat("#22303f", 0.20));
+  /* the shaft has to stand exactly where its lifts do, so it is placed by the
+     same rule rather than by the raw row, or it floats off the cars */
+  const southEdge = DATA.hallD*0.5 + HALF_HALL + RD*1.46 + RD*0.12;
+  const cz = southEdge + RD*0.85*0.5 + (1.55 - 1.3) * DATA.hallD * 0.5;
+  m.position.set(c.x, (c.y0+c.y1)/2, cz);
+  root.add(m);
+  const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({color:0x22303f, transparent:true, opacity:0.35}));
   e.position.copy(m.position); root.add(e);
 });
 
@@ -307,13 +398,24 @@ DATA.boxes.forEach(b=>{
   p.x0=Math.min(p.x0,b.x); p.x1=Math.max(p.x1,b.x);
 });
 Object.values(byPlate).forEach(p=>{
-  const w = (p.x1-p.x0)+RW*2.2;
+  const w = (p.x1-p.x0)+RW*2.6;
   const depth = (HALF_HALL + RD*1.5) * 2;
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(w, DATA.levelH*0.08, depth),
-    mat("#b9c6d6", 0.42));
-  slab.position.set((p.x0+p.x1)/2, p.y-RH*0.62, DATA.hallD*0.5);
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(w, DATA.levelH*0.10, depth),
+    mat("#c8d3df", 0.82));
+  slab.position.set((p.x0+p.x1)/2, p.y-RH*0.64, DATA.hallD*0.5);
+  slab.receiveShadow = true; slab.castShadow = true;
   root.add(slab);
 });
+
+/* the ground the three buildings stand on -- a model floating in space is
+   what makes one look like a diagram instead of a building */
+const site = new THREE.Mesh(
+  new THREE.BoxGeometry((maxX-minX)+DATA.doorW*22, DATA.levelH*0.5,
+                        DATA.hallD*4.4),
+  mat("#aab8c6", 0.9));
+site.position.set((minX+maxX)/2, minY-RH*1.4, DATA.hallD*0.5);
+site.receiveShadow = true;
+root.add(site);
 
 /* bridges: the point of the whole drawing */
 DATA.spans.forEach(s=>{
@@ -321,9 +423,22 @@ DATA.spans.forEach(s=>{
   const br = new THREE.Mesh(new THREE.BoxGeometry(w, DATA.levelH*0.16, RD*0.9),
     mat("#12764a", 0.92));
   br.position.set((s.x0+s.x1)/2, s.y-RH*0.5, s.z);
+  br.castShadow = true; br.receiveShadow = true;
   br.userData = {bridge:true, level:s.level, a:s.a, b:s.b};
   root.add(br); meshes.push(br);
 });
+
+/* the shadow camera has to be told how big the property is, or it either
+   misses most of it or wastes its whole map on empty ground */
+{
+  const spanX = (maxX-minX), spanY = (maxY-minY);
+  const r = Math.max(spanX, spanY) * 0.75 + 40;
+  const sc = key.shadow.camera;
+  sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r;
+  sc.near = 1; sc.far = r*6;
+  sc.updateProjectionMatrix();
+  key.shadow.bias = -0.0016;
+}
 
 /* ---- orbit: drag to turn, wheel or pinch to zoom, right-drag to pan ---- */
 let yaw=-0.62, pitch=0.42, dist=Math.max(maxX-minX,80)*0.92, panX=0, panY=0;
@@ -379,6 +494,9 @@ cv.addEventListener("click", e=>{
   if(d.bridge){
     pick.innerHTML = "<b>Bridge</b> <span>building "+d.a+" &harr; "+d.b+
       " &middot; "+(isNaN(d.level)?d.level:"level "+d.level)+"</span>";
+  } else if(d.facility){
+    pick.innerHTML = "<b>"+d.label+"</b> <span>building "+d.bld+" &middot; "+
+      (isNaN(d.level)?d.level:"level "+d.level)+"</span>";
   } else {
     const where = "building "+d.bld+" &middot; "+
       (isNaN(d.level)?d.level:"level "+d.level);
@@ -398,7 +516,10 @@ cv.addEventListener("click", e=>{
 /* ---- level and building labels, projected each frame ---- */
 const tags = [];
 DATA.levels.forEach((lv,i)=>{
-  const any = DATA.boxes.filter(b=>b.level===lv);
+  /* a level with no guest rooms still has a floor -- building 1's level 1 is
+     the busiest in the resort -- so facilities count towards labelling it */
+  const any = DATA.boxes.filter(b=>b.level===lv)
+    .concat((DATA.facils||[]).filter(f=>f.level===lv));
   if(!any.length) return;
   const el=document.createElement("div"); el.className="lv";
   el.textContent = (lv==="Plaza"||lv==="Terrace") ? lv : "L"+lv;
@@ -461,8 +582,19 @@ elif MODE == "service":
 else:
     chips = "".join(_chip(c, f"Building {b}") for b, c in BLD_COLOUR.items())
 chips += _chip(OFF_TODAY, T("prop.off_today"))
-chips += _chip("#12764a", "Bridge")
 st.markdown(f'<div style="margin:6px 0 4px">{chips}</div>', unsafe_allow_html=True)
+
+# The service core gets its own row: it is a different kind of thing from a
+# room, and mixing the two legends made both harder to read.
+core_chips = "".join(_chip(c, l) for c, l in [
+    ("#12764a", "Bridge"), ("#334759", "Service lift"),
+    ("#5a6f85", "Guest lift"), ("#b06fb0", "Laundry & ice"),
+    ("#2f8f86", "Refill closet"), ("#7a6a55", "Trash chute"),
+    ("#c2452f", "Housekeeping office"), ("#c98a2e", "Breakroom & lockers"),
+    ("#8895a5", "Stairs"), ("#9fb4c9", "Amenity"),
+])
+st.markdown(f'<div style="margin:0 0 4px">{core_chips}</div>',
+            unsafe_allow_html=True)
 st.markdown(
     f'<div style="margin:0 0 18px;font-size:.76rem;color:#7b8798">'
     f'{T("prop.size_note")}</div>', unsafe_allow_html=True)

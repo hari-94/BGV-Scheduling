@@ -105,6 +105,13 @@ Terrace, 1 and 2; to 3 at Plaza and 1 only. A chart holding rooms in both 2 and 
 costs two bridge crossings, and that is the single most expensive thing a chart can
 do — about eight minutes a round trip.
 
+`property_map.py` also carries what is *not* a guest room — service lifts, trash
+chutes, laundry and ice rooms, refill closets, stairs, the housekeeping office
+in building 2's Terrace, and the amenity volumes on the three levels that hold
+no rooms at all. That is not decoration: a housekeeper's day is largely trips
+between a room, the linen, the refill closet and the chute, and it is the
+groundwork for costing those trips rather than only room-to-room ones.
+
 `travel_seconds(a, b)`, `best_order(rooms)`, `chart_travel(rooms)`, `spread(rooms)`.
 The seconds are estimates with names (`ELEVATOR_WAIT`, `BRIDGE_CROSS`…) so they can
 be tuned once somebody times a real trip; what matters is their ratio. Rooms are

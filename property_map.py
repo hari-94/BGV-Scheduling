@@ -398,6 +398,193 @@ def layout(codes):
     return out
 
 
+# --------------------------------------------------------------------------
+# Everything on a floor that is not a guest room
+# --------------------------------------------------------------------------
+# Taken off the same plans. These are not decoration: a housekeeper's day is
+# largely trips between a room, the linen and ice machine, the amenities refill
+# closet and the trash chute, and every vertical move starts at the service
+# elevator. Drawing them is what makes the model answer "why is this chart
+# slow" rather than only "where is this room".
+#
+# (kind, label, x, row, width in door-widths). x and row are the plate's own
+# coordinates, so these sit in the same frame as the rooms.
+
+# Repeats on every guest level of a building -- the service core is a stack.
+TOWER_SERVICES = {
+    1: [("lift_svc", "Service lift", 5.2, 1.55, 1.1),
+        ("trash", "Trash chute", 6.2, 1.45, 0.7),
+        ("lift_guest", "Guest lift", 7.1, -0.05, 0.9),
+        ("stairs", "Stairs 3", 12.6, 1.3, 0.7)],
+    2: [("lift_svc", "Service lift", 4.5, 1.55, 1.1),
+        ("trash", "Trash chute", 5.5, 1.5, 0.7),
+        ("lift_guest", "Guest lift", 11.0, -0.05, 0.9),
+        ("stairs", "Stairs 7", 2.5, -0.05, 0.7)],
+    3: [("lift_svc", "Service lift", 4.2, 1.55, 1.1),
+        ("trash", "Trash chute", 5.0, 1.45, 0.7),
+        ("lift_guest", "Plaza lift", 7.2, 1.0, 0.9),
+        ("stairs", "Stairs 14", 1.4, -0.05, 0.7),
+        ("stairs", "Stairs 15", 11.9, -0.05, 0.7)],
+}
+
+# What sits on one particular level and nowhere else.
+LEVEL_SERVICES = {
+    (1, "2"): [("laundry", "Laundry & ice", 7.0, -0.05, 0.9),
+               ("closet", "Amenities refill", 2.0, 1.95, 1.6)],
+    (1, "3"): [("closet", "Houseware 1", 7.0, -0.05, 0.9),
+               ("closet", "Rollaway closet", 2.0, 1.95, 1.6)],
+    (1, "4"): [("laundry", "Laundry & ice", 7.0, -0.05, 0.9),
+               ("closet", "Service closet", 2.0, 1.95, 1.6)],
+    (1, "5"): [("closet", "Service closet", 2.0, 1.95, 1.6)],
+    (1, "Plaza"): [("lift_svc", "Service lift", 10.2, -0.05, 1.1),
+                   ("trash", "Trash chute", 8.9, -0.05, 0.8),
+                   ("lift_guest", "Plaza–5 lift", 7.8, -0.05, 0.9),
+                   ("breakroom", "Employee breakroom", 12.9, 1.0, 2.4),
+                   ("lockers", "HSKP lockers", 15.0, 1.0, 1.2),
+                   ("amenity", "Ski lockers", 5.6, 0.55, 2.2)],
+    (1, "Terrace"): [("lift_svc", "Service lift", 10.2, -0.05, 1.1),
+                     ("trash", "Trash chute", 8.9, -0.05, 0.8),
+                     ("lift_guest", "Terrace–5 lift", 7.9, -0.05, 0.9),
+                     ("amenity", "Ski lockers", 3.3, 0.5, 2.6),
+                     ("amenity", "Robbie's Tavern", 1.4, 1.1, 1.6)],
+    (2, "4"): [("laundry", "Laundry & ice", 5.7, -0.05, 0.9),
+               ("closet", "Service closet", 1.4, 1.95, 1.6)],
+    (2, "2"): [("laundry", "Laundry & ice", 5.7, -0.05, 0.9),
+               ("closet", "Service closet", 1.4, 1.95, 1.6)],
+    (2, "3"): [("closet", "Amenities refill", 1.4, 1.95, 1.8)],
+    (2, "1"): [("closet", "Service closet", 1.4, 1.95, 1.6),
+               ("amenity", "Theatres 1–4", 8.2, 1.45, 2.6),
+               ("amenity", "Grand lobby", 12.6, 1.15, 2.4)],
+    (2, "Plaza"): [("lift_svc", "Service lift", 4.8, 1.05, 1.1),
+                   ("trash", "Trash chute", 6.4, 1.05, 0.9),
+                   ("lift_guest", "Plaza lift", 8.0, 0.3, 0.9),
+                   ("breakroom", "Employee breakroom", 12.4, 0.05, 2.6),
+                   ("lockers", "HSKP lockers", 11.6, 0.28, 1.4),
+                   ("amenity", "Plaza parking", 3.0, 0.35, 3.4)],
+    (2, "Terrace"): [("office", "Housekeeping office", 7.4, 1.05, 1.4),
+                     ("lift_svc", "Service lift", 4.8, 1.05, 1.1),
+                     ("trash", "Trash chute", 6.4, 1.05, 0.9),
+                     ("lift_guest", "Terrace lift", 7.9, 0.5, 0.9),
+                     ("amenity", "Main entrance", 7.9, 0.15, 1.6),
+                     ("amenity", "Maintenance", 0.7, 1.05, 1.4),
+                     ("stairs", "Stairs 7", 1.7, 0.5, 0.7)],
+    (3, "1"): [("closet", "Houseperson closet", 7.6, 1.0, 1.0),
+               ("laundry", "Laundry & ice", 8.7, 1.0, 0.9),
+               ("amenity", "Pool area", 1.0, 0.3, 2.0),
+               ("amenity", "Day use room", 3.5, -0.05, 1.0)],
+    (3, "2"): [("laundry", "Laundry & ice", 8.7, 1.0, 0.9),
+               ("closet", "Amenities refill", 1.2, 1.95, 1.8)],
+    (3, "3"): [("laundry", "Laundry & ice", 8.7, 1.0, 0.9),
+               ("closet", "Service closet", 1.2, 1.95, 1.8)],
+    # On level 4 the laundry sits immediately east of 3449H, not on top of it.
+    (3, "4"): [("laundry", "Laundry & ice", 9.0, -0.05, 0.9),
+               ("closet", "Amenities closet", 9.9, -0.05, 1.0),
+               ("closet", "Houseware 3", 11.8, -0.05, 1.8),
+               ("amenity", "Theatre 5", 2.2, 1.05, 2.0),
+               ("amenity", "Escape room", 5.0, 1.05, 1.0),
+               ("amenity", "GC8 lounge", 0.3, 0.5, 1.0)],
+    (3, "Plaza"): [("lift_svc", "Service lift", 1.8, 1.3, 1.1),
+                   ("trash", "Trash chute", 2.9, 1.1, 0.8),
+                   ("lift_guest", "Plaza lift", 6.1, 1.0, 0.9),
+                   ("amenity", "Ice rink", 6.2, 1.75, 4.0),
+                   ("amenity", "Ice skate room", 4.7, 1.0, 1.0),
+                   ("office", "ULLR office", 7.6, 1.0, 1.0),
+                   ("amenity", "Ski lockers", 6.0, -0.05, 1.8),
+                   ("amenity", "Breck Sports", 0.3, -0.05, 1.0)],
+    (3, "Terrace"): [("lift_svc", "Service lift", 2.7, 1.6, 1.1),
+                     ("trash", "Trash chute", 3.4, 1.4, 0.8),
+                     # east of 3022A, where the tower's lift is — at 6.1 it was
+                     # drawn standing in the room
+                     ("lift_guest", "Plaza lift", 7.2, 1.0, 0.9),
+                     ("laundry", "Laundry & ice", 7.6, 1.0, 0.9),
+                     ("closet", "Service closet", 1.5, 1.5, 1.2)],
+}
+
+# Building 1 level 1 has no guest rooms at all -- it is the resort's front of
+# house, and the only level that bridges to both neighbours. Drawn in full so
+# the crossroads of the property is not a blank row in the model.
+LEVEL_SERVICES[(1, "1")] = [
+    ("lift_guest", "Level 1–5 lift", 2.6, 0.7, 0.9),
+    ("stairs", "Stairs 3", 2.5, 1.15, 0.7),
+    ("amenity", "Pool area", 1.2, 0.35, 2.2),
+    ("amenity", "Fitness centre", 8.4, 1.2, 4.4),
+    ("amenity", "Infinity spa", 9.4, 0.2, 2.6),
+    ("amenity", "Aquatics", 7.5, 0.2, 1.4),
+    ("amenity", "Grand lobby", 14.2, 0.65, 2.6),
+    ("amenity", "Front desk", 14.4, 0.3, 1.4),
+    ("amenity", "Market", 13.0, 0.3, 1.0),
+    ("amenity", "Theatres 1–4", 15.6, 0.3, 1.0),
+    ("amenity", "Conference", 14.4, 0.05, 1.0),
+    ("amenity", "Courtyard grill", 5.2, 1.65, 3.4),
+    ("amenity", "Day use room", 1.1, 0.9, 1.0),
+    ("amenity", "Bar", 13.2, 1.5, 1.2),
+]
+
+# The levels that exist in a building but hold no guest rooms. Without these
+# the elevation has holes where a floor plainly is.
+EXTRA_LEVELS = {1: ["1"], 2: ["Plaza", "Terrace"]}
+
+
+def facilities(levels_with_rooms):
+    """Everything that is not a guest room, placed in the same world.
+
+    `levels_with_rooms` is the set of (bld, level) pairs the room list covers;
+    the service core is drawn on those, plus the few levels that hold no rooms
+    but plainly exist -- building 1's level 1, building 2's Plaza and Terrace.
+    """
+    want = set(levels_with_rooms)
+    for bld, levels in EXTRA_LEVELS.items():
+        for lv in levels:
+            want.add((bld, lv))
+
+    out = []
+    for bld, lv in sorted(want, key=lambda k: (k[0], LEVEL_IX[k[1]])):
+        # A numbered level repeats the building's service core; Plaza, Terrace
+        # and building 1's level 1 have their own cores drawn out in full,
+        # because down there the lifts and chutes are not where they are in the
+        # tower above.
+        tower = lv not in ("Plaza", "Terrace") and (bld, lv) != (1, "1")
+        items = (TOWER_SERVICES.get(bld, []) if tower else [])
+        items = list(items) + LEVEL_SERVICES.get((bld, lv), [])
+        for kind, label, x, row, w in items:
+            out.append({
+                "kind": kind, "label": label, "bld": bld, "level": lv,
+                "row": row, "width": w,
+                "x": round(_bld_offset(bld) + x * DOOR_W, 2),
+                "y": round(LEVEL_IX[lv] * LEVEL_H, 2),
+                "z": round(row * HALL_D, 2),
+            })
+    return out
+
+
+def service_cores(levels_with_rooms):
+    """The service lift of each building as one shaft through every level.
+
+    A lift is not a thing on a floor, it is the line joining the floors, and
+    drawing it that way is what makes the three buildings read as buildings.
+    The shaft stops where the building does: `_plate` will hand back a plate
+    for any level of a building, so the real levels have to come from the room
+    list, or building 2 grows a level 5 it does not have.
+    """
+    cores = []
+    present = {}
+    for bld, lv in list(levels_with_rooms) + list(LEVEL_SERVICES):
+        present.setdefault(bld, []).append(LEVEL_IX[lv])
+    for bld, seq in TOWER_SERVICES.items():
+        x = next((s[2] for s in seq if s[0] == "lift_svc"), None)
+        if x is None or bld not in present:
+            continue
+        levels = present[bld]
+        cores.append({
+            "bld": bld,
+            "x": round(_bld_offset(bld) + x * DOOR_W, 2),
+            "z": round(1.55 * HALL_D, 2),
+            "y0": round(min(levels) * LEVEL_H, 2),
+            "y1": round(max(levels) * LEVEL_H, 2),
+        })
+    return cores
+
+
 def bridge_spans():
     """Each bridge as a box between two buildings, for the drawing."""
     spans = []
