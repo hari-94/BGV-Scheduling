@@ -361,6 +361,20 @@ def delete_session(token_hash: str) -> None:
     except Exception as ex:
         print(f"[db] delete_session error: {ex}")
 
+def save_note_seen(username: str, when: str) -> None:
+    """Remember how far through the team's notes this person has read."""
+    try:
+        _upsert_key(f"noteseen_{username}", {"at": when})
+    except Exception as ex:
+        print(f"[db] save_note_seen error: {ex}")
+
+def load_note_seen(username: str) -> str:
+    try:
+        return (_load_key(f"noteseen_{username}") or {}).get("at") or ""
+    except Exception as ex:
+        print(f"[db] load_note_seen error: {ex}")
+        return ""
+
 def save_user_lang(username: str, code: str) -> None:
     """Remember which language someone reads the app in."""
     try:

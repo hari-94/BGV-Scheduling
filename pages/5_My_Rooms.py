@@ -209,6 +209,20 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .dlgdot{width:14px;height:14px;border-radius:50%;margin:0 auto}
 /* One bar per housekeeper, under the one that counts everybody. Tight enough
    that a floor of six fits above the rooms rather than pushing them down. */
+/* A note from the floor. Loud enough to be seen on the way past, quiet
+   enough not to be the page. */
+.ntbox{border:1px solid #f0c86a;background:#fffaf0;border-radius:12px;
+  padding:11px 13px;margin:0 0 10px}
+.nthead{font-weight:800;font-size:.84rem;color:#7a5200;margin-bottom:6px}
+.ntrow{border-top:1px solid #f2e3c4;padding:6px 0 2px}
+.ntrow:first-of-type{border-top:none}
+.ntrow b{font-size:.86rem;color:#16202e}
+.ntwho{font-size:.72rem;color:#8a6d3b;margin-left:8px}
+.nttext{font-size:.82rem;color:#42536a;margin-top:2px}
+/* And on the card itself, so it is still there after the alert is cleared. */
+.tkmsg{font-size:.74rem;color:#7a5200;background:#fff8e8;border-radius:7px;
+  padding:3px 7px;margin-top:4px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
 .pgwrap{border:1px solid #e6ebf2;border-radius:12px;padding:9px 12px;
   background:#fbfcfe;margin:0 0 12px}
 .pgrow{display:flex;align-items:center;gap:10px;padding:3px 0}
@@ -356,7 +370,8 @@ def _fingerprint(chs, sts, who):
                  g.get("service_type"), g.get("time"),
                  [str(r.get("room")) for r in (g.get("rooms") or [])])
                 for g in chs if g.get("housekeeper") == who]) + \
-        repr(sorted((k, _rst.normalise((v or {}).get("status")))
+        repr(sorted((k, _rst.normalise((v or {}).get("status")),
+                     (v or {}).get("note_at") or "")
                     for k, v in sts.items()))
     return hashlib.sha1(sig.encode("utf-8")).hexdigest()
 
@@ -546,6 +561,10 @@ def _save_note(code, g, owner, txt):
         db.upsert_room_status(code, {
             "notes": txt, "housekeeper": owner,
             "group_label": g.get("label", ""),
+            # When, and by whom -- without these a note is just a field that
+            # quietly changed, and nobody can be told it is new.
+            "note_at": clock.stamp(),
+            "note_by": me_display or me_user,
             "updated_by": me_user or me_display})
         st.session_state["mr_flash"] = code
         st.session_state["mr_gen"] = st.session_state.get("mr_gen", 0) + 1
@@ -588,6 +607,7 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
             f'{"<span class=tknote>📝</span>" if note else ""}</div>'
             f'<div class="tkguest">{e(guest) or "—"}</div>'
             + (f'<div class="tkarr">→ {e(arriving)}</div>' if arriving else "")
+            + (f'<div class="tkmsg">📝 {e(note)}</div>' if note else "")
             + f'<div class="tkfoot">{chips}'
             f'<span class="tkrqs">{"🧹 " + e(owner) if show_owner else "👤 " + (e(insp) or "—")}</span></div>'
             f'</div>'
@@ -599,6 +619,52 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
 
 
 # ── an RQS sees their whole team, and can mark for them ──────────────────────
+# ── notes from the floor ─────────────────────────────────────────────────────
+if _my_team:
+    _notes = []
+    for _g, _r in _team_rooms:
+        _rec = statuses.get(str(_r.get("room", ""))) or {}
+        if str(_rec.get("notes") or "").strip():
+            _notes.append({
+                "room": str(_r.get("room", "")),
+                "hk": _g.get("housekeeper", ""),
+                "text": str(_rec.get("notes")).strip(),
+                "at": str(_rec.get("note_at") or ""),
+                "by": str(_rec.get("note_by") or ""),
+            })
+    _seen = st.session_state.get("mr_note_seen")
+    if _seen is None:
+        try:
+            _seen = db.load_note_seen(me_user or me_display) or ""
+        except Exception:
+            _seen = ""
+        st.session_state["mr_note_seen"] = _seen
+    _new = [n for n in _notes if n["at"] and n["at"] > _seen]
+    if _new:
+        # Somebody wrote this while their hands were full. It should not have
+        # to be found by opening rooms one at a time.
+        st.markdown(
+            f'<div class="ntbox"><div class="nthead">📝 '
+            f'{T("rooms.notes_new", n=len(_new))}</div>'
+            + "".join(
+                f'<div class="ntrow"><b>{e(n["room"])}</b>'
+                f'<span class="ntwho">{e(n["hk"])}'
+                f'{" · " + e(n["at"][11:16]) if len(n["at"]) > 15 else ""}</span>'
+                f'<div class="nttext">{e(n["text"])}</div></div>'
+                for n in sorted(_new, key=lambda x: x["at"], reverse=True))
+            + '</div>', unsafe_allow_html=True)
+        if st.button(T("rooms.notes_read"), key="btn_notes_read",
+                     use_container_width=True):
+            _latest = max(n["at"] for n in _new)
+            st.session_state["mr_note_seen"] = _latest
+            try:
+                db.save_note_seen(me_user or me_display, _latest)
+            except Exception as ex:
+                print(f"[my_rooms] could not store the read marker: {ex}")
+            st.rerun()
+    elif _notes:
+        st.caption(T("rooms.notes_all_read", n=len(_notes)))
+
 if _my_team:
     # A bar for each of them, merged under the one that counts everybody, so
     # the whole floor is legible in a glance: how far along in total, and who
