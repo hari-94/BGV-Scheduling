@@ -2,6 +2,7 @@
 Dashboard — Cleaning Schedule Performance Tracker
 """
 from datetime import date
+import json
 import pandas as pd
 import streamlit as st
 import sys as _sys, os as _os
@@ -285,11 +286,38 @@ DAY_MINUTES = 330
 CAP_MINUTES = 380
 
 
+def _stored_days():
+    """The stored schedules, whichever db module this process happens to hold.
+
+    Streamlit re-reads a *page* file on every rerun but not the modules it
+    imports: `import db` comes back from sys.modules. So a process that was
+    already running when a deploy landed runs the new page against the old db,
+    and a page calling a db function added in that same deploy dies with an
+    AttributeError until somebody reboots the app. This page did exactly that.
+    The query belongs in db.py and stays there; this is the fallback for the
+    minutes before a restart, and nobody has to notice.
+    """
+    fn = getattr(db, "load_schedule_history", None)
+    if fn is not None:
+        return fn()
+    r = (db._client().table("schedule_full").select("date,payload")
+         .order("date", desc=True).execute())
+    out = []
+    for row in (r.data or []):
+        p = row.get("payload")
+        if isinstance(p, str):
+            p = json.loads(p)
+        gs = (p or {}).get("groups_data") or []
+        if gs:
+            out.append({"date": row["date"], "groups_data": gs})
+    return out
+
+
 @st.cache_data(ttl=300, show_spinner="Reading the schedule history…")
 def load_history():
     """Every stored day, flattened to one row per chart and one per room."""
     charts, rooms = [], []
-    for day in db.load_schedule_history():
+    for day in _stored_days():
         d = day["date"]
         for g in day["groups_data"]:
             rs = g.get("rooms") or []

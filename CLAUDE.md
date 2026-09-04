@@ -223,6 +223,16 @@ real string.
 reopens a collapsed sidebar lives inside `[data-testid="stToolbar"]`; hiding that
 toolbar hid the button. Empty the toolbar by name instead of switching it off.
 
+**A deploy does not reload an imported module.** Streamlit re-reads a *page* file
+on every rerun, but `import db` comes back from `sys.modules`. A process that was
+already running when a deploy lands therefore runs the **new page against the old
+db**, and a page calling a `db` function added in that same deploy dies with
+`AttributeError: module 'db' has no attribute ...` until somebody reboots the
+app. It happened to the dashboard. Rebooting fixes it; so does reaching the new
+function through `getattr(db, "name", None)` with a fallback, which is what
+`_stored_days` in `pages/1_Dashboard.py` does. Adding a `db` function and calling
+it from a page in the same commit is the shape to watch for.
+
 **Test what a person does.** Two bugs survived a passing test because the test
 committed a value with a rerun before clicking, which nobody does.
 
