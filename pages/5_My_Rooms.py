@@ -119,16 +119,16 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .tkico{font-size:1.5rem;flex:0 0 auto;opacity:.75;line-height:1}
 .tkmain{flex:1 1 auto;min-width:0}
 .tkline1{display:flex;align-items:baseline;gap:9px}
-.tkroom{font-weight:800;font-size:1.06rem;color:#16202e;
+.tkroom{font-weight:800;font-size:1.06rem;color:var(--ink,#16202e);
   font-variant-numeric:tabular-nums;letter-spacing:-.01em}
-.tkmins{font-size:.74rem;color:#5b6b7e;white-space:nowrap}
+.tkmins{font-size:.74rem;color:var(--ink,#5b6b7e);opacity:.85;white-space:nowrap}
 .tknote{font-size:.75rem}
-.tkguest{font-size:.86rem;color:#42536a;white-space:nowrap;overflow:hidden;
+.tkguest{font-size:.86rem;color:var(--ink,#42536a);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
-.tkarr{font-size:.72rem;color:#7b8798;white-space:nowrap;overflow:hidden;
+.tkarr{font-size:.72rem;color:var(--ink,#7b8798);opacity:.8;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
 .tkfoot{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:4px}
-.tkrqs{margin-left:auto;font-size:.72rem;color:#5b6b7e;white-space:nowrap}
+.tkrqs{margin-left:auto;font-size:.72rem;color:var(--ink,#5b6b7e);opacity:.9;white-space:nowrap}
 .tkdot{width:11px;height:11px;border-radius:50%;flex:0 0 auto;
   transition:background .35s ease,transform .3s ease}
 .tkchip{font-size:.6rem;font-weight:800;letter-spacing:.05em;
@@ -144,7 +144,7 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
    number makes it harder to read at the moment it most needs checking -- when
    somebody asks which rooms are done. */
 .tk.gone{filter:saturate(1.25) brightness(.965)}
-.tk.gone .tkroom{color:#0b1b12}
+.tk.gone{filter:none}
 /* The whole card lights up in the colour it has just become, then settles.
    A dot changing colour on a phone held at arm's length is easy to miss; a
    card that flushes is not, and it says which room took the change when six
@@ -223,6 +223,26 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .tkmsg{font-size:.74rem;color:#7a5200;background:#fff8e8;border-radius:7px;
   padding:3px 7px;margin-top:4px;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
+/* The strip that opens a card, and what it opens. */
+[class*="st-key-"][class*="_more_"] button{
+  border:none !important;background:transparent !important;
+  color:#5b6b7e !important;font-size:.7rem !important;font-weight:700 !important;
+  letter-spacing:.06em;text-transform:uppercase;min-height:26px !important;
+  padding:2px !important}
+[class*="st-key-"][class*="_more_"] button:hover{
+  background:#eef2f7 !important;color:#12447e !important}
+.dtwrap{border:1px solid #e2e8f1;border-radius:11px;background:#fbfcfe;
+  padding:10px 13px;margin:0 0 10px;
+  animation:tkin .25s cubic-bezier(.2,.8,.25,1) both}
+.dthead{font-family:'DM Mono',monospace;font-size:.6rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.12em;color:#8a95a4;
+  margin:8px 0 3px;border-bottom:1px solid #eef2f7;padding-bottom:3px}
+.dthead:first-child{margin-top:0}
+.dtrow{display:flex;gap:10px;font-size:.79rem;padding:2px 0}
+.dtk{color:#7b8798;min-width:104px;flex:0 0 auto}
+.dtv{color:#16202e;font-weight:600;min-width:0;overflow-wrap:anywhere}
+.dtnote{font-size:.8rem;color:#7a5200;background:#fff8e8;border-radius:7px;
+  padding:6px 9px;margin-top:3px}
 .pgwrap{border:1px solid #e6ebf2;border-radius:12px;padding:9px 12px;
   background:#fbfcfe;margin:0 0 12px}
 .pgrow{display:flex;align-items:center;gap:10px;padding:3px 0}
@@ -582,6 +602,59 @@ def _save_note(code, g, owner, note_key):
         st.session_state["mr_error"] = code
 
 
+def _toggle_more(code):
+    st.session_state["mr_more"] = (
+        None if st.session_state.get("mr_more") == code else code)
+
+
+def _detail_html(g, r, rec, owner):
+    """Everything else known about a room, once somebody asks for it.
+
+    The arrival is the part people go looking for -- who is coming, what kind
+    of booking it is, and whether the room is still occupied -- because that
+    is what decides whether it can be done now or has to wait.
+    """
+    def _row(label, value):
+        if value in (None, "", "—"):
+            return ""
+        return (f'<div class="dtrow"><span class="dtk">{e(label)}</span>'
+                f'<span class="dtv">{e(value)}</span></div>')
+
+    res = str(r.get("res_type", "") or "").strip()
+    occ = str(r.get("status", "") or "").strip()
+    arr = str(r.get("arriving", "") or "").strip()
+    note = str(rec.get("notes") or "").strip()
+
+    times = []
+    for key, lbl in (("started_at", T("rooms.t_started")),
+                     ("cleaned_at", T("rooms.t_ready")),
+                     ("inspected_at", T("rooms.t_inspected"))):
+        if rec.get(key):
+            times.append(f"{lbl} {_local_hhmm(rec.get(key))}")
+
+    return (
+        '<div class="dtwrap">'
+        + f'<div class="dthead">{e(T("rooms.arrival"))}</div>'
+        + _row(T("rooms.guest_now"), str(r.get("guest", "") or "").strip())
+        + _row(T("rooms.guest_next"), arr)
+        + _row(T("rooms.res_type"), res)
+        + _row(T("rooms.occupancy"), occ)
+        + f'<div class="dthead">{e(T("rooms.the_room"))}</div>'
+        + _row(T("rooms.building_l"), r.get("bld"))
+        + _row(T("rooms.floor_l"), r.get("floor"))
+        + _row(T("rooms.service_l"), i18n.service(g.get("service_type", "")))
+        + _row(T("rooms.minutes_l"), f'{r.get("time", 0)} min')
+        + _row(T("rooms.chart_l"), g.get("label"))
+        + _row(T("rooms.cleaner_l"), owner)
+        + _row(T("rooms.rqs_l"), g.get("inspector"))
+        + (f'<div class="dthead">{e(T("rooms.progress_l"))}</div>'
+           + _row(T("rooms.marked_l"), " · ".join(times)) if times else "")
+        + _row(T("rooms.by_l"), rec.get("updated_by"))
+        + (f'<div class="dthead">{e(T("act.note"))}</div>'
+           f'<div class="dtnote">{e(note)}</div>' if note else "")
+        + '</div>')
+
+
 def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
     """One room, as a line you can act on without reading twice."""
     code = str(r.get("room", ""))
@@ -589,7 +662,6 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
     cur = _rst.normalise(rec.get("status"))
     bg, ink, accent = STATUS_STYLE.get(cur, STATUS_STYLE[NOT_STARTED])
     guest = str(r.get("guest", "") or "").strip()
-    _ = ink
     if guest.lower() in ("unallocated", "---", "room, walk", "deposit, deposit"):
         guest = ""
     arriving = str(r.get("arriving", "") or "").strip()
@@ -607,7 +679,8 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
             f'<div class="tk{" just" if code == flash else ""}'
             f'{" working" if cur == IN_PROGRESS else ""}'
             f'{" gone" if cur in (CLEANED, INSPECTED, ALREADY) else ""}" '
-            f'style="border-left-color:{accent};--acc:{accent};--tint:{bg}">'
+            f'style="border-left-color:{accent};--acc:{accent};--tint:{bg};'
+            f'--ink:{ink}">'
             f'<div class="tkico">{icon}</div>'
             f'<div class="tkmain">'
             f'<div class="tkline1"><span class="tkroom">{e(code)}</span>'
@@ -621,6 +694,14 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
             f'</div>'
             f'<div class="tkdot" style="background:{accent}"></div>'
             f'</div>', unsafe_allow_html=True)
+        # A card that opens. The line is what you work from; the rest of what
+        # is known about the room is a tap away rather than crowding it.
+        _open = st.session_state.get("mr_more") == code
+        st.button(("▲ " if _open else "▼ ") + T("rooms.more"),
+                  key=f"{key_prefix}_more_{code}", use_container_width=True,
+                  on_click=_toggle_more, args=(code,))
+        if _open:
+            st.markdown(_detail_html(g, r, rec, owner), unsafe_allow_html=True)
     with c_btn:
         if editable:
             _menu(code, g, owner, key_prefix, cur)

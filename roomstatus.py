@@ -43,14 +43,17 @@ ALIASES = {
 #: blue once it is someone else's turn to look, and a dark, settled green
 #: when the RQS has passed it. Nothing else is green, so green means finished
 #: and finished means inspected.
+#: Eight steps down from the pastels these started as. A card is now the
+#: colour of its state rather than tinted with it, which reads across a
+#: corridor and in daylight on a phone; the ink turns light to keep up.
 META = {
-    PENDING:       ("Waiting to clean", "Waiting", "#94a3b8", "#f1f5f9", "#475569"),
-    STARTED:       ("Cleaning",       "Cleaning",  "#f59e0b", "#fef3c7", "#92400e"),
-    DONE:          ("Ready for RQS",  "Ready",     "#2f80ed", "#dbeafe", "#1e40af"),
-    INSPECTED:     ("Inspected",      "Inspected", "#15803d", "#dcfce7", "#14532d"),
-    ALREADY_CLEAN: ("Already clean",  "Clean",     "#0ea5e9", "#e0f2fe", "#075985"),
-    DND:           ("Do not disturb", "DND",       "#a855f7", "#f3e8ff", "#6b21a8"),
-    HELP:          ("Needs help",     "Help",      "#ef4444", "#fee2e2", "#991b1b"),
+    PENDING:       ("Waiting to clean", "Waiting", "#cbd5e1", "#475569", "#f8fafc"),
+    STARTED:       ("Cleaning",       "Cleaning",  "#fbbf24", "#92400e", "#fffbeb"),
+    DONE:          ("Ready for RQS",  "Ready",     "#60a5fa", "#1e40af", "#eff6ff"),
+    INSPECTED:     ("Inspected",      "Inspected", "#4ade80", "#14532d", "#dcfce7"),
+    ALREADY_CLEAN: ("Already clean",  "Clean",     "#38bdf8", "#075985", "#e0f2fe"),
+    DND:           ("Do not disturb", "DND",       "#c084fc", "#6b21a8", "#f3e8ff"),
+    HELP:          ("Needs help",     "Help",      "#f87171", "#991b1b", "#fee2e2"),
 }
 
 #: The one road through the day. Anything else -- do not disturb, needs help,
