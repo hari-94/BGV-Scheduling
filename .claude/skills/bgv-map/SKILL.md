@@ -33,6 +33,7 @@ the menu stays open and the page shows stale data for up to five seconds.
 |---|---|
 | the housekeeper→RQS board | `with tab_reassign:` ~4865 |
 | the room-level board | same tab, `_move_room`, `room_home`, `SET_ASIDE` |
+| how Daily Service is split | `split_daily_service` — per building first, `_ds_by_building` / `_ds_hops` |
 | column order | `_col_order` — others by name, then RQS 2, then RQS 1, then the pen |
 | card order inside a column | `_card_order`, driven by `kb_sort` |
 | wide columns (Daily Service, Set aside) | the `ds_cols` CSS block — targets `div:nth-of-type(n)` |

@@ -118,6 +118,33 @@ be tuned once somebody times a real trip; what matters is their ratio. Rooms are
 ordered by route on the chart card and on the phone page — the order a housekeeper
 reads down her list is the order that walks least.
 
+## Daily Service charts
+
+`split_daily_service` packs **each building on its own first**, so every chart a
+building can fill by itself is single-building by construction. Only each
+building's trailing part-chart is left over, and each of those keeps a chart to
+itself until the headcount forces a merge — cheapest merge first, scored in
+bridge crossings from `pmap.BRIDGES`.
+
+It used to sort every room by building and cut wherever the cap fell, then run a
+tightening pass that pulled the first room of a later chart forward. Between them
+**half the DS charts touched more than one building**, and housekeepers
+complained about being sent across the property. Two rules keep it from coming
+back: **never merge a remainder that the budget does not force**, and **never
+merge on size alone** — packing by size pairs buildings 2 and 3, the only two
+that do not touch, which is the single most expensive chart the property can
+produce.
+
+The arithmetic is why it is free: full charts plus packed remainders needs
+exactly `ceil(total/cap)` people. Measured over every stored day — same 216
+housekeepers, single-building charts 112 → 153, rooms stranded away from their
+building 18% → 11%.
+
+Not fixable in code: **`DS_CAP` is 460 minutes against a 330-minute day.** The
+median DS chart is exactly 460 and 87% are over 330. Either those minutes are
+nominal and badly beaten, or DS is structurally overloaded — a staffing
+question, and not one the packer should paper over.
+
 ## The day
 
 `daystart.py` decides what to clean first. The order is not a sort — it is a

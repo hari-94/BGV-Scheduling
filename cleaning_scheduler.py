@@ -2649,67 +2649,96 @@ def solve_ih(ih_rooms, seed=20240601):
         else: leftover.extend(c)
     return keep, leftover
 
-def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP):
-    """Split Daily Service rooms into charts, packing each housekeeper as FULL as
-    possible (up to the hard cap) before opening a new one, so we use the fewest
-    housekeepers. Rooms are kept physically close (building/floor/room order) and
-    no chart ever exceeds the cap.
+def _ds_hops(blds):
+    """Most bridges anyone on this chart has to cross: 0, 1 or 2.
 
-    Approach:
-      1. Sort rooms by building/floor/room so each chart stays contiguous.
-      2. Greedily fill the current chart to the cap; only open a new chart when the
-         next room genuinely won't fit.
-      3. Run a tightening pass that pulls early rooms forward to top up
-         under-filled charts, so the last chart carries the small remainder rather
-         than leaving several half-full charts."""
+    Taken off the map rather than written down as a table, so it stays true if
+    the bridges ever change. Buildings 2 and 3 do not touch, so a chart holding
+    both is two crossings — about eight minutes each way, against two and a
+    half for a chart that shares building 1."""
+    bs = sorted(b for b in blds if b in (1, 2, 3))
+    worst = 0
+    for i in range(len(bs)):
+        for j in range(i + 1, len(bs)):
+            worst = max(worst, 1 if pmap.BRIDGES.get(frozenset((bs[i], bs[j]))) else 2)
+    return worst
+
+def _ds_by_building(rooms, cap):
+    """Fill each building's own charts; hand back its trailing part-chart."""
+    by_bld = {}
+    for r in rooms:
+        by_bld.setdefault(_bld(r), []).append(r)
+    full, leftovers = [], []
+    for bld in sorted(by_bld, key=lambda b: {3:0, 1:1, 2:2}.get(b, 1)):
+        rs = sorted(by_bld[bld], key=lambda r: (_flr(r), _rnum(r)))
+        cur, t = [], 0
+        for r in rs:
+            if cur and t + r["time"] > cap:
+                full.append(cur); cur, t = [], 0
+            cur.append(r); t += r["time"]
+        if cur:
+            leftovers.append([cur, {bld}, t])
+    return full, leftovers
+
+def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP):
+    """Split Daily Service rooms into charts, keeping each housekeeper inside
+    one building wherever the headcount allows it.
+
+    This used to sort every room by building and then cut wherever the cap
+    fell, so a chart boundary landed in the middle of a building and the chart
+    spilled into the next; a tightening pass then pulled the first room of a
+    later chart forward to top the earlier ones up, dragging rooms across
+    building lines on purpose. Half the Daily Service charts ended up touching
+    more than one building, and housekeepers said so.
+
+    Instead, pack each building on its own first — every chart a building can
+    fill by itself is then single-building by construction. Only the trailing
+    part-chart of each building is left over, and each of those keeps a chart
+    to itself until the housekeeper budget forces a merge. Merging whenever two
+    happen to fit is what makes crossings out of nothing.
+
+    The arithmetic comes out the same: full charts plus packed remainders needs
+    exactly ceil(total/cap) people, so nothing is spent on the tidiness. Where
+    remainders genuinely will not pair — three of 300 minutes under a 460 cap —
+    the leftovers are split room by room instead, because a housekeeper is 460
+    minutes and a crossing is about ten."""
     import math
     rooms = list(ds_rooms) + list(extra_rooms or [])
     if not rooms: return []
-    BLD = {3:0, 1:1, 2:2}
-    rooms = sorted(rooms, key=lambda r: (BLD.get(_bld(r),1), _flr(r), _rnum(r)))
-    total = sum(r["time"] for r in rooms)
-    # Fewest housekeepers this could possibly need at the hard cap.
-    n_min = max(1, math.ceil(total / cap))
+    n_min = max(1, math.ceil(sum(r["time"] for r in rooms) / cap))
 
-    # Greedy fill-to-cap: keep loading the current chart until the next room won't
-    # fit, then start a new one. This packs each housekeeper tight.
-    charts = []; cur = []; cur_t = 0
-    for r in rooms:
-        if cur and cur_t + r["time"] > cap:
-            charts.append(cur); cur = []; cur_t = 0
-        cur.append(r); cur_t += r["time"]
-    if cur: charts.append(cur)
+    full, bins = _ds_by_building(rooms, cap)
+    while len(bins) > max(n_min - len(full), 1):
+        best = None
+        for i in range(len(bins)):
+            for j in range(i + 1, len(bins)):
+                if bins[i][2] + bins[j][2] > cap: continue
+                merged = bins[i][1] | bins[j][1]
+                # cheapest merge first: fewest bridges, then fewest buildings,
+                # then the fullest chart so later merges have more room
+                key = (_ds_hops(merged), len(merged), -(bins[i][2] + bins[j][2]))
+                if best is None or key < best[0]: best = (key, i, j)
+        if best is None: break      # nothing else fits; the cap outranks tidiness
+        _, i, j = best
+        bins[i][0].extend(bins[j][0]); bins[i][1] |= bins[j][1]
+        bins[i][2] += bins[j][2]; bins.pop(j)
 
-    # Tightening pass: if we ended up with more charts than the theoretical
-    # minimum, try to top up earlier charts by pulling the first room of a later
-    # chart forward whenever it fits under the cap. This concentrates the load and
-    # can drop the trailing (nearly empty) chart entirely, cutting a housekeeper.
-    _ds_pack_tight(charts, cap, n_min)
-    return charts
+    charts = full + [b[0] for b in bins]
+    if len(charts) <= n_min:
+        return charts
 
-def _ds_pack_tight(charts, cap, n_min, rounds=400):
-    """Move boundary rooms EARLIER to fill charts to the cap, so the fewest
-    housekeepers are used. Only the first room of a later chart moves to the end of
-    an earlier one (keeps contiguity), and only when it fits under the cap."""
-    def t(c): return sum(x["time"] for x in c)
-    for _ in range(rounds):
-        moved = False
-        # try to top up each chart from the one after it
-        for i in range(len(charts)-1):
-            a = charts[i]
-            if not a: continue
-            ta = t(a)
-            # pull rooms from later charts forward while they fit
-            for j in range(i+1, len(charts)):
-                b = charts[j]
-                while b and ta + b[0]["time"] <= cap:
-                    r = b.pop(0); a.append(r); ta += r["time"]; moved = True
-                if ta >= cap: break
-        # drop any charts we emptied
-        before = len(charts)
-        charts[:] = [c for c in charts if c]
-        if len(charts) != before: moved = True
-        if not moved: break
+    # Whole remainders would cost a person. Split them instead — the
+    # building-pure charts above are untouched either way, so only the tail of
+    # the day is ever mixed, and it is mixed in west-to-east order so a split
+    # falls between neighbours rather than between 2 and 3.
+    spare = [r for b in bins for r in b[0]]
+    cur, t, tail = [], 0, []
+    for r in spare:
+        if cur and t + r["time"] > cap:
+            tail.append(cur); cur, t = [], 0
+        cur.append(r); t += r["time"]
+    if cur: tail.append(cur)
+    return full + tail
 
 def build_all_groups(rooms):
     verify_rooms = [r for r in rooms if r.get("verify")]
