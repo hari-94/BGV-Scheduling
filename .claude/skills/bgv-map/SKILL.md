@@ -42,6 +42,27 @@ the menu stays open and the page shows stale data for up to five seconds.
 | the day's numbers strip | search `k2row` (~4180) |
 | the sidebar (attendance, RQS roles, DS team) | SIDEBAR ~3486; tick boxes are keyed `att_{gen}_{name}` |
 
+## The dashboard
+`pages/1_Dashboard.py` — gated on `can_view_dashboard` (admin + RQS).
+
+Built from `db.load_schedule_history()`, **not** from the snapshot log. The log
+records only what was handed out — rooms and minutes per person — so it cannot
+answer whether a day fits in a day, where the work is, or who is being sent
+across the property. `load_history()` flattens every stored day into two frames,
+`CH` (one row per chart) and `RM` (one row per room), and every filter, chart and
+table is a slice of those two.
+
+| want to change | go to |
+|---|---|
+| the filter bar | the `f1..f4` columns and `_window` |
+| the top numbers | the `kpi-row` block after `_window` |
+| chart styling | `_lay` — one place for the plotly layout |
+| the day's yardsticks | `DAY_MINUTES` 330, `CAP_MINUTES` 380 |
+
+`room_status` holds only ~55 rows over 9 days — live marking is barely taken up,
+so the Today tab says so rather than drawing a confident empty chart. Do not
+build history on `room_status` until that changes.
+
 ## The staff sheet
 `pages/3_Roster_Import.py` for the screens, `roster_import.py` for the parsing.
 

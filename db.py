@@ -671,6 +671,33 @@ def get_room_statuses(date_str: str = None) -> dict:
         print(f"[db] get_room_statuses error: {ex}")
         return {}
 
+def load_schedule_history() -> list:
+    """Every stored day's charts: [{"date": ..., "groups_data": [...]}, ...].
+
+    The dashboard used to read only the snapshot log, which records what was
+    *assigned* — rooms and minutes per person — and nothing about the rooms
+    themselves. Everything worth charting (service, building, room minutes,
+    late checkouts, who inspected what) is in the schedule itself, so it is
+    read whole and aggregated in the page.
+    """
+    try:
+        r = (_client().table("schedule_full")
+             .select("date,payload")
+             .order("date", desc=True)
+             .execute())
+        out = []
+        for row in (r.data or []):
+            p = row.get("payload")
+            if isinstance(p, str):
+                p = json.loads(p)
+            gs = (p or {}).get("groups_data") or []
+            if gs:
+                out.append({"date": row["date"], "groups_data": gs})
+        return out
+    except Exception as ex:
+        print(f"[db] load_schedule_history error: {ex}")
+        return []
+
 def all_known_rooms() -> list:
     """Every room code that has ever appeared on a chart.
 

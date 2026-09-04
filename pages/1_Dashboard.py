@@ -1,7 +1,7 @@
 """
 Dashboard — Cleaning Schedule Performance Tracker
 """
-from datetime import date, timedelta
+from datetime import date
 import pandas as pd
 import streamlit as st
 import sys as _sys, os as _os
@@ -9,6 +9,8 @@ _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
 import db, auth
 import ui
 import clock
+import property_map as pmap
+import roomstatus as _rst
 
 try:
     import plotly.graph_objects as go
@@ -263,246 +265,450 @@ log = get_log()
 
 ui.topnav("Dashboard")
 
-st.markdown('<p class="pg-title"> Performance Dashboard</p>', unsafe_allow_html=True)
-st.markdown('<p class="pg-sub">Daily · weekly · monthly metrics</p>', unsafe_allow_html=True)
 
-if not log:
-    st.info("No data yet. Generate a schedule on the main page first.")
+# ══════════════════════════════════════════════════════════════════════════════
+#  THE DATA
+#
+#  Everything below is built from the schedules themselves rather than from the
+#  snapshot log. The log records what was handed out — rooms and minutes per
+#  person — and nothing about the rooms, so it cannot answer the questions
+#  worth asking: whether a day fits in the day, where the work actually is, or
+#  who is being sent across the property.
+# ══════════════════════════════════════════════════════════════════════════════
+SVC_FC, SVC_IH = "Full Clean", "Full Clean (IH)"
+SVC_DS, SVC_DV = "Daily Service", "Dust n Vac"
+SVC_COL = {SVC_FC: BLUE, SVC_IH: PURPLE, SVC_DS: TEAL, SVC_DV: AMBER}
+
+#: The working day, from the scheduler's own constants: carts roll at ten and
+#: the floor should be clear by half three.
+DAY_MINUTES = 330
+CAP_MINUTES = 380
+
+
+@st.cache_data(ttl=300, show_spinner="Reading the schedule history…")
+def load_history():
+    """Every stored day, flattened to one row per chart and one per room."""
+    charts, rooms = [], []
+    for day in db.load_schedule_history():
+        d = day["date"]
+        for g in day["groups_data"]:
+            rs = g.get("rooms") or []
+            if not rs:
+                continue
+            codes = [str(x.get("room", "")).strip().upper() for x in rs]
+            sp = pmap.spread(codes)
+            svc = g.get("service_type", "") or "—"
+            hk = (g.get("housekeeper", "") or "").strip()
+            insp = (g.get("inspector", "") or "").strip()
+            label = g.get("label", "") or "—"
+            mins = sum(float(x.get("time") or 0) for x in rs)
+            late = sum(1 for x in rs if str(x.get("late_checkout") or "").strip())
+            early = sum(1 for x in rs if "early in" in str(x.get("notes") or "").lower())
+            arr = sum(1 for x in rs if str(x.get("arriving") or "").strip())
+            charts.append({
+                "date": d, "chart": label, "service": svc,
+                "housekeeper": hk or "— unassigned —",
+                "inspector": insp or "— none —",
+                "rooms": len(rs), "minutes": mins,
+                "buildings": ", ".join("B%d" % b for b in sp["buildings"]) or "—",
+                "n_bld": sp["n_buildings"], "n_floor": sp["n_floors"],
+                "travel": round(pmap.chart_travel(codes) / 60.0, 1),
+                "late_outs": late, "early_ins": early, "arriving": arr,
+                "over_day": mins > DAY_MINUTES,
+            })
+            for x, code in zip(rs, codes):
+                loc = pmap.parse(code)
+                rooms.append({
+                    "date": d, "room": code, "service": svc, "chart": label,
+                    "housekeeper": hk or "— unassigned —",
+                    "inspector": insp or "— none —",
+                    "bld": loc.bld if loc else 0,
+                    "level": loc.level if loc else "—",
+                    "minutes": float(x.get("time") or 0),
+                    "guest": str(x.get("guest") or "").strip(),
+                    "arriving": str(x.get("arriving") or "").strip(),
+                    "late_out": str(x.get("late_checkout") or "").strip(),
+                    "res_type": str(x.get("res_type") or "").strip(),
+                })
+    return pd.DataFrame(charts), pd.DataFrame(rooms)
+
+
+CH, RM = load_history()
+
+st.markdown('<p class="pg-title">Performance Dashboard</p>', unsafe_allow_html=True)
+
+if CH.empty:
+    st.info("No schedules stored yet. Generate one on the main page first.")
     st.stop()
 
-today     = clock.today()
-all_dates = sorted({s.get("date","") for s in log if s.get("date")}, reverse=True)
+# ── Filters ───────────────────────────────────────────────────────────────────
+ALL_DATES = sorted(CH["date"].unique(), reverse=True)
+_today = clock.today_iso()
 
-def filter_log(p):
-    if p == "Today":      return [s for s in log if s.get("date") == str(today)]
-    if p == "This Week":
-        c = str(today - timedelta(days=today.weekday()))
-        return [s for s in log if s.get("date","") >= c]
-    if p == "This Month":
-        c = str(today.replace(day=1))
-        return [s for s in log if s.get("date","") >= c]
-    return log
+f1, f2, f3, f4 = st.columns([1.5, 1.4, 1.1, 1.6])
+with f1:
+    period = st.selectbox("Period", ["Last 7 days", "Last 30 days", "Last 90 days",
+                                     "Today", "All time"], index=1, key="dsh_p")
+with f2:
+    svcs = st.multiselect("Service", sorted(CH["service"].unique()),
+                          default=[], key="dsh_svc",
+                          placeholder="All services")
+with f3:
+    blds = st.multiselect("Building", [1, 2, 3], default=[], key="dsh_bld",
+                          placeholder="All")
+with f4:
+    people = st.multiselect("Housekeeper", sorted(CH["housekeeper"].unique()),
+                            default=[], key="dsh_hk",
+                            placeholder="Everyone")
 
-def agg_hk(snaps):
-    out = {}
-    for snap in snaps:
-        for hk,s in snap.get("hk",{}).items():
-            if hk not in out:
-                out[hk]={"time":0,"rooms":0,"rooms_fc":0,"rooms_ds":0,"rooms_dv":0,"days":0}
-            out[hk]["time"]     += s.get("time",0)
-            out[hk]["rooms"]    += s.get("rooms",0)
-            out[hk]["rooms_fc"] += s.get("rooms_fc",0)
-            out[hk]["rooms_ds"] += s.get("rooms_ds",0)
-            out[hk]["rooms_dv"] += s.get("rooms_dv",0)
-            out[hk]["days"]     += 1
-    return out
 
-def agg_insp(snaps):
-    out = {}
-    for snap in snaps:
-        sv = snap.get("schema_v",1)
-        for nm,s in snap.get("inspectors",{}).items():
-            rooms = s.get("rooms",0)
-            if sv < 2 and rooms == s.get("groups",0)*10:
-                rooms = 0
-            if nm not in out:
-                out[nm]={"rooms":0,"groups":0,"role":"","days":0}
-            out[nm]["rooms"]  += rooms
-            out[nm]["groups"] += s.get("groups",0)
-            out[nm]["role"]    = s.get("role","FC")
-            out[nm]["days"]   += 1
-    return out
+def _window(dates):
+    if period == "Today":
+        return [d for d in dates if d == _today]
+    if period == "All time":
+        return list(dates)
+    n = {"Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90}[period]
+    return sorted(dates, reverse=True)[:n]
 
-tab_hk, tab_insp, tab_log, tab_manage = st.tabs([
-    "Housekeepers","Inspectors","Daily Log","Manage"])
 
-# ── HK tab ────────────────────────────────────────────────────────────────────
-with tab_hk:
-    p = st.radio("Period",["Today","This Week","This Month","All Time"],horizontal=True,key="hkp")
-    snaps = filter_log(p)
-    hkd   = agg_hk(snaps)
-    nd    = len(snaps)
+keep = set(_window(ALL_DATES))
+ch = CH[CH["date"].isin(keep)].copy()
+rm = RM[RM["date"].isin(keep)].copy()
+if svcs:
+    ch = ch[ch["service"].isin(svcs)]
+    rm = rm[rm["service"].isin(svcs)]
+if people:
+    ch = ch[ch["housekeeper"].isin(people)]
+    rm = rm[rm["housekeeper"].isin(people)]
+if blds:
+    rm = rm[rm["bld"].isin(blds)]
+    ok = set(zip(rm["date"], rm["chart"]))
+    ch = ch[[t in ok for t in zip(ch["date"], ch["chart"])]]
 
-    if not hkd:
-        st.info(f"No data for {p}.")
-    else:
-        tfc = sum(v["rooms_fc"] for v in hkd.values())
-        tds = sum(v["rooms_ds"] for v in hkd.values())
-        tdv = sum(v["rooms_dv"] for v in hkd.values())
-        tot = tfc+tds+tdv
-        nh  = len(hkd)
-        avt = sum(v["time"] for v in hkd.values())//max(nh*nd,1)
+if ch.empty:
+    st.warning("Nothing matches those filters.")
+    st.stop()
 
-        st.markdown(f"""<div class="kpi-row">
-  <div class="kpi pu"><div class="val">{tot}</div><div class="lbl">Total Rooms</div>
-    <div class="sub">{nd} day(s)</div></div>
-  <div class="kpi bl"><div class="val">{tfc}</div><div class="lbl">Full Clean</div></div>
-  <div class="kpi te"><div class="val">{tds}</div><div class="lbl">Daily Service</div></div>
-  <div class="kpi am"><div class="val">{tdv}</div><div class="lbl">Dust &amp; Vac</div></div>
-  <div class="kpi"><div class="val">{nh}</div><div class="lbl">Active HKs</div></div>
-  <div class="kpi"><div class="val">{avt}m</div><div class="lbl">Avg Time/Day</div></div>
+n_days = ch["date"].nunique()
+
+# ── The numbers that matter ───────────────────────────────────────────────────
+_rooms = int(ch["rooms"].sum())
+_charts = len(ch)
+_over = int(ch["over_day"].sum())
+_avg_load = ch["minutes"].mean()
+_walk = ch["travel"].mean()
+_xb = int((ch["n_bld"] > 1).sum())
+_late = int(ch["late_outs"].sum())
+
+st.markdown(f"""<div class="kpi-row">
+  <div class="kpi pu"><div class="val">{_rooms:,}</div><div class="lbl">Rooms</div>
+    <div class="sub">{n_days} day(s) · {_rooms/max(n_days,1):.0f}/day</div></div>
+  <div class="kpi bl"><div class="val">{_charts}</div><div class="lbl">Housekeeper-days</div>
+    <div class="sub">{_charts/max(n_days,1):.1f} per day</div></div>
+  <div class="kpi {'am' if _avg_load > DAY_MINUTES else 'te'}"><div class="val">{_avg_load:.0f}m</div>
+    <div class="lbl">Average chart</div><div class="sub">the day holds {DAY_MINUTES}m</div></div>
+  <div class="kpi {'am' if _over/max(_charts,1) > .3 else ''}"><div class="val">{100*_over/max(_charts,1):.0f}%</div>
+    <div class="lbl">Over a day's work</div><div class="sub">{_over} of {_charts} charts</div></div>
+  <div class="kpi te"><div class="val">{_walk:.1f}m</div><div class="lbl">Walking per chart</div>
+    <div class="sub">{100*_xb/max(_charts,1):.0f}% cross a building</div></div>
+  <div class="kpi"><div class="val">{_late}</div><div class="lbl">Late checkouts</div>
+    <div class="sub">{ch['early_ins'].sum()} early check-ins</div></div>
 </div>""", unsafe_allow_html=True)
 
-        rows = sorted([{"HK":hk,"FC":v["rooms_fc"],"DS":v["rooms_ds"],"DV":v["rooms_dv"],
-                         "Total":v["rooms"],"Avg Time":v["time"]//max(v["days"],1),"Days":v["days"]}
-                        for hk,v in hkd.items()], key=lambda r:-r["Total"])
-        df = pd.DataFrame(rows)
 
-        st.markdown('<p class="sec">Rooms Cleaned by Service Type</p>', unsafe_allow_html=True)
-        if df["Total"].sum() == 0:
-            st.info("ℹ No room data yet. Generate a schedule and revisit.")
-        else:
-            dfc = df.sort_values("Total",ascending=True)
-            fig = go.Figure()
-            fig.add_trace(go.Bar(name="Full Clean",y=dfc["HK"],x=dfc["FC"],orientation="h",
-                marker_color=BLUE,text=[str(v) if v>0 else ""for v in dfc["FC"]],
-                textposition="inside",hovertemplate="<b>%{y}</b> FC: %{x}<extra></extra>"))
-            fig.add_trace(go.Bar(name="Daily Service",y=dfc["HK"],x=dfc["DS"],orientation="h",
-                marker_color=TEAL,text=[str(v) if v>0 else ""for v in dfc["DS"]],
-                textposition="inside",hovertemplate="<b>%{y}</b> DS: %{x}<extra></extra>"))
-            fig.add_trace(go.Bar(name="Dust & Vac",y=dfc["HK"],x=dfc["DV"],orientation="h",
-                marker_color=AMBER,text=[str(v) if v>0 else ""for v in dfc["DV"]],
-                textposition="inside",hovertemplate="<b>%{y}</b> DV: %{x}<extra></extra>"))
-            fig.update_layout(barmode="stack",height=max(300,len(dfc)*26+80),
-                margin=dict(l=10,r=60,t=30,b=10),
-                plot_bgcolor="rgba(0,0,0,0)",paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(family="DM Sans",size=12,color=_PLOT_FONT),
-                legend=dict(orientation="h",y=1.04,x=0),
-                xaxis=dict(title="Rooms",showgrid=True,gridcolor="rgba(128,128,128,.15)"),
-                yaxis=dict(showgrid=False),hovermode="y unified")
-            st.plotly_chart(fig, use_container_width=True)
+def _lay(fig, h=340, legend=True):
+    fig.update_layout(
+        height=h, margin=dict(l=10, r=20, t=28, b=10),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="DM Sans", size=12, color=_PLOT_FONT),
+        showlegend=legend,
+        legend=dict(orientation="h", y=1.12, x=0, bgcolor="rgba(0,0,0,0)"),
+        xaxis=dict(showgrid=True, gridcolor="rgba(128,128,128,.14)", zeroline=False),
+        yaxis=dict(showgrid=True, gridcolor="rgba(128,128,128,.14)", zeroline=False))
+    return fig
 
-        st.markdown('<p class="sec">Average Working Time per Day</p>', unsafe_allow_html=True)
-        dft = df.sort_values("Avg Time",ascending=True)
-        bc  = [TEAL if t>=330 else AMBER if t>=250 else RED for t in dft["Avg Time"]]
-        ft  = go.Figure(go.Bar(y=dft["HK"],x=dft["Avg Time"],orientation="h",
-            marker_color=bc,opacity=.9,text=[f"{t}m"for t in dft["Avg Time"]],
+
+t_over, t_people, t_rooms, t_today, t_manage = st.tabs(
+    ["Overview", "People", "Rooms & travel", "Today", "Manage"])
+
+# ══════════════════════════════════════════════════════════════════════ OVERVIEW
+with t_over:
+    st.markdown('<p class="sec">Can the day be done in a day?</p>', unsafe_allow_html=True)
+    st.caption("Each bar is one housekeeper's chart. The line at 330 minutes is "
+               "the working day, 10:00 to 3:30; the one at 380 is the packing cap.")
+    bins = ch["minutes"]
+    hist = go.Figure()
+    hist.add_trace(go.Histogram(
+        x=bins, nbinsx=28, marker_color=BLUE, opacity=.85,
+        hovertemplate="%{y} charts at %{x} min<extra></extra>", name="charts"))
+    hist.add_vline(x=DAY_MINUTES, line_dash="dash", line_color=AMBER,
+                   annotation_text="330m · the day", annotation_position="top")
+    hist.add_vline(x=CAP_MINUTES, line_dash="dot", line_color=RED,
+                   annotation_text="380m · cap", annotation_position="top left")
+    _lay(hist, 320, legend=False)
+    hist.update_layout(xaxis_title="minutes of cleaning on one chart",
+                       yaxis_title="charts")
+    st.plotly_chart(hist, use_container_width=True)
+
+    c1, c2 = st.columns([1.7, 1])
+    with c1:
+        st.markdown('<p class="sec">Rooms a day, by service</p>', unsafe_allow_html=True)
+        piv = rm.pivot_table(index="date", columns="service", values="room",
+                             aggfunc="count").fillna(0).sort_index()
+        f = go.Figure()
+        for s in piv.columns:
+            f.add_trace(go.Bar(x=piv.index, y=piv[s], name=s,
+                               marker_color=SVC_COL.get(s, PURPLE),
+                               hovertemplate="%{x}<br>%{y} " + s + "<extra></extra>"))
+        f.update_layout(barmode="stack")
+        _lay(f, 330)
+        st.plotly_chart(f, use_container_width=True)
+    with c2:
+        st.markdown('<p class="sec">Service mix</p>', unsafe_allow_html=True)
+        mix = rm.groupby("service")["room"].count().sort_values(ascending=False)
+        d = go.Figure(go.Pie(labels=mix.index, values=mix.values, hole=.58,
+                             marker=dict(colors=[SVC_COL.get(s, PURPLE) for s in mix.index]),
+                             textinfo="percent", sort=False,
+                             hovertemplate="%{label}<br>%{value} rooms<extra></extra>"))
+        _lay(d, 330)
+        d.update_layout(legend=dict(orientation="v", y=.5, x=1.0))
+        st.plotly_chart(d, use_container_width=True)
+
+    st.markdown('<p class="sec">Pressure on the day</p>', unsafe_allow_html=True)
+    st.caption("Rooms that cannot simply be cleaned in order: a late checkout "
+               "holds the room until the guest goes, an early check-in has to be "
+               "finished before the rest.")
+    dd = ch.groupby("date").agg(late=("late_outs", "sum"),
+                                early=("early_ins", "sum"),
+                                arriving=("arriving", "sum")).sort_index()
+    f2 = go.Figure()
+    f2.add_trace(go.Scatter(x=dd.index, y=dd["arriving"], name="arriving guest",
+                            mode="lines", line=dict(color=BLUE, width=2), fill="tozeroy",
+                            fillcolor="rgba(37,99,235,.10)"))
+    f2.add_trace(go.Scatter(x=dd.index, y=dd["late"], name="late checkout",
+                            mode="lines+markers", line=dict(color=RED, width=2)))
+    f2.add_trace(go.Scatter(x=dd.index, y=dd["early"], name="early check-in",
+                            mode="lines+markers", line=dict(color=AMBER, width=2)))
+    _lay(f2, 300)
+    st.plotly_chart(f2, use_container_width=True)
+
+# ════════════════════════════════════════════════════════════════════════ PEOPLE
+with t_people:
+    st.markdown('<p class="sec">Housekeepers</p>', unsafe_allow_html=True)
+    hk = ch[ch["housekeeper"] != "— unassigned —"]
+    if hk.empty:
+        st.info("No named housekeepers in this range.")
+    else:
+        g = hk.groupby("housekeeper").agg(
+            days=("date", "nunique"), rooms=("rooms", "sum"),
+            minutes=("minutes", "sum"), walk=("travel", "sum"),
+            over=("over_day", "sum"), cross=("n_bld", lambda s: int((s > 1).sum())),
+            floors=("n_floor", "mean")).reset_index()
+        g["per_day"] = (g["minutes"] / g["days"]).round(0)
+        g["rooms_day"] = (g["rooms"] / g["days"]).round(1)
+        g["walk_day"] = (g["walk"] / g["days"]).round(1)
+
+        s1, s2 = st.columns([1.6, 1])
+        with s1:
+            sort_by = st.selectbox(
+                "Sort by", ["Minutes per day", "Rooms per day", "Total rooms",
+                            "Days worked", "Walking per day",
+                            "Charts over a day", "Cross-building charts"],
+                key="dsh_sort")
+        with s2:
+            asc = st.toggle("Low to high", value=False, key="dsh_asc")
+        col = {"Minutes per day": "per_day", "Rooms per day": "rooms_day",
+               "Total rooms": "rooms", "Days worked": "days",
+               "Walking per day": "walk_day", "Charts over a day": "over",
+               "Cross-building charts": "cross"}[sort_by]
+        g = g.sort_values(col, ascending=asc)
+
+        st.caption("Bars are minutes of work a day. Green sits inside the "
+                   "330-minute day; amber is over it; red is past the 380 cap.")
+        gg = g.sort_values("per_day")
+        bc = [RED if v > CAP_MINUTES else AMBER if v > DAY_MINUTES else TEAL
+              for v in gg["per_day"]]
+        fb = go.Figure(go.Bar(
+            y=gg["housekeeper"], x=gg["per_day"], orientation="h",
+            marker_color=bc, text=[f"{v:.0f}m" for v in gg["per_day"]],
             textposition="outside",
-            hovertemplate="<b>%{y}</b><br>%{x} min/day<extra></extra>"))
-        ft.add_vline(x=380,line_dash="dot",line_color=RED,annotation_text="380m cap")
-        ft.add_vline(x=330,line_dash="dash",line_color=AMBER,annotation_text="330m min")
-        ft.update_layout(height=max(300,len(dft)*26+80),margin=dict(l=10,r=90,t=10,b=10),
-            plot_bgcolor="rgba(0,0,0,0)",paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="DM Sans",size=12,color=_PLOT_FONT),showlegend=False,
-            xaxis=dict(range=[0,430],showgrid=True,gridcolor="rgba(128,128,128,.15)",ticksuffix="m"),
-            yaxis=dict(showgrid=False))
-        st.plotly_chart(ft, use_container_width=True)
+            customdata=gg[["rooms_day", "days", "walk_day"]].values,
+            hovertemplate="<b>%{y}</b><br>%{x:.0f} min/day<br>"
+                          "%{customdata[0]} rooms/day<br>"
+                          "%{customdata[1]} days<br>"
+                          "%{customdata[2]} min walking/day<extra></extra>"))
+        fb.add_vline(x=DAY_MINUTES, line_dash="dash", line_color=AMBER)
+        fb.add_vline(x=CAP_MINUTES, line_dash="dot", line_color=RED)
+        _lay(fb, max(300, len(gg) * 26 + 90), legend=False)
+        fb.update_layout(xaxis=dict(ticksuffix="m", showgrid=True,
+                                    gridcolor="rgba(128,128,128,.14)"),
+                         yaxis=dict(showgrid=False))
+        st.plotly_chart(fb, use_container_width=True)
 
-        st.markdown('<p class="sec">Detail Table</p>', unsafe_allow_html=True)
-        mxt = max(int(df["Avg Time"].max()),1)
-        st.dataframe(df.rename(columns={"HK":"Housekeeper","FC":"FC Rooms","DS":"DS Rooms",
-            "DV":"DV Rooms","Total":"Total Rooms","Avg Time":"Avg Time/Day (min)","Days":"Days Active"}),
-            use_container_width=True, hide_index=True,
-            column_config={"Avg Time/Day (min)":st.column_config.ProgressColumn(
-                "Avg Time/Day",min_value=0,max_value=mxt,format="%d min")})
+        show = g.rename(columns={
+            "housekeeper": "Housekeeper", "days": "Days", "rooms": "Rooms",
+            "rooms_day": "Rooms/day", "per_day": "Minutes/day",
+            "walk_day": "Walking/day", "over": "Charts over a day",
+            "cross": "Cross-building", "floors": "Floors/chart"})[
+            ["Housekeeper", "Days", "Rooms", "Rooms/day", "Minutes/day",
+             "Walking/day", "Charts over a day", "Cross-building", "Floors/chart"]]
+        show["Floors/chart"] = show["Floors/chart"].round(1)
+        st.dataframe(show, use_container_width=True, hide_index=True,
+                     column_config={"Minutes/day": st.column_config.ProgressColumn(
+                         "Minutes/day", min_value=0,
+                         max_value=int(max(show["Minutes/day"].max(), CAP_MINUTES)),
+                         format="%d m")})
 
-# ── Inspector tab ─────────────────────────────────────────────────────────────
-with tab_insp:
-    pi  = st.radio("Period",["Today","This Week","This Month","All Time"],horizontal=True,key="ip")
-    si  = filter_log(pi)
-    id_ = agg_insp(si)
-    ndi = len(si)
-
-    if not id_:
-        st.info(f"No data for {pi}.")
+    st.markdown('<p class="sec">Inspectors</p>', unsafe_allow_html=True)
+    ins = ch[ch["inspector"] != "— none —"]
+    if ins.empty:
+        st.info("No inspectors recorded in this range.")
     else:
-        tir = sum(v["rooms"]  for v in id_.values())
-        tig = sum(v["groups"] for v in id_.values())
-        ni  = len(id_)
-        ari = tir//max(ni*ndi,1)
+        gi = ins.groupby("inspector").agg(
+            days=("date", "nunique"), charts=("chart", "count"),
+            rooms=("rooms", "sum"),
+            people=("housekeeper", "nunique")).reset_index()
+        gi["charts_day"] = (gi["charts"] / gi["days"]).round(1)
+        gi["rooms_day"] = (gi["rooms"] / gi["days"]).round(1)
+        gi = gi.sort_values("rooms", ascending=False)
+        st.dataframe(gi.rename(columns={
+            "inspector": "Inspector", "days": "Days", "charts": "Charts",
+            "charts_day": "Charts/day", "rooms": "Rooms",
+            "rooms_day": "Rooms/day", "people": "Housekeepers covered"}),
+            use_container_width=True, hide_index=True)
 
+# ═══════════════════════════════════════════════════════════════ ROOMS & TRAVEL
+with t_rooms:
+    st.markdown('<p class="sec">Where the work is</p>', unsafe_allow_html=True)
+    st.caption("Rooms cleaned, by building and level. Building 1 has no rooms on "
+               "level 1 and building 2 none on Plaza or Terrace — those gaps are "
+               "the lobby, the pool and the car parks.")
+    lv_order = [l for l in pmap.LEVELS]
+    hm = rm[rm["bld"] > 0].pivot_table(index="level", columns="bld", values="room",
+                                       aggfunc="count")
+    hm = hm.reindex([l for l in lv_order if l in hm.index])
+    if not hm.empty:
+        fh = go.Figure(go.Heatmap(
+            z=hm.values, x=["Building %d" % c for c in hm.columns], y=hm.index,
+            colorscale=[[0, "rgba(37,99,235,.06)"], [1, BLUE]],
+            hovertemplate="%{x} · %{y}<br>%{z} rooms<extra></extra>",
+            text=hm.values, texttemplate="%{text:.0f}",
+            colorbar=dict(title="rooms")))
+        _lay(fh, 360, legend=False)
+        fh.update_layout(yaxis=dict(autorange="reversed", showgrid=False),
+                         xaxis=dict(showgrid=False))
+        st.plotly_chart(fh, use_container_width=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown('<p class="sec">Walking, by service</p>', unsafe_allow_html=True)
+        st.caption("Minutes a chart costs in corridor, lift and bridge.")
+        tv = ch.groupby("service").agg(walk=("travel", "mean"),
+                                       n=("chart", "count")).reset_index()
+        tv = tv.sort_values("walk")
+        ftv = go.Figure(go.Bar(
+            y=tv["service"], x=tv["walk"].round(1), orientation="h",
+            marker_color=[SVC_COL.get(s, PURPLE) for s in tv["service"]],
+            text=[f"{v:.1f}m" for v in tv["walk"]], textposition="outside",
+            customdata=tv[["n"]].values,
+            hovertemplate="<b>%{y}</b><br>%{x:.1f} min/chart<br>"
+                          "%{customdata[0]} charts<extra></extra>"))
+        _lay(ftv, 300, legend=False)
+        ftv.update_layout(xaxis=dict(ticksuffix="m"), yaxis=dict(showgrid=False))
+        st.plotly_chart(ftv, use_container_width=True)
+    with c2:
+        st.markdown('<p class="sec">How scattered a chart is</p>', unsafe_allow_html=True)
+        st.caption("Buildings on one chart. Two and three do not touch — those "
+                   "charts cross building 1 twice.")
+        sc = ch["n_bld"].value_counts().sort_index()
+        fsc = go.Figure(go.Bar(
+            x=[f"{i} building" + ("s" if i > 1 else "") for i in sc.index],
+            y=sc.values,
+            marker_color=[TEAL, AMBER, RED][:len(sc)],
+            text=sc.values, textposition="outside",
+            hovertemplate="%{x}<br>%{y} charts<extra></extra>"))
+        _lay(fsc, 300, legend=False)
+        st.plotly_chart(fsc, use_container_width=True)
+
+    st.markdown('<p class="sec">The rooms that come up most</p>', unsafe_allow_html=True)
+    top = (rm.groupby(["room", "service"]).agg(times=("date", "count"),
+                                               minutes=("minutes", "mean"))
+           .reset_index().sort_values("times", ascending=False).head(40))
+    top["minutes"] = top["minutes"].round(0)
+    st.dataframe(top.rename(columns={"room": "Room", "service": "Service",
+                                     "times": "Times scheduled",
+                                     "minutes": "Minutes"}),
+                 use_container_width=True, hide_index=True)
+
+# ═════════════════════════════════════════════════════════════════════════ TODAY
+with t_today:
+    st.markdown('<p class="sec">Today on the floor</p>', unsafe_allow_html=True)
+    try:
+        statuses = db.get_room_statuses()
+    except Exception:
+        statuses = {}
+    today_rooms = RM[RM["date"] == _today]
+    if today_rooms.empty:
+        st.info("No schedule stored for today yet.")
+    else:
+        marked = {k: _rst.normalise(v.get("status")) for k, v in statuses.items()}
+        done_set = {_rst.DONE, _rst.INSPECTED, _rst.ALREADY_CLEAN}
+        n_tot = len(today_rooms)
+        n_marked = sum(1 for r in today_rooms["room"] if r in marked)
+        n_done = sum(1 for r in today_rooms["room"] if marked.get(r) in done_set)
+        n_insp = sum(1 for r in today_rooms["room"]
+                     if marked.get(r) == _rst.INSPECTED)
         st.markdown(f"""<div class="kpi-row">
-  <div class="kpi pu"><div class="val">{tir}</div><div class="lbl">Rooms Inspected</div>
-    <div class="sub">{ndi} day(s)</div></div>
-  <div class="kpi te"><div class="val">{tig}</div><div class="lbl">Groups Inspected</div></div>
-  <div class="kpi"><div class="val">{ni}</div><div class="lbl">Active Inspectors</div></div>
-  <div class="kpi am"><div class="val">{ari}</div><div class="lbl">Avg Rooms/Insp/Day</div></div>
+  <div class="kpi pu"><div class="val">{n_tot}</div><div class="lbl">Rooms today</div></div>
+  <div class="kpi bl"><div class="val">{n_done}</div><div class="lbl">Cleaned</div>
+    <div class="sub">{100*n_done/max(n_tot,1):.0f}% of the day</div></div>
+  <div class="kpi te"><div class="val">{n_insp}</div><div class="lbl">Inspected</div></div>
+  <div class="kpi"><div class="val">{n_tot-n_marked}</div><div class="lbl">Not yet marked</div></div>
 </div>""", unsafe_allow_html=True)
 
-        RCOL = {"RQS1":AMBER,"RQS2":TEAL,"FC":PURPLE}
-        RLBL = {"RQS1":"RQS1","RQS2":"RQS2","FC":"Full Clean"}
-        ri   = sorted([{"Inspector":nm,"Rooms":v["rooms"],"Groups":v["groups"],
-                         "Role":RLBL.get(v["role"],v["role"]),"Days":v["days"],
-                         "Avg/Day":v["rooms"]//max(v["days"],1)}
-                        for nm,v in id_.items()], key=lambda r:-r["Rooms"])
-        dfi  = pd.DataFrame(ri)
+        prog = (today_rooms.assign(
+            state=[_rst.META.get(marked.get(r), ("Waiting to clean",))[0]
+                   if r in marked else "Not marked"
+                   for r in today_rooms["room"]])
+            .groupby(["housekeeper", "state"])["room"].count().unstack(fill_value=0))
+        fpr = go.Figure()
+        for s in prog.columns:
+            meta = next((v for v in _rst.META.values() if v[0] == s), None)
+            fpr.add_trace(go.Bar(y=prog.index, x=prog[s], name=s, orientation="h",
+                                 marker_color=meta[2] if meta else "#cbd5e1"))
+        fpr.update_layout(barmode="stack")
+        _lay(fpr, max(280, len(prog) * 30 + 90))
+        fpr.update_layout(yaxis=dict(showgrid=False))
+        st.plotly_chart(fpr, use_container_width=True)
 
-        st.markdown('<p class="sec">Rooms Inspected</p>', unsafe_allow_html=True)
-        if dfi["Rooms"].sum() == 0:
-            st.info("ℹ Inspector room counts are 0. Re-generate the schedule and revisit.")
-        else:
-            dic = dfi.sort_values("Rooms",ascending=True)
-            cr  = [RCOL.get(next((v["role"] for nm,v in id_.items() if nm==r),"FC"),PURPLE)
-                   for r in dic["Inspector"]]
-            fi2 = go.Figure(go.Bar(y=dic["Inspector"],x=dic["Rooms"],orientation="h",
-                marker_color=cr,opacity=.9,text=dic["Rooms"],textposition="outside",
-                customdata=dic[["Groups","Role"]].values,
-                hovertemplate="<b>%{y}</b><br>Rooms: %{x}<br>Groups: %{customdata[0]}<br>Role: %{customdata[1]}<extra></extra>"))
-            fi2.update_layout(height=max(280,len(dic)*30+80),margin=dict(l=10,r=60,t=10,b=10),
-                plot_bgcolor="rgba(0,0,0,0)",paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(family="DM Sans",size=12,color=_PLOT_FONT),showlegend=False,
-                xaxis=dict(title="Rooms Inspected",showgrid=True,gridcolor="rgba(128,128,128,.15)"),
-                yaxis=dict(showgrid=False))
-            st.plotly_chart(fi2, use_container_width=True)
+        if n_marked < n_tot * 0.5:
+            st.caption("Live marking is still being taken up — most of today's "
+                       "rooms have not been marked on a phone yet, so this is a "
+                       "picture of what has been recorded, not of the floor.")
 
-        mxr = max(int(dfi["Rooms"].max()),1)
-        st.dataframe(dfi,use_container_width=True,hide_index=True,
-            column_config={"Rooms":st.column_config.ProgressColumn(
-                "Rooms Inspected",min_value=0,max_value=mxr,format="%d")})
-
-# ── Daily Log tab ─────────────────────────────────────────────────────────────
-with tab_log:
-    st.markdown('<p class="sec">Schedule History</p>', unsafe_allow_html=True)
-    for snap in sorted(log, key=lambda s:s.get("date",""), reverse=True):
-        d = snap.get("date","")
-        is_today = (d == str(today))
-        nr=snap.get("total_rooms",0); ng=snap.get("n_groups",0)
-        nh2=len(snap.get("hk",{})); ni2=len(snap.get("inspectors",{}))
-        lbl = f"{' TODAY' if is_today else ''} {d} · {nr} rooms · {ng} groups · {nh2} HKs · {ni2} inspectors"
-        with st.expander(lbl, expanded=is_today):
-            c1,c2 = st.columns(2)
-            with c1:
-                if snap.get("hk"):
-                    st.markdown("**Housekeepers**")
-                    st.dataframe(pd.DataFrame([
-                        {"Name":k,"FC":v.get("rooms_fc",0),"DS":v.get("rooms_ds",0),
-                         "DV":v.get("rooms_dv",0),"Total":v.get("rooms",0),"Time":v.get("time",0)}
-                        for k,v in snap["hk"].items()
-                    ]).sort_values("Total",ascending=False),use_container_width=True,hide_index=True)
-            with c2:
-                if snap.get("inspectors"):
-                    st.markdown("**Inspectors**")
-                    st.dataframe(pd.DataFrame([
-                        {"Name":k,"Rooms":v.get("rooms",0),"Groups":v.get("groups",0),"Role":v.get("role","")}
-                        for k,v in snap["inspectors"].items()
-                    ]).sort_values("Rooms",ascending=False),use_container_width=True,hide_index=True)
-
-# ── Manage tab ────────────────────────────────────────────────────────────────
-with tab_manage:
-    st.markdown('<p class="sec">Data Management</p>', unsafe_allow_html=True)
-    m1,m2 = st.columns(2)
+# ════════════════════════════════════════════════════════════════════════ MANAGE
+with t_manage:
+    st.markdown('<p class="sec">Data</p>', unsafe_allow_html=True)
+    m1, m2 = st.columns(2)
     with m1:
-        st.markdown("** Export as CSV**")
-        ar = []
-        for snap in log:
-            for hk,s in snap.get("hk",{}).items():
-                ar.append({"Date":snap["date"],"Type":"HK","Name":hk,
-                    "Time":s.get("time",0),"Total":s.get("rooms",0),
-                    "FC":s.get("rooms_fc",0),"DS":s.get("rooms_ds",0),"DV":s.get("rooms_dv",0)})
-            for nm,s in snap.get("inspectors",{}).items():
-                ar.append({"Date":snap["date"],"Type":"Inspector","Name":nm,
-                    "Rooms":s.get("rooms",0),"Groups":s.get("groups",0),"Role":s.get("role","")})
-        if ar:
-            csv = pd.DataFrame(ar).to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV",data=csv,
-                file_name="schedule_history.csv",mime="text/csv",use_container_width=True)
+        st.markdown("**Export**")
+        st.download_button("Charts (CSV)", data=ch.to_csv(index=False).encode("utf-8"),
+                           file_name="charts.csv", mime="text/csv",
+                           use_container_width=True)
+        st.download_button("Rooms (CSV)", data=rm.to_csv(index=False).encode("utf-8"),
+                           file_name="rooms.csv", mime="text/csv",
+                           use_container_width=True)
+        st.caption("Both follow the filters above.")
     with m2:
         if auth.can("can_delete_data"):
-            st.markdown("** Delete a Day**")
-            dd = st.selectbox("Date",["— select —"]+all_dates)
-            if st.button("Delete",type="secondary") and dd != "— select —":
-                db.delete_snapshot(dd); get_log.clear()
+            st.markdown("**Delete a day**")
+            dd = st.selectbox("Date", ["— select —"] + list(ALL_DATES))
+            if st.button("Delete", type="secondary") and dd != "— select —":
+                db.delete_snapshot(dd)
+                get_log.clear()
+                load_history.clear()
                 st.success(f"Deleted {dd}. Refresh to update.")
         else:
             st.info("Only admins can delete data.")
-    st.caption(f"Records: {len(log)} day(s)")
+    st.caption(f"{len(CH)} charts across {CH['date'].nunique()} stored days · "
+               f"{len(log)} snapshot record(s)")

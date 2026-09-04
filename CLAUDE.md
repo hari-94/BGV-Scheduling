@@ -1,4 +1,4 @@
-# BGV Scheduling — housekeeping at Grand Timber Lodge, Breckenridge
+# BGV Scheduling — housekeeping at Grand Colorado on Peak Eight, Breckenridge
 
 A Streamlit app that turns a morning's room list into cleaning charts, hands each
 housekeeper her rooms on a phone, and lets an RQS (inspector) watch and correct the
@@ -29,7 +29,7 @@ several of them read the *real* schedule to test against a real day.
 | `cleaning_scheduler.py` | 6200 | the entry point and most of the app — see the section map below |
 | `pages/3_Roster_Import.py` | 1750 | the weekly staff sheet: upload, diff, week/month views, planning |
 | `pages/5_My_Rooms.py` | 800 | the phone page: a housekeeper's rooms, and an RQS's whole team |
-| `pages/1_Dashboard.py` | 510 | performance history |
+| `pages/1_Dashboard.py` | 715 | what the schedules show: load, people, travel |
 | `pages/2_Admin.py` | 410 | accounts and sign-in history |
 | `pages/4_My_Home.py` | 370 | one person's own week, from the staff sheet |
 | `roster_import.py` | 1600 | the staff sheet parser — no Streamlit, so it is testable alone |
