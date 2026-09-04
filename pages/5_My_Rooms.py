@@ -140,9 +140,11 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .tkchip.late{background:#fde8ef;color:#9b1c48}
 /* Finished rooms recede rather than vanish -- still countable, no longer
    competing with what is left. */
-.tk.gone{filter:saturate(.5)}
-.tk.gone .tkroom,.tk.gone .tkguest{opacity:.5}
-.tk.gone .tkroom{text-decoration:line-through;text-decoration-thickness:1px}
+/* A finished room goes darker rather than crossed out. A line through a room
+   number makes it harder to read at the moment it most needs checking -- when
+   somebody asks which rooms are done. */
+.tk.gone{filter:saturate(1.25) brightness(.965)}
+.tk.gone .tkroom{color:#0b1b12}
 /* The whole card lights up in the colour it has just become, then settles.
    A dot changing colour on a phone held at arm's length is easy to miss; a
    card that flushes is not, and it says which room took the change when six
@@ -205,13 +207,18 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .dlgnow{margin-left:auto;border-radius:99px;padding:3px 11px;font-size:.7rem;
   font-weight:800;letter-spacing:.03em}
 .dlgdot{width:14px;height:14px;border-radius:50%;margin:0 auto}
-/* A housekeeper's rooms sit under their name, indented, always open. */
-.tmhead{display:flex;align-items:center;gap:10px;margin:16px 0 6px}
-.tmname{font-weight:800;font-size:.92rem;color:#16202e}
-.tmcount{font-size:.76rem;color:#5b6b7e;font-variant-numeric:tabular-nums}
-.tmbar{flex:1;height:6px;border-radius:99px;background:#e6ebf2;overflow:hidden}
-.tmbar i{display:block;height:100%;border-radius:99px;
+/* One bar per housekeeper, under the one that counts everybody. Tight enough
+   that a floor of six fits above the rooms rather than pushing them down. */
+.pgwrap{border:1px solid #e6ebf2;border-radius:12px;padding:9px 12px;
+  background:#fbfcfe;margin:0 0 12px}
+.pgrow{display:flex;align-items:center;gap:10px;padding:3px 0}
+.pgname{font-size:.8rem;font-weight:700;color:#16202e;min-width:112px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pgbar{flex:1;height:7px;border-radius:99px;background:#e6ebf2;overflow:hidden}
+.pgbar i{display:block;height:100%;border-radius:99px;
   background:linear-gradient(90deg,#2f9169,#46b184);transition:width .6s ease}
+.pgnum{font-size:.74rem;color:#5b6b7e;font-variant-numeric:tabular-nums;
+  min-width:44px;text-align:right}
 .mrbar.sm{height:6px;margin:0 0 8px}
 .mrteam{margin:18px 0 8px;font-size:.8rem;color:#42536a;
   border-top:1px solid #e6ebf2;padding-top:12px}
@@ -548,7 +555,7 @@ def _save_note(code, g, owner, txt):
         st.session_state["mr_error"] = code
 
 
-def _room_row(g, r, key_prefix, owner, editable=True):
+def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
     """One room, as a line you can act on without reading twice."""
     code = str(r.get("room", ""))
     rec = statuses.get(code) or {}
@@ -582,7 +589,7 @@ def _room_row(g, r, key_prefix, owner, editable=True):
             f'<div class="tkguest">{e(guest) or "—"}</div>'
             + (f'<div class="tkarr">→ {e(arriving)}</div>' if arriving else "")
             + f'<div class="tkfoot">{chips}'
-            f'<span class="tkrqs">👤 {e(insp) or "—"}</span></div>'
+            f'<span class="tkrqs">{"🧹 " + e(owner) if show_owner else "👤 " + (e(insp) or "—")}</span></div>'
             f'</div>'
             f'<div class="tkdot" style="background:{accent}"></div>'
             f'</div>', unsafe_allow_html=True)
@@ -591,46 +598,33 @@ def _room_row(g, r, key_prefix, owner, editable=True):
             _menu(code, g, owner, key_prefix, cur)
 
 
-for _g, _r in sorted(my_rooms, key=lambda x: str(x[1].get("room", ""))):
-    _room_row(_g, _r, "mr", mine)
-
-
 # ── an RQS sees their whole team, and can mark for them ──────────────────────
 if _my_team:
-    st.markdown(f'<div class="mrteam"><b>{len(_my_team)}</b> '
+    # A bar for each of them, merged under the one that counts everybody, so
+    # the whole floor is legible in a glance: how far along in total, and who
+    # is behind. The rooms then run as one list -- grouping them under names
+    # meant scrolling past a finished person to reach an unfinished one.
+    st.markdown(f'<div class="mrteam">{len(_my_team)} '
                 f'{T("rooms.team_note")}</div>', unsafe_allow_html=True)
+    _bars = ""
     for _hk in _my_team:
-        _hk_charts = [g for g in charts if g.get("housekeeper") == _hk]
-        _hk_rooms = [(g, r) for g in _hk_charts for r in (g.get("rooms") or [])]
-        _hk_done = sum(1 for _g, r in _hk_rooms
-                       if _rst.is_clean((statuses.get(str(r.get("room", "")))
-                                         or {}).get("status")))
-        _pct = int(round(100 * _hk_done / max(len(_hk_rooms), 1)))
-        # Always open. A supervisor walking the floor wants the rooms in front
-        # of them, not a row of closed drawers to remember to open.
-        st.markdown(
-            f'<div class="tmhead"><span class="tmname">{e(_hk)}</span>'
-            f'<span class="tmcount">{_hk_done}/{len(_hk_rooms)}</span>'
-            f'<span class="tmbar"><i style="width:{_pct}%"></i></span></div>',
-            unsafe_allow_html=True)
-        with st.container():
-            _left = [(g, r) for g, r in _hk_rooms
-                     if not _rst.is_clean((statuses.get(str(r.get("room", "")))
-                                           or {}).get("status"))]
-            if _left and st.button(T("rooms.mark_rest"), key=f"allrest_{_hk}",
-                                   use_container_width=True):
-                _snap = None
-                for g, r in _left:
-                    try:
-                        db.upsert_room_status(str(r.get("room", "")), {
-                            "status": CLEANED, "housekeeper": _hk,
-                            "group_label": g.get("label", ""),
-                            "inspector": g.get("inspector", "") or "",
-                            "cleaned_at": clock.stamp(),
-                            "updated_by": me_user or me_display})
-                    except Exception as ex:
-                        print(f"[my_rooms] bulk mark failed: {ex}")
-                st.rerun()
-            for _g2, _r2 in sorted(_hk_rooms,
-                                   key=lambda x: str(x[1].get("room", ""))):
-                _room_row(_g2, _r2, f"t{_hk}", _hk)
+        _rs = [r for g in charts if g.get("housekeeper") == _hk
+               for r in (g.get("rooms") or [])]
+        _dn = sum(1 for r in _rs
+                  if _rst.is_clean((statuses.get(str(r.get("room", "")))
+                                    or {}).get("status")))
+        _pc = int(round(100 * _dn / max(len(_rs), 1)))
+        _bars += (f'<div class="pgrow"><span class="pgname">{e(_hk)}</span>'
+                  f'<span class="pgbar"><i style="width:{_pc}%"></i></span>'
+                  f'<span class="pgnum">{_dn}/{len(_rs)}</span></div>')
+    st.markdown(f'<div class="pgwrap">{_bars}</div>', unsafe_allow_html=True)
+
+# One list, ordered by housekeeper then room, so a person's rooms still sit
+# together without a heading between them.
+_flat = sorted(shown_rooms,
+               key=lambda x: (str(x[0].get("housekeeper", "")),
+                              str(x[1].get("room", ""))))
+_mixed = len({g.get("housekeeper") for g, _ in _flat}) > 1
+for _g, _r in _flat:
+    _room_row(_g, _r, "mr", _g.get("housekeeper") or mine,
+              show_owner=_mixed)
