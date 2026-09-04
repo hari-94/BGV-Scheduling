@@ -96,6 +96,12 @@ housekeeper above their rooms; the per-card start time is the `when` argument to
 ## The property page
 `pages/6_Property.py` — gated on `can_view_insp_tab` (admin + RQS).
 
+Two views behind one toggle: the 3-D model, and `_plan_html` — a flat plan per
+building and level, absolutely positioned from the same plate coordinates. The
+flat one exists because a solid hides things: use it to read every label at
+once. Room labels in 3-D go on the **outward-facing side** of a box, never the
+lid — a lid is hidden by the level above it, which is every level but the top.
+
 Three.js from cdnjs, fed by `pmap.layout(codes)`, `pmap.bridge_spans()`,
 `pmap.facilities(levels)` and `pmap.service_cores(levels)`.
 

@@ -11,7 +11,7 @@ actually crosses — the topology is exact. The dimensions are proportions taken
 off the plans, which carry no measurements, so it is not a survey.
 """
 import streamlit as st
-import sys, os, json
+import sys, os, json, collections
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, i18n
 import property_map as pmap
@@ -86,6 +86,7 @@ with c1:
                           T("prop.by_building")],
                          horizontal=True, key="prop_colour")
 with c2:
+    flat = st.toggle(T("prop.flat"), value=False, key="prop_flat")
     show_extras = st.toggle(T("prop.show_amenities"), value=True, key="prop_extras")
     if st.button(T("prop.refresh"), use_container_width=True):
         st.session_state["prop_gen"] = st.session_state.get("prop_gen", 0) + 1
@@ -264,37 +265,42 @@ function mat(hex, op){
    reprojected every frame is what makes a page like this crawl on a phone,
    and because a label stuck to the box cannot drift off it. */
 const labelCache = {};
-function labelMat(code, svc, hex, forceDark){
-  const k = code+"|"+svc+"|"+hex+"|"+(forceDark||0);
+function labelMat(code, svc, hex, forceDark, square){
+  const k = code+"|"+svc+"|"+hex+"|"+(forceDark||0)+"|"+(square||0);
   if(labelCache[k]) return labelCache[k];
+  /* A side face is about as tall as it is wide; a lid is twice as wide as it
+     is deep. Using one canvas shape for both stretched the text on whichever
+     it was not drawn for. */
+  const W = 512, H = square ? 512 : 256;
   const c = document.createElement("canvas");
-  c.width = 512; c.height = 256;   /* generous, so text stays sharp zoomed in */
+  c.width = W; c.height = H;
   const g = c.getContext("2d");
-  g.fillStyle = hex; g.fillRect(0,0,512,256);
+  g.fillStyle = hex; g.fillRect(0,0,W,H);
   const col = new THREE.Color(hex);
   const lum = 0.2126*srgb(col.r) + 0.7152*srgb(col.g) + 0.0722*srgb(col.b);
   g.fillStyle = (forceDark || lum > 0.34) ? "#15202e" : "#ffffff";
   g.textAlign = "center";
   const mono = /^[0-9]{4}[A-Z]?$/.test(code);
   /* shrink to fit rather than spill: "Housekeeping office" is not a room code */
-  let size = mono ? 124 : 92;
+  let size = mono ? 132 : 100;
   do {
     g.font = "bold "+size+"px " +
       (mono ? "ui-monospace,Menlo,Consolas,monospace"
             : "system-ui,-apple-system,'Segoe UI',sans-serif");
-    if(g.measureText(code).width <= 470) break;
+    if(g.measureText(code).width <= W-42) break;
     size -= 6;
   } while(size > 34);
-  g.fillText(code, 256, svc ? 132 : 168);
+  const mid = H/2;
+  g.fillText(code, W/2, svc ? mid + size*0.16 : mid + size*0.36);
   if(svc){
     g.globalAlpha = 0.72;
-    g.font = "bold 80px system-ui,-apple-system,sans-serif";
-    g.fillText(svc, 256, 224);
+    g.font = "bold "+Math.round(size*0.62)+"px system-ui,-apple-system,sans-serif";
+    g.fillText(svc, W/2, mid + size*0.98);
     g.globalAlpha = 1;
   }
   const t = new THREE.CanvasTexture(c);
   t.anisotropy = 8;
-  const m = new THREE.MeshLambertMaterial({map:t});
+  const m = new THREE.MeshLambertMaterial({map:t, transparent:true});
   labelCache[k] = m;
   return m;
 }
@@ -316,9 +322,23 @@ DATA.boxes.forEach(b=>{
     z = DATA.hallD*0.5 + b.side * (HALF_HALL + d*0.5);
   }
   const plain = mat(b.colour, b.on_chart ? 0.96 : 0.55);
-  const top = labelMat(b.code, b.svc_short, b.colour);
-  /* BoxGeometry material order is +X -X +Y -Y +Z -Z; only the lid is lettered */
-  const m = new THREE.Mesh(geo, [plain,plain,top,plain,plain,plain]);
+  const face = labelMat(b.code, b.svc_short, b.colour, 0, 1);
+  /* The number goes on the OUTWARD-FACING SIDE, not the lid. A lid is hidden
+     the moment another level sits above it, which is every level but the top
+     one -- the labels were invisible on all six floors that matter. The side
+     a room faces is the side it is on: north rooms show on -Z, south rooms on
+     +Z, and an end wing shows on whichever end of the building it sits at.
+     BoxGeometry material order is +X -X +Y -Y +Z -Z. */
+  const mid = (minX + maxX) / 2;
+  let mats6;
+  if(b.wing){
+    mats6 = (b.x > mid) ? [face,plain,plain,plain,plain,plain]
+                        : [plain,face,plain,plain,plain,plain];
+  } else {
+    mats6 = (b.side > 0) ? [plain,plain,plain,plain,face,plain]
+                         : [plain,plain,plain,plain,plain,face];
+  }
+  const m = new THREE.Mesh(geo, mats6);
   m.position.set(b.x, b.y, z);
   m.castShadow = true; m.receiveShadow = true;
   m.userData = b;
@@ -353,8 +373,11 @@ const FAC = {
   const plain = mat(spec.c, isAmenity ? 0.42 : 0.95);
   let mats6 = plain;
   if(spec.label && w > DATA.doorW*0.7){
-    const top = labelMat(f.label, "", spec.c, isAmenity ? 1 : 0);
-    mats6 = [plain,plain,top,plain,plain,plain];
+    /* both long sides, so a service point reads from whichever side of the
+       building you have turned towards -- these sit in the middle of the
+       plate, not on an outward edge like a room */
+    const face = labelMat(f.label, "", spec.c, isAmenity ? 1 : 0, 1);
+    mats6 = [plain,plain,plain,plain,face,face];
   }
   const m = new THREE.Mesh(geo, mats6);
   /* Anything past the south row -- the service lift, the chute, the refill
@@ -564,7 +587,124 @@ size();
 </script>
 """
 
-components.html(HTML.replace("__PAYLOAD__", payload), height=640, scrolling=False)
+def _ink(hexcol):
+    """Dark or white text, whichever actually reads on this colour."""
+    h = hexcol.lstrip("#")
+    try:
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return "#15202e"
+
+    def lin(c):
+        c /= 255.0
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+    return "#15202e" if lum > 0.34 else "#ffffff"
+
+
+def _plan_html():
+    """The same property flat, every label readable without turning anything.
+
+    The model answers "how do these buildings join up"; this answers "what is
+    on level 3 of building 2 right now", which is the question somebody has
+    when they are standing at a desk with a radio in their hand.
+    """
+    per_bld = collections.defaultdict(lambda: collections.defaultdict(list))
+    for b in boxes:
+        per_bld[b["bld"]][b["level"]].append(b)
+    fac_by = collections.defaultdict(lambda: collections.defaultdict(list))
+    for f in facils:
+        fac_by[f["bld"]][f["level"]].append(f)
+
+    out = []
+    for bld in (3, 1, 2):
+        levels = set(per_bld[bld]) | set(fac_by[bld])
+        if not levels:
+            continue
+        xs = [b["x"] for b in boxes if b["bld"] == bld]
+        xs += [f["x"] for f in facils if f["bld"] == bld]
+        lo, hi = min(xs), max(xs)
+        span = max(hi - lo, 1.0)
+        width_px = int(span / pmap.DOOR_W * 82) + 170
+        out.append(f'<div class="pb"><h4>Building {bld}</h4>')
+        for lv in sorted(levels, key=lambda l: -pmap.LEVEL_IX[l]):
+            rs = per_bld[bld].get(lv, [])
+            fs = fac_by[bld].get(lv, [])
+            rows = [x["row"] for x in rs] + [x["row"] for x in fs] or [0]
+            h = int((max(rows) - min(rows)) * 62) + 74
+            cells = []
+            for r in sorted(rs, key=lambda r: r["x"]):
+                # inset, or a box centred on 0% or 100% loses half itself
+                left = 5 + (r["x"] - lo) / span * 90
+                top = (r["row"] - min(rows)) * 62
+                ink = _ink(r["colour"])
+                meta = " · ".join(x for x in (r["svc_short"],
+                                              f'{r["mins"]:.0f}m' if r["mins"] else "") if x)
+                cells.append(
+                    f'<div class="pr" style="left:{left:.2f}%;top:{top}px;'
+                    f'background:{r["colour"]};color:{ink};'
+                    f'{"opacity:.5;" if not r["on_chart"] else ""}" '
+                    f'title="{r["code"]} — {r.get("hk") or "unassigned"}">'
+                    f'<b>{r["code"]}</b>'
+                    + (f'<i>{meta}</i>' if meta else '') + '</div>')
+            for f in sorted(fs, key=lambda f: f["x"]):
+                left = 5 + (f["x"] - lo) / span * 90
+                top = (f["row"] - min(rows)) * 62
+                cells.append(
+                    f'<div class="pf k-{f["kind"]}" style="left:{left:.2f}%;'
+                    f'top:{top + 8}px">{f["label"]}</div>')
+            name = lv if lv in ("Plaza", "Terrace") else f"Level {lv}"
+            out.append(
+                f'<div class="pl"><span class="pn">{name}</span>'
+                f'<span class="pc">{len(rs)} rooms</span></div>'
+                f'<div class="pscroll"><div class="pp" '
+                f'style="height:{h}px;min-width:{width_px}px">'
+                f'{"".join(cells)}</div></div>')
+        out.append('</div>')
+    return "".join(out)
+
+
+PLAN_CSS = """
+<style>
+.pb{margin:0 0 26px}
+.pb h4{margin:0 0 8px;font-size:1rem;font-weight:800;color:#1e3350;
+  border-bottom:2px solid #d8e0ea;padding-bottom:5px}
+.pl{display:flex;align-items:baseline;gap:9px;margin:12px 0 3px}
+.pn{font-weight:800;font-size:.84rem;color:#33455c}
+.pc{font-size:.72rem;color:#8794a4}
+.pscroll{overflow-x:auto;padding-bottom:5px}
+.pp{position:relative;background:#f4f7fa;border:1px solid #e2e8f0;
+  border-radius:9px}
+.pr{position:absolute;transform:translateX(-50%);width:66px;height:50px;
+  border-radius:6px;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;box-shadow:0 1px 2px rgba(20,35,55,.14);
+  border:1px solid rgba(20,35,55,.14)}
+.pr b{font-size:.74rem;font-weight:800;font-family:ui-monospace,Menlo,monospace;
+  letter-spacing:-.01em;line-height:1.1}
+.pr i{font-size:.6rem;font-style:normal;opacity:.82;line-height:1.2;
+  white-space:nowrap}
+.pf{position:absolute;transform:translateX(-50%);font-size:.58rem;
+  font-weight:700;padding:3px 6px;border-radius:5px;white-space:nowrap;
+  background:#dfe6ee;color:#43566c;border:1px solid #cbd6e2}
+.pf.k-lift_svc{background:#334759;color:#fff;border-color:#26374a}
+.pf.k-lift_guest{background:#5a6f85;color:#fff;border-color:#4a5d71}
+.pf.k-trash{background:#7a6a55;color:#fff;border-color:#665843}
+.pf.k-laundry{background:#b06fb0;color:#fff;border-color:#965996}
+.pf.k-closet{background:#2f8f86;color:#fff;border-color:#26766e}
+.pf.k-office{background:#c2452f;color:#fff;border-color:#a53a27}
+.pf.k-breakroom{background:#c98a2e;color:#fff;border-color:#ab7426}
+.pf.k-lockers{background:#a8862f;color:#fff;border-color:#8d7027}
+.pf.k-stairs{background:#8895a5;color:#fff;border-color:#74818f}
+.pf.k-amenity{background:#e7edf3;color:#4a5c70;border-color:#d2dce6}
+</style>
+"""
+
+if flat:
+    st.markdown(PLAN_CSS + _plan_html(), unsafe_allow_html=True)
+else:
+    components.html(HTML.replace("__PAYLOAD__", payload), height=640,
+                    scrolling=False)
 
 # ---------------------------------------------------------------- legend
 def _chip(colour, label):

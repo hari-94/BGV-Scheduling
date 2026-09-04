@@ -1106,7 +1106,7 @@ def _init_state():
     for k, default in [("groups_data",None),("total_rooms",None),
                         ("inspectors_data",None),("used_hk_set",None),
                         ("last_email",None),("rqs1",""),("rqs2",""),
-                        ("priority_hks",[]),("ds_team",[])]:
+                        ("ds_team",[])]:
         if k not in st.session_state:
             st.session_state[k] = default
 
@@ -2711,7 +2711,7 @@ def _ds_pack_tight(charts, cap, n_min, rounds=400):
         if len(charts) != before: moved = True
         if not moved: break
 
-def build_all_groups(rooms, priority_hks=None):
+def build_all_groups(rooms):
     verify_rooms = [r for r in rooms if r.get("verify")]
     rooms = [r for r in rooms if not r.get("verify")]
 
@@ -2721,83 +2721,11 @@ def build_all_groups(rooms, priority_hks=None):
     dv_rooms = [r for r in rooms if r.get("service")==SVC_DV]
 
     # ── Stage 1: regular Full Clean — tidy-first, minimum housekeepers ────────
-    # (priority_hks preserved: any rooms pre-claimed by a named housekeeper are
-    # packed first via the legacy path, the rest go through the new solver.)
-    priority_groups = []
     remaining_fc = list(fc_rooms)
-    priority_hks = priority_hks or []
-    if priority_hks:
-        try: roster = st.session_state.get("hk_roster", {})
-        except: roster = {}
-        for hk_name in priority_hks:
-            home_bld = roster.get(hk_name, {}).get("building", 0)
-            pool = sorted(remaining_fc, key=lambda r:(
-                0 if r.get("bld",0)==home_bld else 1,
-                r.get("floor",0), -r.get("time",0)
-            ))
-            state = {"rooms":[], "time":0, "c140":0, "c120":0, "used":set()}
-            def can_add_p(rooms_to_add, s=state):
-                t = sum(r["time"] for r in rooms_to_add)
-                if s["time"]+t > MAX_FC: return False
-                has140 = any(r["time"]==140 for r in rooms_to_add)
-                nc140 = s["c140"]+(1 if has140 else 0)
-                nc120 = s["c120"]+sum(1 for r in rooms_to_add if r["time"]==120)
-                if nc140 > 1: return False
-                if nc140>=1 and nc120>=1 and any(r["time"]>70 for r in rooms_to_add): return False
-                cur_blds = set(r.get("bld",0) for r in s["rooms"])
-                new_blds = cur_blds | set(r.get("bld",0) for r in rooms_to_add)
-                if 2 in new_blds and 3 in new_blds: return False
-                return True
-            def add_p(rooms_to_add, s=state):
-                for r in rooms_to_add:
-                    s["rooms"].append(r); s["used"].add(id(r))
-                    s["time"] += r["time"]
-                    s["c140"] += 1 if r["time"]==140 else 0
-                    s["c120"] += 1 if r["time"]==120 else 0
-            import re as _re3
-            guest_map = {}
-            for r in pool:
-                g = _re3.sub(r'\s+', ' ', r.get("guest","").strip())
-                if g.lower() not in {"","unallocated","---","deposit, deposit","room, walk","p/u models"}:
-                    guest_map.setdefault(g,[]).append(r)
-            seen2 = set()
-            for r in pool:
-                if id(r) in state["used"]: continue
-                g = _re3.sub(r'\s+', ' ', r.get("guest","").strip())
-                if g in seen2: continue
-                seen2.add(g)
-                unit = guest_map.get(g,[r])
-                if any(id(u) in state["used"] for u in unit): continue
-                if can_add_p(unit): add_p(unit)
-                if state["time"] >= MAX_FC: break
-            if state["time"] < MAX_FC:
-                for r in sorted(pool, key=lambda r:-r["time"]):
-                    if id(r) in state["used"]: continue
-                    if can_add_p([r]): add_p([r])
-                    if state["time"] >= MAX_FC: break
-            if state["time"] < 380:
-                gap = MAX_FC - state["time"]
-                fill_pool = sorted([r for r in remaining_fc if id(r) not in state["used"]],
-                                   key=lambda r:abs(r["time"]-gap))
-                for r in fill_pool:
-                    if id(r) in state["used"]: continue
-                    if can_add_p([r]): add_p([r])
-                    if state["time"] >= MAX_FC: break
-            if state["time"] < 330:
-                for r in sorted(remaining_fc, key=lambda r:-r["time"]):
-                    if id(r) in state["used"]: continue
-                    if can_add_p([r]): add_p([r])
-                    if state["time"] >= MAX_FC: break
-            if state["rooms"]:
-                grp = mk(state["rooms"], SVC_FC)
-                grp["priority_hk"] = hk_name
-                priority_groups.append(grp)
-                used_ids = {id(r) for r in state["rooms"]}
-                remaining_fc = [r for r in remaining_fc if id(r) not in used_ids]
 
     fc_charts = solve_full_clean(remaining_fc)
     fc_groups_normal = [mk(c, SVC_FC) for c in fc_charts]
-    fc_groups = priority_groups + fc_groups_normal
+    fc_groups = fc_groups_normal
 
     # ── Stage 2: Full Clean (IH) — packed separately, inspected by RQS 2 ──────
     ih_leftover = []
@@ -2912,15 +2840,10 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
             for b in [1,2,3]:
                 if name in av.get(b,[]):
                     av[b].remove(name); return
-    # Priority HKs first
+    # Verify groups are never assigned to anybody.
     for g in groups:
-        if g.get("verify_group"): # never assign verify groups
-            assignment[g["label"]] = ""; continue
-        phk = g.get("priority_hk","")
-        if not phk: continue
-        if g.get("dv_rqs2"): assignment[g["label"]]=""; continue # DV -> RQS2 inspector
-        drop(phk)
-        assignment[g["label"]] = phk; used.add(phk)
+        if g.get("verify_group"):
+            assignment[g["label"]] = ""
     # Daily Service goes ONLY to the dedicated team when one is selected. Once
     # the team is exhausted the remaining DS charts get a numbered placeholder
     # (Need Housekeeper 1, 2, ...) instead of a name, so the gap is visible.
@@ -3300,7 +3223,6 @@ def group_card_html(g, idx):
     else:
         svc_badge = badge(svc, c["badge_bg"], c["badge_txt"], _rgba_a(c["glow"], ".25"))
     overflow_badge = badge("DS Overflow","rgba(245,158,11,.15)","#fcd34d","rgba(245,158,11,.3)") if g.get("ds_overflow") else ""
-    priority_badge = badge("Priority","rgba(234,179,8,.15)","#fde047","rgba(234,179,8,.3)") if g.get("priority_hk") else ""
     cross_badge = badge("Cross-bld","rgba(168,85,247,.15)","#d8b4fe","rgba(168,85,247,.3)") if (g.get("cross_bld") and not is_verify) else ""
 
     # How far this chart makes somebody walk, and the order that walks least.
@@ -3391,7 +3313,7 @@ def group_card_html(g, idx):
     <div style="flex:1;min-width:0">
       <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
         <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:.88rem;color:{_C["txt"]}">{title_text}</span>
-        {svc_badge} {overflow_badge} {priority_badge} {cross_badge} {walk_badge} {unassigned_badge}
+        {svc_badge} {overflow_badge} {cross_badge} {walk_badge} {unassigned_badge}
       </div>
       {meta_line}
     </div>
@@ -3522,13 +3444,12 @@ with st.sidebar:
 
     # ── Housekeepers: NO attendance/config sidebar ─────────────────────────
     # They only see their name, role, and sign-out above. Everything below
-    # (attendance, roster, RQS roles, priority HKs) is admin/rqs only.
+    # (attendance, roster, RQS roles) is admin/rqs only.
     if auth.is_housekeeper():
         present_hk = [n for n,v in st.session_state["hk_roster"].items() if v["present"]]
         present_insp = [n for n,v in st.session_state["insp_roster"].items() if v]
         rqs1 = st.session_state.get("rqs1","")
         rqs2 = st.session_state.get("rqs2","")
-        priority_hks = st.session_state.get("priority_hks",[])
         ds_team      = st.session_state.get("ds_team",[])
         groups_per_insp = 3
     else:
@@ -3821,23 +3742,9 @@ with st.sidebar:
         rqs2 = "" if rqs2_sel==RQS_NONE else rqs2_sel
         st.session_state["rqs1"] = rqs1; st.session_state["rqs2"] = rqs2
 
-        st.markdown("---")
-        groups_per_insp = st.select_slider("Groups / FC inspector", options=[3,4], value=3)
-
-        st.markdown("---")
-        st.markdown("### Priority HKs")
-        st.caption("Select HKs who need a full 380-min group (productivity recovery).")
-        if "priority_hks" not in st.session_state: st.session_state["priority_hks"] = []
-        saved_priority = [n for n in st.session_state["priority_hks"] if n in present_hk]
-        if saved_priority != st.session_state["priority_hks"]: st.session_state["priority_hks"] = saved_priority
-        st.multiselect("Priority HKs", options=present_hk, key="priority_hks",
-                       label_visibility="collapsed", placeholder="Choose HKs for priority full groups…")
-        priority_hks = st.session_state["priority_hks"]
-        if priority_hks:
-            st.markdown(f'<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;'
-                        f'padding:7px 11px;font-size:.75rem;color:#92400e">'
-                        f' <b>{len(priority_hks)}</b> HK(s): {", ".join(priority_hks)}</div>',
-                        unsafe_allow_html=True)
+        # One inspector covers three Full Clean charts. It was a slider offering
+        # three or four; four was never chosen, so it is a constant now.
+        groups_per_insp = 3
 
         st.markdown("---")
         st.markdown("### Daily Service Team")
@@ -4175,7 +4082,7 @@ if run:
                             "res_type":r.get("ResType",""),"uncertain":has_stayover,
                             "verify":needs_verify,
                         })
-                    fg = build_all_groups(rds, priority_hks=st.session_state.get("priority_hks",[]))
+                    fg = build_all_groups(rds)
                     fc_gs=[g for g in fg if g.get("service_type")==SVC_FC and not g.get("verify_group")]
                     ih_gs=[g for g in fg if g.get("service_type")==SVC_IH and not g.get("verify_group")]
                     ds_gs=[g for g in fg if g.get("service_type")==SVC_DS and not g.get("verify_group")]
@@ -4192,13 +4099,12 @@ if run:
                     # charts, so the legacy tiny-merge pass below is disabled to
                     # avoid undoing its tidy, building-coherent packing.)
                     fg=[g for g in fg if g["rooms"]]
-                    p_fc=[g for g in fg if g.get("service_type")==SVC_FC and g.get("priority_hk") and not g.get("verify_group")]
-                    n_fc=[g for g in fg if g.get("service_type")==SVC_FC and not g.get("priority_hk") and not g.get("verify_group")]
+                    n_fc=[g for g in fg if g.get("service_type")==SVC_FC and not g.get("verify_group")]
                     ih2=[g for g in fg if g.get("service_type")==SVC_IH and not g.get("verify_group")]
                     ds2=[g for g in fg if g.get("service_type")==SVC_DS and not g.get("verify_group")]
                     dv2=[g for g in fg if g.get("service_type")==SVC_DV and not g.get("verify_group")]
                     vr2=[g for g in fg if g.get("verify_group")]
-                    for g,lbl in zip(p_fc+n_fc, make_labels("FC",len(p_fc)+len(n_fc))): g["label"]=lbl
+                    for g,lbl in zip(n_fc, make_labels("FC",len(n_fc))): g["label"]=lbl
                     for g,lbl in zip(ih2, make_labels("IH",len(ih2))): g["label"]=lbl
                     for g,lbl in zip(ds2, make_labels("DS",len(ds2))): g["label"]=lbl
                     for g,lbl in zip(dv2, make_labels("DV",len(dv2))): g["label"]=lbl
