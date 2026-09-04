@@ -140,11 +140,25 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .tkchip.late{background:#fde8ef;color:#9b1c48}
 /* Finished rooms recede rather than vanish -- still countable, no longer
    competing with what is left. */
-.tk.gone{background:#fafcfa}
+.tk.gone{filter:saturate(.5)}
 .tk.gone .tkroom,.tk.gone .tkguest{opacity:.5}
 .tk.gone .tkroom{text-decoration:line-through;text-decoration-thickness:1px}
-.tk.just{animation:tkpop .55s cubic-bezier(.2,1.2,.3,1) both}
+/* The whole card lights up in the colour it has just become, then settles.
+   A dot changing colour on a phone held at arm's length is easy to miss; a
+   card that flushes is not, and it says which room took the change when six
+   of them are on screen. */
+.tk.just{animation:tkflash .95s cubic-bezier(.2,.8,.25,1) both}
 .tk.just .tkdot{animation:tkdot .6s ease both}
+@keyframes tkflash{
+  0%{background:var(--tint);box-shadow:0 0 0 4px var(--acc),
+     0 10px 26px rgba(16,26,42,.18);transform:scale(1.012)}
+  45%{background:var(--tint);box-shadow:0 0 0 2px var(--acc),
+     0 6px 16px rgba(16,26,42,.12)}
+  100%{background:#fff;box-shadow:0 1px 2px rgba(16,26,42,.05);transform:none}
+}
+/* At rest the card keeps a wash of its status, so the state reads without
+   hunting for the dot. */
+.tk{background:var(--tint,#fff)}
 .tk.working{position:relative;overflow:hidden}
 .tk.working:after{content:"";position:absolute;inset:0;pointer-events:none;
   background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.5) 50%,
@@ -155,20 +169,22 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
    and a coloured icon on the right, each row tall enough to hit without
    looking. Streamlit gives a keyed widget a st-key- class, which is the only
    handle there is on one particular widget. */
-[class*="st-key-pop_"] [data-testid="stPopoverBody"]{min-width:236px;padding:6px}
-[class*="st-key-pop_"] [data-testid="stPopoverBody"] .stButton>button{
+[data-testid="stPopoverBody"]{padding:6px}
+/* The menu floats from the circle. Nudged back over the card so it does not
+   hang off the right edge of a phone. */
+#stFloatingOverlayPortal [data-testid="stPopoverBody"]{max-width:250px}
+[data-testid="stPopoverBody"] .stButton>button{
   justify-content:space-between !important;text-align:left !important;
   font-size:.92rem !important;font-weight:600 !important;
   padding:11px 14px !important;min-height:46px !important;
   border:none !important;background:transparent !important;
   border-radius:9px !important}
-[class*="st-key-pop_"] [data-testid="stPopoverBody"] .stButton>button:hover{
+[data-testid="stPopoverBody"] .stButton>button:hover{
   background:#f2f6fb !important}
-[class*="st-key-pop_"] [data-testid="stPopoverBody"] .stButton>button:disabled{
+[data-testid="stPopoverBody"] .stButton>button:disabled{
   opacity:.45 !important}
 /* The step the room would naturally take next is the one that is filled in. */
-[class*="st-key-pop_"] [data-testid="stPopoverBody"]
-  .stButton>button[kind="primary"]{background:#eaf4ff !important;
+[data-testid="stPopoverBody"] .stButton>button[kind="primary"]{background:#eaf4ff !important;
   color:#12447e !important}
 
 /* The circle itself. */
@@ -474,8 +490,11 @@ def _menu(code, g, owner, key_prefix, cur):
     following tap landed on whatever was underneath.
     """
     gen = st.session_state.get("mr_gen", 0)
+    # Not use_container_width: that stretched the menu to the width of the row
+    # and it came out as a slab under the card. A fixed, narrow menu floats
+    # beside the circle that opened it, the way the handheld does it.
     with st.popover(_GLYPH.get(cur, "○"), use_container_width=True,
-                    key=f"pop_{key_prefix}_{code}_{gen}"):
+                    width=248, key=f"pop_{key_prefix}_{code}_{gen}"):
         for target, icon in _OPTIONS:
             if target in _rst.RQS_ONLY and not can_inspect:
                 continue
@@ -518,6 +537,7 @@ def _room_row(g, r, key_prefix, owner, editable=True):
     cur = _rst.normalise(rec.get("status"))
     bg, ink, accent = STATUS_STYLE.get(cur, STATUS_STYLE[NOT_STARTED])
     guest = str(r.get("guest", "") or "").strip()
+    _ = ink
     if guest.lower() in ("unallocated", "---", "room, walk", "deposit, deposit"):
         guest = ""
     arriving = str(r.get("arriving", "") or "").strip()
@@ -535,7 +555,7 @@ def _room_row(g, r, key_prefix, owner, editable=True):
             f'<div class="tk{" just" if code == flash else ""}'
             f'{" working" if cur == IN_PROGRESS else ""}'
             f'{" gone" if cur in (CLEANED, INSPECTED, ALREADY) else ""}" '
-            f'style="border-left-color:{accent}">'
+            f'style="border-left-color:{accent};--acc:{accent};--tint:{bg}">'
             f'<div class="tkico">{icon}</div>'
             f'<div class="tkmain">'
             f'<div class="tkline1"><span class="tkroom">{e(code)}</span>'
