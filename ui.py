@@ -167,13 +167,21 @@ CHROME_CSS = """
 [data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"])
   .stButton>button{white-space:nowrap !important;}
 
-/* On a narrow screen the bar wraps onto a second line rather than shrinking
-   the labels away. */
-@media (max-width:1100px){
-  [data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
-    flex-wrap:wrap !important;row-gap:4px !important;
-  }
+/* The bar wraps onto a second line rather than shrinking the labels away --
+   at ANY width, not just a narrow one. The columns are content-sized and the
+   links are min-width:max-content, so the row cannot shrink to fit: without
+   wrapping it simply runs off the side of the window, taking the whole page
+   with it. That is what a seventh link did on a desktop window narrower than
+   the bar's natural width. */
+[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
+  flex-wrap:wrap !important;row-gap:4px !important;max-width:100% !important;
 }
+
+/* A flex child defaults to min-width:auto, which means it refuses to go
+   narrower than its contents: one wide thing inside a column pushes the row,
+   and then the page, off the side of the window instead of being contained by
+   it. Columns are proportional here, so nothing wants that default. */
+[data-testid="stColumn"]{min-width:0 !important;}
 
 /* ── Getting the sidebar back ──
    The button that reopens a collapsed sidebar is rendered INSIDE

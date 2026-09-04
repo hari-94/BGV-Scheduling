@@ -223,6 +223,14 @@ real string.
 reopens a collapsed sidebar lives inside `[data-testid="stToolbar"]`; hiding that
 toolbar hid the button. Empty the toolbar by name instead of switching it off.
 
+**The top bar cannot shrink, so it must wrap.** Its columns are content-sized
+and the links are `min-width:max-content`, which is what stopped the labels being
+cropped mid-word — but it also means the row cannot fit itself into a narrower
+window. It used to wrap only below 1100px, so a seventh nav link ran the bar,
+and with it the whole page, off the side of a desktop browser. It wraps at every
+width now. Adding a nav item is the shape to watch: `_weights` gives `n` links
+plus four more columns.
+
 **A deploy does not reload an imported module.** Streamlit re-reads a *page* file
 on every rerun, but `import db` comes back from `sys.modules`. A process that was
 already running when a deploy lands therefore runs the **new page against the old

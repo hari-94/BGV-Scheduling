@@ -258,7 +258,20 @@ else:
 # ── The timeline ──────────────────────────────────────────────────────────────
 # Plotly draws the first row at the bottom, so everything above is sorted
 # backwards on purpose: the list then reads top-down the way it was asked for.
-labels = [f"{r}  " for r in view["room"]]
+# The axis carries the housekeeper, once per run of her rooms rather than
+# beside every bar -- the same name repeated eleven times is noise, and the
+# room number is already written on the bar itself. Each row still needs its
+# own category or plotly stacks them all into one, so the rows are keyed on a
+# hidden index and only the ticks that begin a run are given text.
+keys = [f"r{i}" for i in range(len(view))]
+names = list(view["housekeeper"])
+tickvals, ticktext = [], []
+for i, nm in enumerate(names):
+    if i == 0 or nm != names[i - 1]:
+        tickvals.append(keys[i])
+        ticktext.append(nm)
+
+labels = keys
 colours = [_rst.META[s][2] if s in _rst.META else NOT_MARKED
            for s in view["status"]]
 
@@ -272,11 +285,13 @@ fig.add_trace(go.Bar(
     marker=dict(color=colours), name="cleaning", showlegend=False,
     text=view["room"], textposition="inside", insidetextanchor="middle",
     textfont=dict(size=10, color="#ffffff"), cliponaxis=False,
-    customdata=view[["housekeeper", "guest", "state", "service", "why", "rqs"]].values,
-    hovertemplate="<b>%{y}</b> · %{customdata[3]}<br>"
-                  "%{customdata[0]} · RQS %{customdata[5]}<br>"
-                  "%{customdata[1]}<br>"
-                  "<b>%{customdata[2]}</b> · %{customdata[4]}<extra></extra>"))
+    # y is a hidden key now, so everything the tooltip says comes from here
+    customdata=view[["room", "housekeeper", "guest", "state", "service",
+                     "why", "rqs"]].values,
+    hovertemplate="<b>%{customdata[0]}</b> · %{customdata[4]}<br>"
+                  "%{customdata[1]} · RQS %{customdata[6]}<br>"
+                  "%{customdata[2]}<br>"
+                  "<b>%{customdata[3]}</b> · %{customdata[5]}<extra></extra>"))
 
 now_min = clock.now().hour * 60 + clock.now().minute
 lo = float((view["start"] - view["lead"]).min())
@@ -299,8 +314,9 @@ fig.update_layout(
     xaxis=dict(range=[lo - 8, hi + 8], tickvals=ticks,
                ticktext=[_day.hhmm(t) for t in ticks],
                showgrid=True, gridcolor="rgba(128,138,150,.20)", side="top"),
-    yaxis=dict(showgrid=False, tickfont=dict(family="DM Mono", size=10),
-               autorange=True),
+    yaxis=dict(showgrid=False, tickmode="array", tickvals=tickvals,
+               ticktext=ticktext, ticklen=0, automargin=True,
+               tickfont=dict(family="DM Sans", size=11), autorange=True),
     hoverlabel=dict(bgcolor="#16202e", font_color="#fff", bordercolor="#16202e"))
 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
