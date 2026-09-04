@@ -371,7 +371,7 @@ def _fingerprint(chs, sts, who):
                  [str(r.get("room")) for r in (g.get("rooms") or [])])
                 for g in chs if g.get("housekeeper") == who]) + \
         repr(sorted((k, _rst.normalise((v or {}).get("status")),
-                     (v or {}).get("note_at") or "")
+                     str((v or {}).get("notes") or ""))
                     for k, v in sts.items()))
     return hashlib.sha1(sig.encode("utf-8")).hexdigest()
 
@@ -566,14 +566,14 @@ def _save_note(code, g, owner, note_key):
     button is pressed, which is the only way to get what was just typed."""
     txt = str(st.session_state.get(note_key, "") or "").strip()
     try:
+        # Only columns room_status actually has. Inventing note_at and note_by
+        # made PostgREST reject the whole write, so every note typed on the
+        # floor was thrown away with an error the housekeeper could do nothing
+        # about. The table already stamps updated_at and carries updated_by.
         db.upsert_room_status(code, {
             "notes": txt, "housekeeper": owner,
             "group_label": g.get("label", ""),
-            # When, and by whom -- without these a note is just a field that
-            # quietly changed, and nobody can be told it is new.
-            "note_at": clock.stamp(),
-            "note_by": me_display or me_user,
-            "updated_by": me_user or me_display})
+            "updated_by": me_display or me_user})
         st.session_state["mr_flash"] = code
         st.session_state["mr_gen"] = st.session_state.get("mr_gen", 0) + 1
         _fresh.clear()
@@ -627,27 +627,45 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False):
 
 
 # ── an RQS sees their whole team, and can mark for them ──────────────────────
+def _local_hhmm(iso):
+    """The row's timestamp, at the property. Supabase stamps in UTC."""
+    try:
+        import datetime as _dt
+        t = _dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=_dt.timezone.utc)
+        return t.astimezone(clock.MTN).strftime("%H:%M")
+    except Exception:
+        return ""
+
+
 # ── notes from the floor ─────────────────────────────────────────────────────
 if _my_team:
     _notes = []
     for _g, _r in _team_rooms:
         _rec = statuses.get(str(_r.get("room", ""))) or {}
         if str(_rec.get("notes") or "").strip():
+            _at = str(_rec.get("updated_at") or "")
             _notes.append({
                 "room": str(_r.get("room", "")),
                 "hk": _g.get("housekeeper", ""),
                 "text": str(_rec.get("notes")).strip(),
-                "at": str(_rec.get("note_at") or ""),
-                "by": str(_rec.get("note_by") or ""),
+                "at": _at,
+                "by": str(_rec.get("updated_by") or ""),
             })
+    # A note is new when it does not say what it said last time this person
+    # read it. Comparing the words rather than a timestamp means no new column
+    # in a table somebody would have to migrate, and it survives a room being
+    # touched for some other reason -- a status change does not resurrect a
+    # note that has already been read.
     _seen = st.session_state.get("mr_note_seen")
     if _seen is None:
         try:
-            _seen = db.load_note_seen(me_user or me_display) or ""
+            _seen = db.load_note_seen(me_user or me_display) or {}
         except Exception:
-            _seen = ""
+            _seen = {}
         st.session_state["mr_note_seen"] = _seen
-    _new = [n for n in _notes if n["at"] and n["at"] > _seen]
+    _new = [n for n in _notes if _seen.get(n["room"]) != n["text"]]
     if _new:
         # Somebody wrote this while their hands were full. It should not have
         # to be found by opening rooms one at a time.
@@ -657,16 +675,17 @@ if _my_team:
             + "".join(
                 f'<div class="ntrow"><b>{e(n["room"])}</b>'
                 f'<span class="ntwho">{e(n["hk"])}'
-                f'{" · " + e(n["at"][11:16]) if len(n["at"]) > 15 else ""}</span>'
+                f'{" · " + e(_local_hhmm(n["at"])) if n["at"] else ""}</span>'
                 f'<div class="nttext">{e(n["text"])}</div></div>'
                 for n in sorted(_new, key=lambda x: x["at"], reverse=True))
             + '</div>', unsafe_allow_html=True)
         if st.button(T("rooms.notes_read"), key="btn_notes_read",
                      use_container_width=True):
-            _latest = max(n["at"] for n in _new)
-            st.session_state["mr_note_seen"] = _latest
+            _now_seen = dict(_seen)
+            _now_seen.update({n["room"]: n["text"] for n in _notes})
+            st.session_state["mr_note_seen"] = _now_seen
             try:
-                db.save_note_seen(me_user or me_display, _latest)
+                db.save_note_seen(me_user or me_display, _now_seen)
             except Exception as ex:
                 print(f"[my_rooms] could not store the read marker: {ex}")
             st.rerun()
