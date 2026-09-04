@@ -50,7 +50,7 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 .stApp{background:#f6f7f9!important;background-image:none!important;}
 html,body,[class*="css"]{font-family:'DM Sans',-apple-system,sans-serif!important;color:#16202e!important;}
-.block-container{padding-top:1.2rem!important;max-width:1320px;}
+.block-container{padding-top:1.2rem!important;max-width:97%;}
 header[data-testid="stHeader"]{background:transparent!important;height:0!important;}
 footer{visibility:hidden!important;}#MainMenu{visibility:hidden!important;}
 [data-testid="stSidebarNav"]{display:none!important;}
@@ -266,10 +266,17 @@ else:
 keys = [f"r{i}" for i in range(len(view))]
 names = list(view["housekeeper"])
 tickvals, ticktext = [], []
-for i, nm in enumerate(names):
-    if i == 0 or nm != names[i - 1]:
-        tickvals.append(keys[i])
-        ticktext.append(nm)
+i = 0
+while i < len(names):
+    j = i
+    while j + 1 < len(names) and names[j + 1] == names[i]:
+        j += 1
+    # against the middle of the person's block, not its first row: plotly draws
+    # row 0 at the bottom, so labelling the first row puts the name under the
+    # block it belongs to instead of beside it
+    tickvals.append(keys[(i + j) // 2])
+    ticktext.append(names[i])
+    i = j + 1
 
 labels = keys
 colours = [_rst.META[s][2] if s in _rst.META else NOT_MARKED
@@ -316,7 +323,8 @@ fig.update_layout(
                showgrid=True, gridcolor="rgba(128,138,150,.20)", side="top"),
     yaxis=dict(showgrid=False, tickmode="array", tickvals=tickvals,
                ticktext=ticktext, ticklen=0, automargin=True,
-               tickfont=dict(family="DM Sans", size=11), autorange=True),
+               tickfont=dict(family="DM Sans", size=14, color="#16202e"),
+               autorange=True),
     hoverlabel=dict(bgcolor="#16202e", font_color="#fff", bordercolor="#16202e"))
 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 

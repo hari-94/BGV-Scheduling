@@ -188,7 +188,11 @@ html,body,[class*="css"]{
     radial-gradient(ellipse 80% 50% at 20% -10%,rgba(99,102,241,.12) 0%,transparent 60%),
     radial-gradient(ellipse 60% 40% at 80% 100%,rgba(34,211,238,.07) 0%,transparent 55%)!important;
 }
-.block-container{padding-top:1.6rem!important;max-width:1440px!important;background:transparent!important;}
+/* Use the window. A fixed 1440 left an ultrawide screen 40% used and the
+   content sitting well right of centre, because it centres inside the main
+   area and the sidebar has already taken 340px off the left. */
+.block-container{padding-top:1.6rem!important;max-width:97%!important;
+  background:transparent!important;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-track{background:var(--bg1);}
 ::-webkit-scrollbar-thumb{background:var(--indigo);border-radius:99px;}
@@ -545,7 +549,9 @@ if _THEME == "light":
   background:#f4f5f7!important;
   background-image:none!important;
 }
-.block-container{padding-top:1.8rem!important;max-width:1360px!important;}
+/* The light theme re-states this after the block above, so both have to
+   say the same thing or the narrower one silently wins. */
+.block-container{padding-top:1.8rem!important;max-width:97%!important;}
 
 /* Page title: solid, confident slate — no gradient text, no animation flourish. */
 .pg-title{

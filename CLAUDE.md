@@ -223,13 +223,23 @@ real string.
 reopens a collapsed sidebar lives inside `[data-testid="stToolbar"]`; hiding that
 toolbar hid the button. Empty the toolbar by name instead of switching it off.
 
-**The top bar cannot shrink, so it must wrap.** Its columns are content-sized
-and the links are `min-width:max-content`, which is what stopped the labels being
-cropped mid-word — but it also means the row cannot fit itself into a narrower
-window. It used to wrap only below 1100px, so a seventh nav link ran the bar,
-and with it the whole page, off the side of a desktop browser. It wraps at every
-width now. Adding a nav item is the shape to watch: `_weights` gives `n` links
-plus four more columns.
+**A fixed `max-width` wastes a wide screen and looks broken.** The block
+container was capped at 1440px and centres inside the *main* area, which starts
+after the 340px sidebar — so on a 3440px window the content used 1360px, 40% of
+the screen, sitting 1210px from the left edge and 870px from the right. It reads
+as the page having fallen over sideways. Measured in a real browser at 1280 →
+3440: nothing ever overflowed, the content was just narrow and off-centre. The
+cap is `max-width:97%` now, which holds the margin steady at every width.
+
+Watch for the same rule stated twice. `cleaning_scheduler.py` sets
+`.block-container` at line ~194 and the light theme re-states it at ~554; the
+second one silently wins, so both have to say the same thing.
+
+**Measure the layout, do not reason about it.** Playwright against a local
+instance settles in a minute what a screenshot cannot: `document.scrollWidth`
+against `clientWidth` says whether anything really overflows, and walking every
+element's `getBoundingClientRect` names the one that does. It cost a wrong guess
+here — the top nav looked like the culprit and measurably was not.
 
 **A deploy does not reload an imported module.** Streamlit re-reads a *page* file
 on every rerun, but `import db` comes back from `sys.modules`. A process that was
