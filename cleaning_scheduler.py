@@ -19,6 +19,7 @@ st.set_page_config(
 
 # Import local modules after set_page_config
 import auth, db
+import fcpack
 import property_map as pmap
 import ui
 
@@ -2610,6 +2611,41 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP):
     if cur: tail.append(cur)
     return full + tail
 
+def _tidy_full_clean(charts):
+    """Redeal the Full Clean charts so fewer of them cross a building.
+
+    The solver picks the fewest housekeepers and then the tidiest arrangement
+    it can find at that number, but it packs the property as one pool, so a
+    chart boundary lands mid-building and the chart spills over. Building 1's
+    minutes, building 2's and building 3's each round up to a whole person on
+    their own, and often that still comes to the same total -- on which days
+    nobody need cross at all.
+
+    This never spends a person on tidiness. It repacks per building, merges
+    back down to the count the solver already reached, and if it cannot get
+    there it hands back the solver's own answer untouched. So it is either an
+    improvement or a no-op, never a cost.
+    """
+    charts = [c for c in charts if c]
+    if len(charts) < 2:
+        return charts
+    rooms = [r for c in charts for r in c]
+    try:
+        packed = fcpack.pack_full_clean(rooms, MAX_FC, lambda r: pmap.parse(
+            str(r.get("room", "")).strip().upper()), target=len(charts))
+    except Exception as ex:
+        print(f"[fc] could not repack, keeping the solver's charts: {ex}")
+        return charts
+    if len(packed) > len(charts):
+        return charts                      # a person is worth more than a tidy chart
+    if sorted(str(r.get("room")) for c in packed for r in c) !=        sorted(str(r.get("room")) for c in charts for r in c):
+        print("[fc] repack changed the room set, keeping the solver's charts")
+        return charts
+    if any(sum(r["time"] for r in c) > MAX_FC for c in packed):
+        return charts
+    return packed
+
+
 def build_all_groups(rooms):
     verify_rooms = [r for r in rooms if r.get("verify")]
     rooms = [r for r in rooms if not r.get("verify")]
@@ -2623,6 +2659,7 @@ def build_all_groups(rooms):
     remaining_fc = list(fc_rooms)
 
     fc_charts = solve_full_clean(remaining_fc)
+    fc_charts = _tidy_full_clean(fc_charts)
     fc_groups_normal = [mk(c, SVC_FC) for c in fc_charts]
     fc_groups = fc_groups_normal
 
@@ -2928,14 +2965,65 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     INSP_ROOM_MAX = 13          # an inspector can carry up to ~12-13 rooms
     INSP_CHART_MAX = max(per, 5)  # allow filling toward the room ceiling
     def _grooms(g): return len(g["rooms"])
+    # Fill each inspector a building at a time. Running straight down the whole
+    # sorted list and cutting whenever the room ceiling is reached puts the cut
+    # in the middle of a building, and the inspector either side of it carries
+    # charts on both — which is why half of all inspector-days crossed a
+    # building. A building's trailing part-batch stays its own until there are
+    # not enough inspectors to go round, and only then is it merged.
     batches = []
-    cur = []; cur_rooms = 0
+    _by_bld = {}
     for g in dedicated_fc:
-        gr = _grooms(g)
-        if cur and (cur_rooms + gr > INSP_ROOM_MAX or len(cur) >= INSP_CHART_MAX):
-            batches.append(cur); cur = []; cur_rooms = 0
-        cur.append(g); cur_rooms += gr
-    if cur: batches.append(cur)
+        _by_bld.setdefault(_primary_bld(g), []).append(g)
+    for _b in sorted(_by_bld, key=lambda b: {3: 0, 1: 1, 2: 2}.get(b, 9)):
+        cur = []; cur_rooms = 0
+        for g in _by_bld[_b]:
+            gr = _grooms(g)
+            if cur and (cur_rooms + gr > INSP_ROOM_MAX or len(cur) >= INSP_CHART_MAX):
+                batches.append(cur); cur = []; cur_rooms = 0
+            cur.append(g); cur_rooms += gr
+        if cur: batches.append(cur)
+    # More batches than inspectors: combine the lightest, and prefer a pair that
+    # shares a bridge — buildings 2 and 3 do not touch, so putting those two on
+    # one inspector is the most expensive round the property can hand out.
+    def _bset(b):
+        return {_primary_bld(g) for g in b}
+    def _brms(b):
+        return sum(len(g["rooms"]) for g in b)
+    def _hops(bs):
+        bs = sorted(x for x in bs if x in (1, 2, 3)); worst = 0
+        for i in range(len(bs)):
+            for j in range(i + 1, len(bs)):
+                worst = max(worst, 1 if pmap.BRIDGES.get(frozenset((bs[i], bs[j]))) else 2)
+        return worst
+    # Never use more inspectors than filling them straight down the list would
+    # have: keeping a building's trailing part-batch separate is worth doing
+    # when it is free and not when it costs a person, exactly as for the charts.
+    _seq, _c, _cr = 0, [], 0
+    for g in dedicated_fc:
+        _gr = _grooms(g)
+        if _c and (_cr + _gr > INSP_ROOM_MAX or len(_c) >= INSP_CHART_MAX):
+            _seq += 1; _c = []; _cr = 0
+        _c.append(g); _cr += _gr
+    if _c:
+        _seq += 1
+    _cap_batches = min(n_dedicated, _seq) if n_dedicated else _seq
+    while _cap_batches and len(batches) > _cap_batches:
+        best = None
+        for i in range(len(batches)):
+            for j in range(i + 1, len(batches)):
+                if _brms(batches[i]) + _brms(batches[j]) > INSP_ROOM_MAX:
+                    continue
+                merged = _bset(batches[i]) | _bset(batches[j])
+                key = (_hops(merged), len(merged),
+                       -(_brms(batches[i]) + _brms(batches[j])))
+                if best is None or key < best[0]:
+                    best = (key, i, j)
+        if best is None:
+            break
+        _, i, j = best
+        batches[i] = batches[i] + batches[j]
+        batches.pop(j)
     # Balance batches to reduce cross-building and floor travel. Run several full
     # passes; each pass keeps swapping charts between batches while any swap lowers
     # the combined score (which now also penalizes the single worst-travelling

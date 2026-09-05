@@ -146,7 +146,27 @@ median DS chart is exactly 460 and 87% are over 330. Either those minutes are
 nominal and badly beaten, or DS is structurally overloaded — a staffing
 question, and not one the packer should paper over.
 
-## The day
+## Full Clean charts, and who inspects them
+
+`solve_full_clean` picks the fewest housekeepers and the tidiest arrangement it
+can find at that number, but it packs the whole property as one pool, so a chart
+boundary lands mid-building and the chart spills over. `_tidy_full_clean` then
+redeals the result per building (`fcpack.pack_full_clean`), filling each chart
+from one floor before it takes another, and merges back down to the count the
+solver already reached. **It can only be free**: more charts than the solver used
+and it hands the solver's answer back untouched. Measured over every stored day —
+same 1,143 housekeepers, charts crossing a building 152 → 100, walking −2%.
+
+Building 1's minutes, building 2's and building 3's each round up to a whole
+person on their own, and on many days that still comes to the same total, which
+is why this is usually free. Forcing it always would cost about one extra
+housekeeper a day, which is why it is not forced.
+
+Inspectors are batched the same way: a building at a time, its trailing
+part-batch left alone until there are not enough inspectors, then merged
+cheapest-bridge-first. RQS rounds crossing a building 245 → 192.
+
+## The day## The day
 
 `daystart.py` decides what to clean first. The order is not a sort — it is a
 simulation of the day from ten in the morning, choosing at each step the room
