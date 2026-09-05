@@ -2636,13 +2636,18 @@ def _tidy_full_clean(charts):
     rooms = [r for c in charts for r in c]
     _pool = st.session_state.get("fc_mode") == FC_MODE_FEWEST
     try:
-        packed = fcpack.pack_full_clean(
-            rooms, MAX_FC,
-            lambda r: pmap.parse(str(r.get("room", "")).strip().upper()),
-            # No target in the pure mode: a target is what licenses a merge
-            # across buildings, and merging across buildings is the one thing
-            # that mode exists to avoid.
-            target=len(charts) if _pool else None, pool_leftovers=_pool)
+        _where = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
+        if _pool:
+            packed = fcpack.pack_full_clean(rooms, MAX_FC, _where,
+                                            target=len(charts),
+                                            pool_leftovers=True)
+        else:
+            # Floors in order, filled as they come, so a chart holds one
+            # corridor or two that touch -- never Plaza and level 4, which is
+            # what "scattered" means to somebody pushing a cart. No target: a
+            # target is what licenses a merge across buildings, and that is the
+            # one thing this mode exists to avoid.
+            packed = fcpack.pack_by_floor(rooms, MAX_FC, _where)
     except Exception as ex:
         print(f"[fc] could not repack, keeping the solver's charts: {ex}")
         return charts
@@ -3684,7 +3689,7 @@ with _inp_exp:
             [FC_MODE_PURE, FC_MODE_FEWEST],
             key="fc_mode",
             on_change=_remember_fc_mode,
-            help="Stay in one building: nobody crosses between buildings, and it may take one more housekeeper. Fewest housekeepers: each building still fills its own charts and only the rooms left over are pooled, so the few crossings there are land in one or two charts.")
+            help="Stay in one building: nobody crosses between buildings and each chart keeps to one floor, or two that touch. It may take one more housekeeper. Fewest housekeepers: each building still fills its own charts and only the rooms left over are pooled, so the few crossings there are land in one or two charts.")
         _can_gen = auth.can("can_generate")
         run = st.button("Generate", type="primary", use_container_width=True,
                         disabled=not _can_gen,

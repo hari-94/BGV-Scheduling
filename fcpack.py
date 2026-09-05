@@ -121,10 +121,20 @@ def pack_full_clean(rooms, cap, loc_of, target=None, pool_leftovers=False):
                     bins.append([]); load.append(0.0); floors_in.append(set())
                     fits = [len(bins) - 1]
                 same = [i for i in fits if lv in floors_in[i]]
-                # a chart already on this floor, fullest first so it closes out;
-                # otherwise the emptiest, which keeps the floor together
-                pick = (max(same, key=lambda i: load[i]) if same
-                        else min(fits, key=lambda i: load[i]))
+                if same:
+                    # already on this floor: the fullest, so it closes out
+                    pick = max(same, key=lambda i: load[i])
+                else:
+                    # Otherwise the nearest floor, then the emptiest. Counting
+                    # floors alone treats Plaza-and-4 as no worse than 2-and-3,
+                    # and it is: one is a lift ride past three landings, the
+                    # other is a staircase. Distance first, capacity second.
+                    here = LEVEL_IX[lv]
+                    def _reach(i):
+                        if not floors_in[i]:
+                            return 0
+                        return min(abs(LEVEL_IX[f] - here) for f in floors_in[i])
+                    pick = min(fits, key=lambda i: (_reach(i), load[i]))
                 bins[pick].append(r)
                 load[pick] += r["time"]
                 floors_in[pick].add(lv)
@@ -276,3 +286,71 @@ def _dissolve_to(items, target, cap, loc_of):
                 items[pick][1].add(loc_of(r).bld)
         items.pop(light)
     return items
+
+
+def pack_by_floor(rooms, cap, loc_of):
+    """Charts that read down the building: one floor, or two touching ones.
+
+    Each building's floors are walked in order and charts filled as they go, so
+    a chart holds one corridor, or the tail of one and the head of the floor
+    directly above it -- never two floors with others in between. That is what
+    "scattered" means to somebody carrying a cart: two floors is a staircase,
+    Plaza-and-4 is a lift ride past three landings.
+
+    A second pass then combines any two charts that sit on touching floors of
+    the same building and fit together, which buys back most of the people that
+    filling strictly in order would otherwise cost.
+    """
+    from property_map import LEVEL_IX
+    by_b = collections.defaultdict(list)
+    unplaced = []
+    for r in rooms:
+        (by_b[loc_of(r).bld].append(r) if loc_of(r) else unplaced.append(r))
+
+    out = []
+    for b in sorted(by_b, key=lambda x: BORD.get(x, 9)):
+        rs = sorted(by_b[b], key=lambda r: (LEVEL_IX[loc_of(r).level], loc_of(r).x))
+        cur, t = [], 0.0
+        for r in rs:
+            if cur and t + r["time"] > cap:
+                out.append(cur)
+                cur, t = [], 0.0
+            cur.append(r)
+            t += r["time"]
+        if cur:
+            out.append(cur)
+
+    def _levels(c):
+        return {LEVEL_IX[loc_of(r).level] for r in c if loc_of(r)}
+
+    def _blds(c):
+        return {loc_of(r).bld for r in c if loc_of(r)}
+
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(out)):
+            for j in range(i + 1, len(out)):
+                if sum(r["time"] for r in out[i]) + sum(r["time"] for r in out[j]) > cap:
+                    continue
+                if _blds(out[i]) != _blds(out[j]):
+                    continue          # never across buildings here
+                lv = _levels(out[i]) | _levels(out[j])
+                if lv and max(lv) - min(lv) > 1:
+                    continue          # only floors that touch
+                out[i] = out[i] + out[j]
+                out.pop(j)
+                merged = True
+                break
+            if merged:
+                break
+
+    if unplaced:
+        cur, t = [], 0.0
+        for r in unplaced:
+            if cur and t + r["time"] > cap:
+                out.append(cur); cur, t = [], 0.0
+            cur.append(r); t += r["time"]
+        if cur:
+            out.append(cur)
+    return out

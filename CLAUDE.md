@@ -157,9 +157,17 @@ shift, a building crossing is a few minutes of walking.
   no longer fill one are pooled across buildings. Crossings land in one or two
   tail charts instead of being spread about. Never uses more people than the
   solver already found.
-- **Stay in one building** (the default): nobody crosses, and it may cost a
-  housekeeper. Measured over eight real days — 124 people and 0 crossings,
-  against 116 and 9.
+- **Stay in one building** (the default): `fcpack.pack_by_floor`. Nobody
+  crosses a building, and each building's floors are walked in order and charts
+  filled as they go, so a chart holds one corridor or two that touch — never
+  Plaza and level 4. A second pass recombines charts on touching floors to buy
+  back most of what filling strictly in order would cost.
+
+**Floors per chart is the wrong measure; the span between them is the right
+one.** Counting floors treats Plaza-and-4 the same as 2-and-3, and to somebody
+pushing a cart one is a lift ride past three landings and the other is a
+staircase. Over 61 stored days, packing by floor moved the mean span from 1.01
+to 0.64 for about a third of a housekeeper a day.
 
 `_tidy_full_clean` passes a target only in the pooled mode: a target is what
 licenses a merge across buildings, which is the one thing the pure mode exists
