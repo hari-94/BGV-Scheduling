@@ -2551,7 +2551,7 @@ def _ds_by_building(rooms, cap):
             leftovers.append([cur, {bld}, t])
     return full, leftovers
 
-def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP):
+def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP, one_building=None):
     """Split Daily Service rooms into charts, keeping each housekeeper inside
     one building wherever the headcount allows it.
 
@@ -2577,8 +2577,16 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP):
     rooms = list(ds_rooms) + list(extra_rooms or [])
     if not rooms: return []
     n_min = max(1, math.ceil(sum(r["time"] for r in rooms) / cap))
+    # The same question the Full Clean charts are asked. Daily Service rounds
+    # are long and each building's own rarely fills a whole one, so pooling the
+    # remainders is usually what saves a person -- and refusing to pool them is
+    # what keeps somebody out of a second building.
+    if one_building is None:
+        one_building = st.session_state.get("fc_mode") == FC_MODE_PURE
 
     full, bins = _ds_by_building(rooms, cap)
+    if one_building:
+        return full + [b[0] for b in bins]
     while len(bins) > max(n_min - len(full), 1):
         best = None
         for i in range(len(bins)):
@@ -2657,10 +2665,14 @@ def _tidy_full_clean(charts):
     # that it may cost a person -- so it is allowed to run over, though not
     # far: something has gone wrong if it wants several more.
     if _pool:
+        # Never spend a housekeeper on tidiness in this mode.
         if len(packed) > len(charts):
             return charts
-    elif len(packed) > len(charts) + max(1, len(charts) // 8):
-        return charts
+    # In the other mode there is no ceiling. There used to be one -- a tenth or
+    # so over the solver's count -- and on the days it bit, the fallback handed
+    # back the solver's charts complete with the building crossings the mode
+    # exists to prevent. An option that quietly stops doing what it says is
+    # worse than one that costs a person, which is what its own label promises.
     if sorted(str(r.get("room")) for c in packed for r in c) !=        sorted(str(r.get("room")) for c in charts for r in c):
         print("[fc] repack changed the room set, keeping the solver's charts")
         return charts
@@ -3727,7 +3739,7 @@ with _inp_exp:
             [FC_MODE_PURE, FC_MODE_FEWEST],
             key="fc_mode",
             on_change=_remember_fc_mode,
-            help="Stay in one building: nobody crosses between buildings and each chart keeps to one floor, or two that touch. It may take one more housekeeper. Fewest housekeepers: each building still fills its own charts and only the rooms left over are pooled, so the few crossings there are land in one or two charts.")
+            help="Stay in one building: nobody crosses between buildings — Full Clean and Daily Service both — and each chart keeps to one floor, or two that touch. Measured over the stored days it takes about two or three more housekeepers a day than the other option. Fewest housekeepers: each building still fills its own charts and only the rooms left over are pooled, so the few crossings there are land in one or two charts.")
         _can_gen = auth.can("can_generate")
         run = st.button("Generate", type="primary", use_container_width=True,
                         disabled=not _can_gen,

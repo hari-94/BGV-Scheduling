@@ -152,6 +152,16 @@ question, and not one the packer should paper over.
 it is a real trade and only a person can price it: a housekeeper is a whole
 shift, a building crossing is a few minutes of walking.
 
+**The mode governs Daily Service too**, not only Full Clean. A DS round is long
+and each building's own rarely fills one, so pooling the remainders is usually
+what saves a person — and refusing to pool them is what keeps somebody out of a
+second building.
+
+**Measured over 67 stored days, housekeeper rounds only** (excluding the verify
+pile and the Dust n Vac round, neither of which is one person's walk):
+1,528 rounds and **0 crossings** against 1,356 and 191 — purity costs about
+**2.6 housekeepers a day**, not the one the help text used to imply.
+
 - **Fewest housekeepers** (what the schedulers do by hand):
   each building fills its own charts and only the rooms left over once it can
   no longer fill one are pooled across buildings. Crossings land in one or two
