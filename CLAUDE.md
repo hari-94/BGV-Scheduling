@@ -194,6 +194,19 @@ Inspectors are batched the same way: a building at a time, its trailing
 part-batch left alone until there are not enough inspectors, then merged
 cheapest-bridge-first. RQS rounds crossing a building 245 → 192.
 
+Charts are handed to inspectors in **walking order** — `_chart_place`, which
+reads building, level and corridor position off `property_map`. Two things it
+fixes: `_primary_bld` sorted buildings 1, 2, 3, which puts 3 next to 2, the
+only pair that does not touch; and the old key sorted on `g["floors"]`, the
+second digit of the room code, which is not a floor (0 is Plaza *and* Terrace,
+and building 3 renumbers its lower levels). `_insp_travel_score` had the same
+two faults and now scores real levels and real bridge counts — crossings 130 →
+112 over 67 days.
+
+The one round a day that covers all three buildings is the Daily Service and
+Dust n Vac inspector, which is property-wide by design. It is not a Full Clean
+problem and no amount of sorting will change it.
+
 ## The day## The day
 
 `daystart.py` decides what to clean first. The order is not a sort — it is a

@@ -2837,58 +2837,97 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
         if not is_unassigned_hk(matched): used.add(matched)
     return assignment, used
 
+#: West to east, the order somebody actually walks the property. Sorting charts
+#: by building *number* puts 3 next to 2 — the only two that do not touch — so
+#: an inspector handed consecutive charts across that seam gets the most
+#: expensive round the property can produce.
+BLD_WALK_ORDER = {3: 0, 1: 1, 2: 2}
+
+
+def _chart_place(g):
+    """Where a chart sits, for putting charts in walking order.
+
+    Off property_map, not off the room code: the second digit is not the floor
+    (0 is Plaza *and* Terrace) and building 3 renumbers its lower levels, so
+    sorting on `floors` sorts on something that only looks like a floor.
+    """
+    best = None
+    for r in (g.get("rooms") or []):
+        loc = pmap.parse(str(r.get("room", "")).strip().upper())
+        if loc is None:
+            continue
+        key = (BLD_WALK_ORDER.get(loc.bld, 9), loc.level_ix, loc.x)
+        if best is None or key < best:
+            best = key
+    return best if best is not None else (9, 9, 999)
+
+
 def _primary_bld(g): return min(g["blds"]) if g["blds"] else 0
 def _group_complexity(g): return sum(r.get("time",70)/70 for r in g.get("rooms",[]))
 def _batch_complexity(batch): return sum(_group_complexity(g) for g in batch)
+_LOC_CACHE = {}
+
+
+def _room_loc(r):
+    """Where a room really is, cached — this runs inside a swap loop."""
+    code = str(r.get("room", "")).strip().upper()
+    if code not in _LOC_CACHE:
+        _LOC_CACHE[code] = pmap.parse(code)
+    return _LOC_CACHE[code]
+
+
 def _insp_travel_score(batch):
-    # Travel cost = buildings visited + floors visited within those buildings,
-    # plus the vertical spread (how many floors apart the highest and lowest
-    # rooms are). Keeping an inspector on one floor — or a tight floor band —
-    # scores lowest.
-    blds=set(); cross=0
-    floor_keys=set() # distinct (building, floor) stops
-    floors_by_bld={}
-    for g in batch:
-        blds |= g["blds"]
-        if len(g["blds"])>1: cross += len(g["blds"])-1
-        for b in g["blds"]:
-            for f in (g.get("floors") or {0}):
-                floor_keys.add((b,f))
-                floors_by_bld.setdefault(b,set()).add(f)
-    # Vertical spread within each building (max floor - min floor)
-    spread=0
-    for b,fs in floors_by_bld.items():
-        if fs: spread += (max(fs)-min(fs))
-    # Non-sequential penalty: an inspector should cover a CONTIGUOUS band of
-    # floors (e.g. 2-3-4), not hop over gaps (e.g. 2 then 5). For each building we
-    # count the missing floors between the lowest and highest floor the inspector
-    # visits — every gap floor is extra elevator/stair travel — and penalize it
-    # heavily so the optimizer keeps each inspector on sequential floors.
-    gap=0
-    for b,fs in floors_by_bld.items():
+    """What a round costs an inspector, in the property's own terms.
+
+    This used to score on `g["floors"]` — the second digit of the room code —
+    and on a plain count of buildings. Both are wrong here. The digit is not a
+    floor: 0 is Plaza *and* Terrace, so a round covering both looked like one
+    stop, and building 3 renumbers its lower levels. And counting buildings
+    treats 2-and-3 the same as 1-and-2, when 2 and 3 do not touch and cost two
+    bridges rather than one.
+    """
+    locs = [l for g in batch for r in (g.get("rooms") or [])
+            if (l := _room_loc(r)) is not None]
+    if not locs:
+        return 0.0
+    blds = {l.bld for l in locs}
+    stops = {(l.bld, l.level_ix) for l in locs}
+
+    # bridges, off the map: 0 inside one building, 1 between neighbours, 2
+    # between 2 and 3, which have to go through building 1
+    bs = sorted(blds)
+    hops = 0
+    for a in range(len(bs)):
+        for b in range(a + 1, len(bs)):
+            hops = max(hops, 1 if pmap.BRIDGES.get(frozenset((bs[a], bs[b]))) else 2)
+
+    spread = gap = 0
+    by_bld = {}
+    for l in locs:
+        by_bld.setdefault(l.bld, set()).add(l.level_ix)
+    for _b, fs in by_bld.items():
         if len(fs) > 1:
             lo, hi = min(fs), max(fs)
-            gap += (hi - lo + 1) - len(fs)   # count of skipped floors in the band
-    # Horizontal spread: how far apart the room numbers are within each building
-    # (walking down a long hall). Grouping physically close rooms cuts RQS travel.
-    nums_by_bld={}
-    for g in batch:
-        for b in g["blds"]:
-            for r in g.get("rooms",[]):
-                if r.get("bld")==b:
-                    nums_by_bld.setdefault(b,[]).append(r.get("num",0))
-    hspread=0
-    for b,ns in nums_by_bld.items():
-        if ns: hspread += (max(ns)-min(ns))
-    # Weights: building hops are most expensive, then number of distinct
-    # floor-stops, then how far apart those floors are. A batch that spans all
-    # THREE buildings is very hard to inspect, so it gets a steep extra penalty
-    # on top of the linear building cost — we want the optimizer to treat a
-    # 3-building inspector as nearly forbidden.
-    nbld = len(blds)
-    three_bld_penalty = 400 if nbld >= 3 else 0
-    return (nbld*12 + three_bld_penalty + cross*4 + len(floor_keys)*3
-            + spread*2 + gap*8 + hspread)
+            spread += hi - lo
+            gap += (hi - lo + 1) - len(fs)   # levels skipped inside the band
+
+    # how far along the corridors, which is the cheapest of these and so the
+    # last tie-break
+    hspread = 0.0
+    by_floor = {}
+    for l in locs:
+        by_floor.setdefault((l.bld, l.level_ix), []).append(l.x)
+    for xs in by_floor.values():
+        hspread += max(xs) - min(xs)
+
+    return (hops * 60.0                      # a bridge dominates everything
+            + (len(blds) - 1) * 25.0
+            + (30.0 if len(blds) >= 3 else 0.0)
+            + len(stops) * 6.0               # each floor is a lift call
+            + spread * 3.0
+            + gap * 5.0                      # a skipped level is pure travel
+            + hspread * 0.4)
+
 def _batch_heavy(batch):
     """Count of big rooms (120/140 min) across a batch — used to spread the
     hard-to-inspect rooms evenly across inspectors."""
@@ -2965,11 +3004,10 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     fc_inspectors = [n for n in present_insp if n not in (rqs1, rqs2)]
 
     # ── Assign dedicated FC inspectors to FC groups first ────────────────────
-    fc_sorted=sorted(fc_groups, key=lambda g:(
-        _primary_bld(g),
-        min(g.get("floors",{0})) if g.get("floors") else 0,
-        min(r.get("num",0) for r in g["rooms"]) if g["rooms"] else 0
-    ))
+    # Charts in the order somebody would walk them — building by building west
+    # to east, up through the levels, along each corridor — so an inspector
+    # handed consecutive charts is handed neighbouring ones.
+    fc_sorted = sorted(fc_groups, key=_chart_place)
     # How many FC charts can the dedicated inspectors cover? With tight room-based
     # packing an inspector holds up to ~13 rooms (often 4-5 small charts), so the
     # dedicated pool can absorb more charts than n_dedicated*per. Estimate capacity
@@ -2998,7 +3036,7 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     _by_bld = {}
     for g in dedicated_fc:
         _by_bld.setdefault(_primary_bld(g), []).append(g)
-    for _b in sorted(_by_bld, key=lambda b: {3: 0, 1: 1, 2: 2}.get(b, 9)):
+    for _b in sorted(_by_bld, key=lambda b: BLD_WALK_ORDER.get(b, 9)):
         cur = []; cur_rooms = 0
         for g in _by_bld[_b]:
             gr = _grooms(g)
