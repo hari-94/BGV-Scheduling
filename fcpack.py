@@ -64,7 +64,7 @@ def _bins_needed(rs, cap, tries=40):
     return max(best, lower)
 
 
-def pack_full_clean(rooms, cap, loc_of, target=None):
+def pack_full_clean(rooms, cap, loc_of, target=None, pool_leftovers=False):
     """Charts that never cross a building and change floor as little as they can.
 
     `loc_of(room)` gives something with .bld, .level and .x, or None. Rooms the
@@ -73,6 +73,14 @@ def pack_full_clean(rooms, cap, loc_of, target=None):
     `target` is the most charts this may use. Pass the count the existing
     solver reaches and the result can only be as good or better: the same
     housekeepers, with the crossings removed wherever removing them is free.
+
+    `pool_leftovers` trades a little of that purity for people. Each building
+    still fills its own charts, but the rooms left over once it can no longer
+    fill one are pooled with the other buildings' leftovers and packed
+    together. Every crossing then lands in one of those few tail charts
+    instead of being spread about -- which is what the schedulers do by hand,
+    and it is the better bargain: a housekeeper is a shift, a crossing is
+    minutes.
     """
     placed, unplaced = [], []
     for r in rooms:
@@ -83,8 +91,16 @@ def pack_full_clean(rooms, cap, loc_of, target=None):
     for r in placed:
         by_bld[loc_of(r).bld].append(r)
 
+    leftovers = []
     for bld in sorted(by_bld, key=lambda b: BORD.get(b, 9)):
         rs = by_bld[bld]
+        if pool_leftovers:
+            # only the charts this building can fill by itself; whatever will
+            # not make a full one goes into the shared pool
+            rs, spare = _fill_whole(rs, cap, loc_of)
+            leftovers += spare
+            if not rs:
+                continue
         n = max(_bins_needed(rs, cap), math.ceil(sum(r["time"] for r in rs) / cap))
         bins = [[] for _ in range(n)]
         load = [0.0] * n
@@ -114,6 +130,20 @@ def pack_full_clean(rooms, cap, loc_of, target=None):
                 floors_in[pick].add(lv)
         out += [b for b in bins if b]
 
+    if leftovers:
+        # The tail. Packed largest-first so the crossings land in as few charts
+        # as they can, and ordered west to east so a chart that does cross takes
+        # neighbouring buildings rather than 2 and 3, which do not touch.
+        leftovers.sort(key=lambda r: (BORD.get(loc_of(r).bld, 9)
+                                      if loc_of(r) else 9, -r["time"]))
+        cur, t = [], 0.0
+        for r in leftovers:
+            if cur and t + r["time"] > cap:
+                out.append(cur); cur, t = [], 0.0
+            cur.append(r); t += r["time"]
+        if cur:
+            out.append(cur)
+
     # Building-pure is not free every day. Each building rounds its own minutes
     # up to a whole person, and those part-people add up: over every stored day
     # it would cost about one extra housekeeper a day. A crossing costs some
@@ -133,6 +163,40 @@ def pack_full_clean(rooms, cap, loc_of, target=None):
         if cur:
             out.append(cur)
     return out
+
+
+def _fill_whole(rs, cap, loc_of):
+    """Split a building's rooms into the charts it can fill, and the rest.
+
+    "Can fill" is measured in minutes rather than guessed: a building with
+    5,260 minutes fills thirteen charts of 380 outright and has 320 left, and
+    it is those 320 that are worth pooling rather than spending a whole
+    housekeeper on.
+    """
+    total = sum(r["time"] for r in rs)
+    whole = int(total // cap)
+    if whole < 1:
+        return [], list(rs)
+    from property_map import LEVEL_IX
+    order = sorted(rs, key=lambda r: (LEVEL_IX[loc_of(r).level], loc_of(r).x)
+                   if loc_of(r) else (99, 0))
+    keep, spare, cur, t, made = [], [], [], 0.0, 0
+    for r in order:
+        if made >= whole:
+            spare.append(r)
+            continue
+        if cur and t + r["time"] > cap:
+            keep += cur; made += 1; cur, t = [], 0.0
+            if made >= whole:
+                spare.append(r)
+                continue
+        cur.append(r); t += r["time"]
+    if cur:
+        if made < whole:
+            keep += cur
+        else:
+            spare += cur
+    return keep, spare
 
 
 def _hops(blds):

@@ -148,6 +148,23 @@ question, and not one the packer should paper over.
 
 ## Full Clean charts, and who inspects them
 
+**Two ways to split the day, chosen on the Schedule page** (`fc_mode`), because
+it is a real trade and only a person can price it: a housekeeper is a whole
+shift, a building crossing is a few minutes of walking.
+
+- **Fewest housekeepers** (the default, and what the schedulers do by hand):
+  each building fills its own charts and only the rooms left over once it can
+  no longer fill one are pooled across buildings. Crossings land in one or two
+  tail charts instead of being spread about. Never uses more people than the
+  solver already found.
+- **Stay in one building**: nobody crosses, and it may cost a housekeeper.
+  Measured over eight real days — 124 people and 0 crossings, against 116 and 9.
+
+`_tidy_full_clean` passes a target only in the pooled mode: a target is what
+licenses a merge across buildings, which is the one thing the pure mode exists
+to avoid. Default is the cheaper one so nobody is quietly given an extra
+housekeeper by opening the page.
+
 `solve_full_clean` picks the fewest housekeepers and the tidiest arrangement it
 can find at that number, but it packs the whole property as one pool, so a chart
 boundary lands mid-building and the chart spills over. `_tidy_full_clean` then

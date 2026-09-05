@@ -2611,6 +2611,10 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP):
     if cur: tail.append(cur)
     return full + tail
 
+FC_MODE_PURE = "Stay in one building"
+FC_MODE_FEWEST = "Fewest housekeepers"
+
+
 def _tidy_full_clean(charts):
     """Redeal the Full Clean charts so fewer of them cross a building.
 
@@ -2630,14 +2634,28 @@ def _tidy_full_clean(charts):
     if len(charts) < 2:
         return charts
     rooms = [r for c in charts for r in c]
+    _pool = st.session_state.get("fc_mode") == FC_MODE_FEWEST
     try:
-        packed = fcpack.pack_full_clean(rooms, MAX_FC, lambda r: pmap.parse(
-            str(r.get("room", "")).strip().upper()), target=len(charts))
+        packed = fcpack.pack_full_clean(
+            rooms, MAX_FC,
+            lambda r: pmap.parse(str(r.get("room", "")).strip().upper()),
+            # No target in the pure mode: a target is what licenses a merge
+            # across buildings, and merging across buildings is the one thing
+            # that mode exists to avoid.
+            target=len(charts) if _pool else None, pool_leftovers=_pool)
     except Exception as ex:
         print(f"[fc] could not repack, keeping the solver's charts: {ex}")
         return charts
-    if len(packed) > len(charts):
-        return charts                      # a person is worth more than a tidy chart
+    # What counts as too many depends on which question was asked. "Fewest
+    # housekeepers" means never spend one on tidiness. "Stay in one building"
+    # means the opposite -- purity is the point, and the control says plainly
+    # that it may cost a person -- so it is allowed to run over, though not
+    # far: something has gone wrong if it wants several more.
+    if _pool:
+        if len(packed) > len(charts):
+            return charts
+    elif len(packed) > len(charts) + max(1, len(charts) // 8):
+        return charts
     if sorted(str(r.get("room")) for c in packed for r in c) !=        sorted(str(r.get("room")) for c in charts for r in c):
         print("[fc] repack changed the room set, keeping the solver's charts")
         return charts
@@ -3631,6 +3649,17 @@ with _inp_exp:
                     f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">Today</div>'
                     f'<div> <b>{len(present_hk)}</b> HKs present</div>'
                     f'<div> <b>{len(present_insp)}</b> inspectors</div></div>', unsafe_allow_html=True)
+        # Two ways to cut the day up, because they are a real trade and only a
+        # person can price it: a housekeeper is a whole shift, a building
+        # crossing is a few minutes of walking. Neither answer is wrong.
+        st.radio(
+            "How to split the day",
+            # Fewest first, and so the default: it is what the app already
+            # did and what the schedulers do by hand, so nobody is quietly
+            # given an extra housekeeper by opening the page.
+            [FC_MODE_FEWEST, FC_MODE_PURE],
+            key="fc_mode",
+            help="Stay in one building: nobody crosses between buildings, and it may take one more housekeeper. Fewest housekeepers: each building still fills its own charts and only the rooms left over are pooled, so the few crossings there are land in one or two charts.")
         _can_gen = auth.can("can_generate")
         run = st.button("Generate", type="primary", use_container_width=True,
                         disabled=not _can_gen,
