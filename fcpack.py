@@ -12,17 +12,56 @@ import collections, math
 BORD = {3: 0, 1: 1, 2: 2}          # west to east, as the property runs
 
 
-def _bins_needed(rs, cap):
-    """Fewest charts that can hold these rooms: first-fit-decreasing."""
+def _fit(rs, cap, order, best_fit):
+    """Deal these rooms into charts in the given order; return the loads."""
     bins = []
-    for r in sorted(rs, key=lambda r: -r["time"]):
-        for b in bins:
-            if b[0] + r["time"] <= cap:
-                b[0] += r["time"]
-                break
+    for r in order:
+        if best_fit:
+            room = [i for i, b in enumerate(bins) if b + r["time"] <= cap]
+            if room:
+                bins[max(room, key=lambda i: bins[i])] += r["time"]
+                continue
         else:
-            bins.append([r["time"]])
-    return len(bins)
+            for i, b in enumerate(bins):
+                if b + r["time"] <= cap:
+                    bins[i] += r["time"]
+                    break
+            else:
+                bins.append(r["time"])
+                continue
+            continue
+        bins.append(r["time"])
+    return bins
+
+
+def _bins_needed(rs, cap, tries=40):
+    """Fewest charts that can hold these rooms.
+
+    First-fit-decreasing on its own is not enough here. Building 1 on a real
+    day holds 5,260 minutes, which is fourteen charts of 380, and FFD produced
+    fifteen -- one whole housekeeper more than the person doing this by hand.
+    The room times are a handful of repeated values (70, 120, 140), so a few
+    shuffled deals find a perfect fit where the greedy one does not; the same
+    trick the main solver already uses.
+    """
+    import math, random
+    lower = math.ceil(sum(r["time"] for r in rs) / cap) if rs else 0
+    best = None
+    for order, bf in ((sorted(rs, key=lambda r: -r["time"]), False),
+                      (sorted(rs, key=lambda r: -r["time"]), True),
+                      (list(rs), False)):
+        n = len(_fit(rs, cap, order, bf))
+        best = n if best is None else min(best, n)
+        if best <= lower:
+            return best
+    rng = random.Random(20240601)
+    shuffled = list(rs)
+    for _ in range(tries):
+        rng.shuffle(shuffled)
+        best = min(best, len(_fit(rs, cap, list(shuffled), True)))
+        if best <= lower:
+            break
+    return max(best, lower)
 
 
 def pack_full_clean(rooms, cap, loc_of, target=None):
