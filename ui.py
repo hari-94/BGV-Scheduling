@@ -25,6 +25,7 @@ NAV_ITEMS = [
     ("pages/1_Dashboard.py",     "Dashboard",     "📊", "can_view_dashboard", "nav.dashboard"),
     ("pages/3_Roster_Import.py", "Roster Import", "📥", "can_generate", "nav.roster_import"),
     ("pages/6_Property.py",      "Property",      "🏔️", "can_view_insp_tab", "nav.property"),
+    ("pages/7_Profile.py",       "Profile",       "👤", None, "nav.profile"),
     ("pages/2_Admin.py",         "Admin",         "⚙️", "can_manage_users", "nav.admin"),
 ]
 

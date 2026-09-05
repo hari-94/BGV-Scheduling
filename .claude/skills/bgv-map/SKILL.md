@@ -161,6 +161,25 @@ is shared between levels, so it cannot know which rooms a level has;
 `db.all_known_rooms()` supplies them. Colours come from `roomstatus.META`, never
 invented locally, or the legend stops matching the phone in somebody's hand.
 
+## Profile and passwords
+`pages/7_Profile.py` — everyone, no permission needed.
+
+| want to change | go to |
+|---|---|
+| the rules | `MIN_LEN`, and the checks in the `if go:` block, in the order asked |
+| the wording | `profile.*` in `i18n_es`/`i18n` — all of it is translated |
+| what verifies the old one | `db.verify_password` — **not** `db.authenticate` |
+| ending other devices | `db.delete_other_sessions(username, keep_hash)` |
+
+`verify_password` exists because `authenticate` stamps `last_login`, which is
+right for a sign-in and wrong for confirming who you are — it would show a
+password change as a sign-in on the Admin activity report.
+
+Changing a password ends every other session for that user but keeps the
+browser doing it signed in. Being thrown back to the login form is a poor
+reward for changing your password, and leaving the other devices alone defeats
+the point of changing it.
+
 ## Everything else
 
 - **Roles and access**: `auth.py`. `can_manage_users` is admin only; `can_view_insp_tab` is admin + rqs.

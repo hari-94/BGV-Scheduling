@@ -611,6 +611,54 @@ def authenticate(username: str, password: str) -> dict | None:
         pass
     return user
 
+def verify_password(username: str, password: str) -> bool:
+    """Is this the person's current password? Nothing is written.
+
+    Deliberately not `authenticate`: that stamps last_login, which is right for
+    a sign-in and wrong for confirming who you are before changing something.
+    Using it here would show a password change as a sign-in on the activity
+    report.
+    """
+    user = get_user(username)
+    if not user:
+        return False
+    return _check_pw(password, user.get("password_hash", ""))
+
+def delete_other_sessions(username: str, keep_hash: str = "") -> int:
+    """End this person's sessions everywhere except the browser asking.
+
+    Changing a password has to reach the other devices, or somebody who
+    changed theirs because it was known is no safer than before. Returns how
+    many were ended, for the message.
+    """
+    uname = (username or "").strip().lower()
+    if not uname:
+        return 0
+    try:
+        r = (_client().table(SETTINGS_TABLE).select("key,payload")
+             .like("key", "session_%").execute())
+    except Exception as ex:
+        print(f"[db] could not list sessions: {ex}")
+        return 0
+    gone = 0
+    for row in (r.data or []):
+        key = row.get("key", "")
+        if key == f"session_{keep_hash}":
+            continue
+        payload = row.get("payload")
+        try:
+            rec = json.loads(payload) if isinstance(payload, str) else payload
+        except Exception:
+            continue
+        if (rec or {}).get("username", "").strip().lower() != uname:
+            continue
+        try:
+            _delete_key(key)
+            gone += 1
+        except Exception as ex:
+            print(f"[db] could not end session {key}: {ex}")
+    return gone
+
 def update_password(username: str, new_password: str) -> tuple[bool, str]:
     uname = username.strip().lower()
     pw_hash = _hash_pw(new_password)

@@ -31,6 +31,7 @@ several of them read the *real* schedule to test against a real day.
 | `pages/5_My_Rooms.py` | 800 | the phone page: a housekeeper's rooms, and an RQS's whole team |
 | `pages/1_Dashboard.py` | 340 | today's floor as a timeline, one bar per room |
 | `pages/2_Admin.py` | 410 | accounts and sign-in history |
+| `pages/7_Profile.py` | 90 | your own account: changing your password |
 | `pages/4_My_Home.py` | 370 | one person's own week, from the staff sheet |
 | `roster_import.py` | 1600 | the staff sheet parser — no Streamlit, so it is testable alone |
 | `db.py` | 710 | every Supabase read and write, 55 functions |
