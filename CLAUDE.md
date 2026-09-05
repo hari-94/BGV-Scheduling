@@ -243,6 +243,14 @@ against `clientWidth` says whether anything really overflows, and walking every
 element's `getBoundingClientRect` names the one that does. It cost a wrong guess
 here — the top nav looked like the culprit and measurably was not.
 
+**A cookie written from the page has a life the browser decides.** Safari on
+iOS caps a script-set cookie at seven days and drops it whether or not the app
+is being used, so a sign-in that is never renewed dies in a week, phones first.
+`ensure_cookie` used to stop as soon as the browser was carrying the cookie,
+which is precisely when it needed to start again. It now rewrites the cookie and
+pushes the record's expiry out once per browser session, so anyone opening the
+app in a normal week stays signed in. Do not "optimise" that write away.
+
 **A deploy does not reload an imported module.** Streamlit re-reads a *page* file
 on every rerun, but `import db` comes back from `sys.modules`. A process that was
 already running when a deploy lands therefore runs the **new page against the old

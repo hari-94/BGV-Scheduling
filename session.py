@@ -20,7 +20,11 @@ import clock
 import db
 
 COOKIE = "bgv_session"
-TTL_DAYS = 7
+
+#: How long a session lasts without being used at all. It is renewed on every
+#: visit (see ensure_cookie), so somebody who opens the app in a normal working
+#: week is never signed out; this is the gap after which they are.
+TTL_DAYS = 30
 
 
 def _hash(token: str) -> str:
@@ -64,14 +68,49 @@ def _cookie_token():
     return v if isinstance(v, str) and v.strip() else None
 
 
+def _expiry() -> str:
+    import datetime
+    return (clock.now() + datetime.timedelta(days=TTL_DAYS)).isoformat(timespec="seconds")
+
+
+def _expired(rec: dict) -> bool:
+    """Whether a stored session has run out.
+
+    Parsed rather than compared as text: the stored stamp carries a UTC offset,
+    and Breckenridge changes offset twice a year, so two strings that look
+    orderable are not. A stamp that will not parse is treated as still valid --
+    a bad clock should not sign the floor out.
+    """
+    import datetime
+    raw = (rec or {}).get("expires") or ""
+    if not raw:
+        return False
+    try:
+        return datetime.datetime.fromisoformat(raw) < clock.now()
+    except ValueError:
+        return False
+
+
+def _extend(token: str) -> None:
+    """Push a live session's expiry out again."""
+    h = _hash(token)
+    try:
+        rec = db.load_session(h)
+        if not rec:
+            return
+        rec["expires"] = _expiry()
+        db.save_session(h, rec)
+    except Exception as ex:
+        print(f"[session] could not extend session: {ex}")
+
+
 def remember(user: dict) -> None:
     """Start a session that survives a refresh."""
     token = secrets.token_urlsafe(32)
-    expires = clock.now() + __import__("datetime").timedelta(days=TTL_DAYS)
     try:
         db.save_session(_hash(token), {
             "username": user.get("username", ""),
-            "expires": expires.isoformat(timespec="seconds"),
+            "expires": _expiry(),
         })
     except Exception as ex:
         print(f"[session] could not store session: {ex}")
@@ -96,9 +135,26 @@ def ensure_cookie() -> None:
     time, and it stops of its own accord once a load carries the cookie back.
     """
     token = st.session_state.get("_session_token")
-    if not token or _cookie_token() == token:
+    if not token:
         return
-    _write_cookie(token)
+    if _cookie_token() != token:
+        _write_cookie(token)       # not carrying it yet; keep offering it
+        return
+    # It is carrying it -- and that is exactly when the old version stopped,
+    # which is why people were signed out anyway. A cookie written from a page
+    # has a life the browser decides: Safari on iOS caps a script-set cookie at
+    # seven days and will drop it whether or not the app is being used. Since
+    # nothing ever reset that clock, everybody was signed out a week after
+    # signing in, phones first.
+    #
+    # So renew it once per browser session: rewrite the cookie to restart its
+    # clock and push the record's expiry out to match. Somebody who opens the
+    # app in a normal week is then never signed out. Once per session, not per
+    # rerun -- each write is an iframe.
+    if not st.session_state.get("_session_renewed"):
+        st.session_state["_session_renewed"] = True
+        _write_cookie(token)
+        _extend(token)
 
 
 def restore() -> bool:
@@ -118,8 +174,7 @@ def restore() -> bool:
         return False
     if not rec:
         return False
-    exp = rec.get("expires") or ""
-    if exp and exp < clock.now().isoformat(timespec="seconds"):
+    if _expired(rec):
         try:
             db.delete_session(_hash(token))
         except Exception:
@@ -135,6 +190,10 @@ def restore() -> bool:
     import auth
     auth.login(user)
     st.session_state["_session_token"] = token
+    # Coming back on a cookie is itself a visit, so start its clock again.
+    _extend(token)
+    _write_cookie(token)
+    st.session_state["_session_renewed"] = True
     return True
 
 
@@ -147,4 +206,5 @@ def forget() -> None:
         except Exception as ex:
             print(f"[session] could not delete session: {ex}")
     st.session_state.pop("_session_token", None)
+    st.session_state.pop("_session_renewed", None)
     _clear_cookie()
