@@ -388,6 +388,24 @@ def staff_file_info() -> dict:
             pass
     return info
 
+FC_MODE_KEY = "fc_mode"
+
+def save_fc_mode(mode: str) -> None:
+    """Remember how the day should be split. Shared, not per person — the
+    schedule is one schedule, so the choice belongs to the property."""
+    try:
+        _upsert_key(FC_MODE_KEY, {"mode": mode})
+    except Exception as ex:
+        print(f"[db] save_fc_mode error: {ex}")
+
+def load_fc_mode() -> str:
+    try:
+        rec = _load_key(FC_MODE_KEY) or {}
+        return str(rec.get("mode", "") or "")
+    except Exception as ex:
+        print(f"[db] load_fc_mode error: {ex}")
+        return ""
+
 def save_custom_options(opts: dict) -> None:
     """Extra dropdown choices a manager typed in, keyed by role."""
     try:

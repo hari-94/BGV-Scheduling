@@ -3652,13 +3652,38 @@ with _inp_exp:
         # Two ways to cut the day up, because they are a real trade and only a
         # person can price it: a housekeeper is a whole shift, a building
         # crossing is a few minutes of walking. Neither answer is wrong.
+        # The choice is remembered for the property, not re-asked every
+        # morning. Seeded before the widget exists so Streamlit takes it as the
+        # starting value; a stale db module (see CLAUDE.md) just means the
+        # default, never a crash.
+        if "fc_mode" not in st.session_state:
+            _saved_mode = ""
+            try:
+                _lf = getattr(db, "load_fc_mode", None)
+                _saved_mode = _lf() if _lf else str(
+                    (db._load_key("fc_mode") or {}).get("mode", "") or "")
+            except Exception as ex:
+                print(f"[fc] could not read the saved split: {ex}")
+            st.session_state["fc_mode"] = (
+                _saved_mode if _saved_mode in (FC_MODE_PURE, FC_MODE_FEWEST)
+                else FC_MODE_PURE)
+
+        def _remember_fc_mode():
+            try:
+                _sf = getattr(db, "save_fc_mode", None)
+                if _sf:
+                    _sf(st.session_state.get("fc_mode", ""))
+                else:
+                    db._upsert_key("fc_mode",
+                                   {"mode": st.session_state.get("fc_mode", "")})
+            except Exception as ex:
+                print(f"[fc] could not save the split: {ex}")
+
         st.radio(
             "How to split the day",
-            # Fewest first, and so the default: it is what the app already
-            # did and what the schedulers do by hand, so nobody is quietly
-            # given an extra housekeeper by opening the page.
-            [FC_MODE_FEWEST, FC_MODE_PURE],
+            [FC_MODE_PURE, FC_MODE_FEWEST],
             key="fc_mode",
+            on_change=_remember_fc_mode,
             help="Stay in one building: nobody crosses between buildings, and it may take one more housekeeper. Fewest housekeepers: each building still fills its own charts and only the rooms left over are pooled, so the few crossings there are land in one or two charts.")
         _can_gen = auth.can("can_generate")
         run = st.button("Generate", type="primary", use_container_width=True,
