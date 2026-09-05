@@ -179,6 +179,16 @@ pushing a cart one is a lift ride past three landings and the other is a
 staircase. Over 61 stored days, packing by floor moved the mean span from 1.01
 to 0.64 for about a third of a housekeeper a day.
 
+**Then the slack is gathered.** `fcpack.balance_low` moves rooms between charts
+to cut the *number* of people short of a full day, not the spread of it: two
+housekeepers on 280 and 310 both work a short day, and one room moved between
+them leaves one on a full 350 and one on 240 — same work, same two people, but
+only one is now underused and that one can be sent home, given the stayover
+pile, or lent out. Every move is re-checked against the cap, one building and
+touching floors, so it cannot smuggle a crossing back in, and a chart emptied
+outright is dropped. Over 67 stored days: short charts 383 → 257, and 13 fewer
+charts because some emptied completely.
+
 `_tidy_full_clean` passes a target only in the pooled mode: a target is what
 licenses a merge across buildings, which is the one thing the pure mode exists
 to avoid. The choice is remembered for the property in `app_settings` under

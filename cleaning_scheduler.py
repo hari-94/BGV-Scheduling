@@ -2678,6 +2678,23 @@ def _tidy_full_clean(charts):
         return charts
     if any(sum(r["time"] for r in c) > MAX_FC for c in packed):
         return charts
+
+    # Last, gather the slack. Packing leaves several people a little short of a
+    # day each; moving a room or two between them leaves one person short
+    # instead of three, and that one can be sent home, given the stayover pile,
+    # or lent out. Every move is checked against the same rules the charts were
+    # built under, so this cannot smuggle a building crossing back in.
+    try:
+        balanced = fcpack.balance_low(packed, MAX_FC, LOW_MIN, _where,
+                                      one_building=not _pool)
+    except Exception as ex:
+        print(f"[fc] could not balance the short charts: {ex}")
+        return packed
+    if (len(balanced) <= len(packed)
+            and sorted(str(r.get("room")) for c in balanced for r in c)
+            == sorted(str(r.get("room")) for c in packed for r in c)
+            and not any(sum(r["time"] for r in c) > MAX_FC for c in balanced)):
+        return balanced
     return packed
 
 

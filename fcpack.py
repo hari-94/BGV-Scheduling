@@ -354,3 +354,66 @@ def pack_by_floor(rooms, cap, loc_of):
         if cur:
             out.append(cur)
     return out
+
+
+def _fits(chart, room, cap, loc_of, one_building):
+    """Could this room join this chart without breaking the rules?
+
+    The rules are the ones the charts were built under: the cap, one building,
+    and floors that touch. A balancing move that quietly undoes them would just
+    trade one complaint for another.
+    """
+    from property_map import LEVEL_IX
+    if sum(r["time"] for r in chart) + room["time"] > cap:
+        return False
+    locs = [loc_of(r) for r in chart] + [loc_of(room)]
+    locs = [l for l in locs if l]
+    if not locs:
+        return True
+    if one_building and len({l.bld for l in locs}) > 1:
+        return False
+    ix = [l.level_ix for l in locs]
+    return max(ix) - min(ix) <= 1
+
+
+def balance_low(charts, cap, low_min, loc_of, one_building=True, rounds=60):
+    """Gather the slack onto fewer people instead of spreading it thin.
+
+    Two housekeepers on 280 and 310 minutes are both short of a day. Move one
+    70-minute room between them and one has a full 350 and the other has 240 --
+    the same work, the same two people, but only one of them is now underused,
+    and that one can be sent home, given the pile of stayovers, or lent to
+    another building.
+
+    So the thing being minimised is the *number* of short charts, not the
+    spread of them. Every move is checked against the rules the charts were
+    built under, and a chart emptied completely is simply dropped, which is one
+    housekeeper the day did not need.
+    """
+    charts = [list(c) for c in charts if c]
+
+    def load(c):
+        return sum(r["time"] for r in c)
+
+    def n_low(cs):
+        return sum(1 for c in cs if load(c) < low_min)
+
+    for _ in range(rounds):
+        best = None
+        base = (n_low(charts), len(charts))
+        for i, src in enumerate(charts):
+            for ri, room in enumerate(src):
+                for j, dst in enumerate(charts):
+                    if i == j or not _fits(dst, room, cap, loc_of, one_building):
+                        continue
+                    moved = [c for c in charts]
+                    moved[i] = src[:ri] + src[ri + 1:]
+                    moved[j] = dst + [room]
+                    moved = [c for c in moved if c]
+                    key = (n_low(moved), len(moved))
+                    if key < base and (best is None or key < best[0]):
+                        best = (key, moved)
+        if best is None:
+            break
+        charts = best[1]
+    return charts
