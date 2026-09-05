@@ -191,7 +191,7 @@ html,body,[class*="css"]{
 /* Use the window. A fixed 1440 left an ultrawide screen 40% used and the
    content sitting well right of centre, because it centres inside the main
    area and the sidebar has already taken 340px off the left. */
-.block-container{padding-top:1.6rem!important;max-width:97%!important;
+.block-container{padding-top:1.6rem!important;max-width:min(1200px,97%)!important;
   background:transparent!important;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-track{background:var(--bg1);}
@@ -551,7 +551,7 @@ if _THEME == "light":
 }
 /* The light theme re-states this after the block above, so both have to
    say the same thing or the narrower one silently wins. */
-.block-container{padding-top:1.8rem!important;max-width:97%!important;}
+.block-container{padding-top:1.8rem!important;max-width:min(1200px,97%)!important;}
 
 /* Page title: solid, confident slate — no gradient text, no animation flourish. */
 .pg-title{

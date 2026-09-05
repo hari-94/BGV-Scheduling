@@ -223,17 +223,19 @@ real string.
 reopens a collapsed sidebar lives inside `[data-testid="stToolbar"]`; hiding that
 toolbar hid the button. Empty the toolbar by name instead of switching it off.
 
-**A fixed `max-width` wastes a wide screen and looks broken.** The block
-container was capped at 1440px and centres inside the *main* area, which starts
-after the 340px sidebar — so on a 3440px window the content used 1360px, 40% of
-the screen, sitting 1210px from the left edge and 870px from the right. It reads
-as the page having fallen over sideways. Measured in a real browser at 1280 →
-3440: nothing ever overflowed, the content was just narrow and off-centre. The
-cap is `max-width:97%` now, which holds the margin steady at every width.
+**Every page needs a width cap, and they should be the same one.** Admin was
+capped at 1100 and My Home at 1180; the scheduler, roster and dashboard were far
+wider and My Rooms and Property had no cap at all, so they took Streamlit's wide
+default and stretched across a big monitor. HP reported exactly that split —
+those two pages fine, every other one "zoomed in". They are all
+`max-width:min(1200px,97%)` now (My Rooms 1100, since it is a phone page). The
+`min()` matters: a bare pixel cap cannot promise to stay inside a small window.
 
-Watch for the same rule stated twice. `cleaning_scheduler.py` sets
-`.block-container` at line ~194 and the light theme re-states it at ~554; the
-second one silently wins, so both have to say the same thing.
+Two ways to set this and miss. `cleaning_scheduler.py` states `.block-container`
+twice — once at ~194 and again in the light theme at ~554 — and the second
+silently wins. And `pages/6_Property.py` has no page-level stylesheet of its own;
+its `PLAN_CSS` renders only in the 2-D view, so a rule put there leaves the 3-D
+view uncapped.
 
 **Measure the layout, do not reason about it.** Playwright against a local
 instance settles in a minute what a screenshot cannot: `document.scrollWidth`

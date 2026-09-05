@@ -20,6 +20,11 @@ import streamlit.components.v1 as components
 import ui
 
 st.set_page_config(page_title="Property", page_icon="🏔️", layout="wide")
+# Same width family as the rest of the app, and unconditional: the plan
+# view's stylesheet only renders in 2-D, so a cap in there would leave the
+# 3-D view stretched across a big monitor.
+st.markdown("<style>.block-container{max-width:min(1200px,97%);}</style>",
+            unsafe_allow_html=True)
 auth.require_login()
 ui.topnav("Property")
 

@@ -51,7 +51,7 @@ st.markdown("""
 *{box-sizing:border-box;}
 html,body,[class*="css"]{font-family:'DM Sans',sans-serif!important;color:var(--txt)!important;}
 .stApp{background:#f4f5f7!important;}
-.block-container{padding-top:1.2rem!important;max-width:97%;}
+.block-container{padding-top:1.2rem!important;max-width:min(1200px,97%);}
 .pg-title{font-family:'Syne',sans-serif!important;font-size:1.6rem;font-weight:700;
   letter-spacing:-.03em;color:#16202e;margin:0 0 2px}
 .pg-sub{font-size:.82rem;color:var(--txt2);margin:0 0 .8rem}

@@ -52,6 +52,9 @@ STATUS_ICON = {NOT_STARTED: "○", IN_PROGRESS: "◐", CLEANED: "✓",
                INSPECTED: "★", DND: "⏸", HELP: "!"}
 
 st.markdown("""<style>
+/* Same width family as the rest of the app. Without a cap this page took
+   Streamlit's wide default and stretched right across a big monitor. */
+.block-container{max-width:min(1100px,97%);}
 .mrhero{background:linear-gradient(135deg,#12395f 0%,#1f5fa0 55%,#3f8ed0 100%);
   color:#fff;border-radius:20px;padding:20px 24px;margin:2px 0 16px;
   box-shadow:0 10px 30px rgba(18,57,95,.24);animation:mrfade .5s ease both}

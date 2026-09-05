@@ -50,7 +50,7 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 .stApp{background:#f6f7f9!important;background-image:none!important;}
 html,body,[class*="css"]{font-family:'DM Sans',-apple-system,sans-serif!important;color:#16202e!important;}
-.block-container{padding-top:1.2rem!important;max-width:97%;}
+.block-container{padding-top:1.2rem!important;max-width:min(1200px,97%);}
 header[data-testid="stHeader"]{background:transparent!important;height:0!important;}
 footer{visibility:hidden!important;}#MainMenu{visibility:hidden!important;}
 [data-testid="stSidebarNav"]{display:none!important;}
