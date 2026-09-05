@@ -252,6 +252,22 @@ which is precisely when it needed to start again. It now rewrites the cookie and
 pushes the record's expiry out once per browser session, so anyone opening the
 app in a normal week stays signed in. Do not "optimise" that write away.
 
+**One key at a time is what makes a page slow.** Every `_load_key` is its own
+round trip to Supabase, about eighty milliseconds. The roster page asked for
+weeks one at a time and asked 175 times on a cold load — eight of its nine
+seconds — and `staff_file_info`, whose docstring said it avoided pulling the
+1.8 MB workbook blob, read the whole record anyway, five times a load. Both are
+batched now: `_weeks_all` reads every week in one query and the writers empty it,
+and the workbook's name and date live under their own small key. Measured: 190
+settings reads to 15, and the page from 19.7s to 6.6s cold. Reach for
+`_like_keys` before a loop of `_load_key`.
+
+**Test the page, not the function.** `group_card_html` had been dead for a
+while, and a "minutes of walking" badge was added to it, verified by calling the
+function directly, and shipped — where nobody could ever see it. A test that
+imports a function and asserts on its output proves the function works, not that
+anything runs it.
+
 **A deploy does not reload an imported module.** Streamlit re-reads a *page* file
 on every rerun, but `import db` comes back from `sys.modules`. A process that was
 already running when a deploy lands therefore runs the **new page against the old

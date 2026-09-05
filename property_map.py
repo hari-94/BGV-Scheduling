@@ -601,10 +601,3 @@ def bridge_spans():
     return spans
 
 
-def describe(rooms):
-    """One line for a chart card: where it is, and how far apart it is."""
-    s = spread(rooms)
-    if not s["floors"]:
-        return "unplaced"
-    where = ", ".join("B%d·%s" % (b, lv) for b, lv in s["floors"])
-    return "%s — %.0f min walking" % (where, chart_travel(rooms) / 60.0)

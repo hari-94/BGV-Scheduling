@@ -7,7 +7,7 @@ Tables (auto-created on first use):
 """
 # Guard against circular imports — this module must never import from
 # cleaning_scheduler.py or auth.py at module level.
-import os, json, hashlib, secrets
+import os, json, hashlib, secrets, time as _time
 import clock
 from datetime import datetime, date
 
@@ -133,6 +133,7 @@ STAFF_OVERRIDE_KEY  = "staffsched_overrides"
 STAFF_FILE_KEY      = "staffsched_file"
 STAFF_AUTO_KEY      = "staffsched_autoapply"
 STAFF_WEEK_PREFIX   = "staffweek_"
+STAFF_FILEINFO_KEY  = "staffsched_fileinfo"
 
 SETTINGS_TABLE = "app_settings"
 
@@ -238,42 +239,58 @@ def load_staff_meta() -> dict | None:
 def save_staff_week(week_key: str, week: dict) -> None:
     try:
         _upsert_key(STAFF_WEEK_PREFIX + week_key, week)
+        _weeks_forget()          # the batch above is now a week out of date
     except Exception as ex:
         print(f"[db] save_staff_week error: {ex}")
         raise
 
-def load_staff_week(week_key: str) -> dict | None:
-    try:
-        return _load_key(STAFF_WEEK_PREFIX + week_key)
-    except Exception as ex:
-        print(f"[db] load_staff_week error: {ex}")
-        return None
+#: Every stored week, read in one query and reused for a few seconds.
+#:
+#: The roster page asks for weeks one at a time and asks a great many times --
+#: 175 separate reads on a cold load, measured -- and each one is its own round
+#: trip to Supabase at about eighty milliseconds. That was eight of the page's
+#: nine seconds. The rows are small and there are eighty of them, so fetching
+#: the lot once and answering from that is both faster and less load on the
+#: database. Any write here empties it, so a save is visible immediately.
+_WEEKS = {"at": 0.0, "rows": None}
+_WEEKS_TTL = 15.0
 
-def load_staff_weeks() -> dict:
-    """Every stored week, keyed by its Sunday ISO date."""
+def _weeks_all(force: bool = False) -> dict:
+    if (not force and _WEEKS["rows"] is not None
+            and _time.time() - _WEEKS["at"] < _WEEKS_TTL):
+        return _WEEKS["rows"]
+    out = {}
     try:
-        out = {}
         for row in _like_keys(STAFF_WEEK_PREFIX, with_payload=True):
             payload = row["payload"]
             out[row["key"][len(STAFF_WEEK_PREFIX):]] = (
                 json.loads(payload) if isinstance(payload, str) else payload)
-        return out
     except Exception as ex:
-        print(f"[db] load_staff_weeks error: {ex}")
-        return {}
+        print(f"[db] could not read the weeks: {ex}")
+        return _WEEKS["rows"] or {}
+    _WEEKS["rows"], _WEEKS["at"] = out, _time.time()
+    return out
+
+
+def _weeks_forget() -> None:
+    _WEEKS["rows"] = None
+
+
+def load_staff_week(week_key: str) -> dict | None:
+    return _weeks_all().get(week_key)
+
+def load_staff_weeks() -> dict:
+    """Every stored week, keyed by its Sunday ISO date."""
+    return dict(_weeks_all())
 
 def staff_week_keys() -> list:
     """Just the stored week ids — cheaper than pulling every payload."""
-    try:
-        return sorted(row["key"][len(STAFF_WEEK_PREFIX):]
-                      for row in _like_keys(STAFF_WEEK_PREFIX))
-    except Exception as ex:
-        print(f"[db] staff_week_keys error: {ex}")
-        return []
+    return sorted(_weeks_all())
 
 def delete_staff_week(week_key: str) -> None:
     try:
         _delete_key(STAFF_WEEK_PREFIX + week_key)
+        _weeks_forget()
     except Exception as ex:
         print(f"[db] delete_staff_week error: {ex}")
 
@@ -300,38 +317,76 @@ def save_staff_file(data: bytes, file_name: str = "") -> None:
     (export only), never on page load, so the size costs nothing day to day.
     """
     import base64
+    info = {
+        "file_name": file_name,
+        "size": len(data),
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+    }
     try:
-        _upsert_key(STAFF_FILE_KEY, {
-            "file_name": file_name,
-            "size": len(data),
-            "saved_at": datetime.now().isoformat(timespec="seconds"),
-            "b64": base64.b64encode(data).decode("ascii"),
-        })
+        _upsert_key(STAFF_FILE_KEY, dict(info, b64=base64.b64encode(data).decode("ascii")))
+        # The same three facts again, on their own, so anything that only wants
+        # the name and the date does not drag the workbook across the wire.
+        _upsert_key(STAFF_FILEINFO_KEY, info)
+        _FILE["rec"] = None
     except Exception as ex:
         print(f"[db] save_staff_file error: {ex}")
         raise
 
+#: The stored workbook, held for a minute after it is read.
+#:
+#: It is a base64 blob and the real one is 1.8 MB. The roster page asked for it
+#: five times a load -- three of those only wanted the file's name -- so nine
+#: megabytes crossed the wire to print one line of text.
+_FILE = {"at": 0.0, "rec": None}
+_FILE_TTL = 60.0
+
+
+def _file_rec():
+    if _FILE["rec"] is not None and _time.time() - _FILE["at"] < _FILE_TTL:
+        return _FILE["rec"]
+    try:
+        rec = _load_key(STAFF_FILE_KEY) or {}
+    except Exception as ex:
+        print(f"[db] load_staff_file error: {ex}")
+        return _FILE["rec"] or {}
+    _FILE["rec"], _FILE["at"] = rec, _time.time()
+    return rec
+
+
 def load_staff_file() -> tuple[bytes, dict] | tuple[None, dict]:
     """Return (workbook_bytes, info). Bytes are None when nothing is stored."""
     import base64
+    rec = _file_rec()
+    if not rec or not rec.get("b64"):
+        return None, {}
+    info = {k: v for k, v in rec.items() if k != "b64"}
     try:
-        rec = _load_key(STAFF_FILE_KEY)
-        if not rec or not rec.get("b64"):
-            return None, {}
-        info = {k: v for k, v in rec.items() if k != "b64"}
         return base64.b64decode(rec["b64"]), info
     except Exception as ex:
-        print(f"[db] load_staff_file error: {ex}")
-        return None, {}
+        print(f"[db] could not decode the stored workbook: {ex}")
+        return None, info
 
 def staff_file_info() -> dict:
-    """Just the metadata about the stored workbook — avoids pulling the blob."""
+    """Just the metadata about the stored workbook — really without the blob.
+
+    It used to say that and then read the whole record anyway. The three facts
+    are written to their own key now; a workbook stored before that falls back
+    to the big record once and writes the small one on its way past.
+    """
     try:
-        rec = _load_key(STAFF_FILE_KEY) or {}
-        return {k: v for k, v in rec.items() if k != "b64"}
+        info = _load_key(STAFF_FILEINFO_KEY)
+        if info:
+            return info
     except Exception as ex:
         print(f"[db] staff_file_info error: {ex}")
-        return {}
+    rec = _file_rec() or {}
+    info = {k: v for k, v in rec.items() if k != "b64"}
+    if info:
+        try:
+            _upsert_key(STAFF_FILEINFO_KEY, info)
+        except Exception:
+            pass
+    return info
 
 def save_custom_options(opts: dict) -> None:
     """Extra dropdown choices a manager typed in, keyed by role."""
@@ -426,17 +481,6 @@ def load_full_schedule(date_str: str = None) -> dict | None:
         print(f"[db] load_full_schedule error: {ex}")
         return None
 
-def schedule_exists_today() -> bool:
-    """Check if a full schedule already exists for today."""
-    try:
-        r = (_client().table("schedule_full")
-             .select("date")
-             .eq("date", clock.today_iso())
-             .limit(1)
-             .execute())
-        return bool(r.data)
-    except Exception:
-        return False
 def load_log() -> list:
     """Return all daily snapshots sorted by date desc."""
     try:
