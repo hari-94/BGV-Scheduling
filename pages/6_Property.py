@@ -35,6 +35,23 @@ if not auth.can("can_view_insp_tab"):
     st.stop()
 
 
+@st.cache_data(show_spinner=False)
+def _model():
+    """The resort as modelled, baked to one geometry per material.
+
+    property_model.json is generated from the glb by tools/glb_to_model.py.
+    It is 360KB of base64, so it is read once and held, not re-read on every
+    rerun -- and it is only sent to the browser when the realistic view is on.
+    """
+    path = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                        "property_model.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _inventory():
     return db.all_known_rooms()
@@ -209,471 +226,148 @@ payload = json.dumps({"boxes": boxes, "spans": spans,
                       "levels": pmap.LEVELS,
                       "doorW": pmap.DOOR_W, "levelH": pmap.LEVEL_H,
                       "hallD": pmap.HALL_D}, separators=(",", ":"))
+MODEL_JSON = _model() if VIEW == "real" else "null"
 
 REAL_JS = r"""
 <script>
 /* ── The building as it looks ───────────────────────────────────────────────
-   Grand Colorado on Peak Eight, drawn from the photographs: not three plain
-   bars but a stepped village of cross-gables, warm cedar between grey panel
-   and pale stone, every roof under snow, a wall of dark spruce immediately
-   behind and the Tenmile range beyond it, and the beginner slope out front
-   with its fencing and its ski school.
+   This view is the modelled resort, not the floor plan. It arrives as one
+   geometry per material -- fourteen of them -- baked out of the glb, so the
+   page carries a few compact arrays instead of a model file and a loader.
 
-   The massing is not invented. Every wall runs between the first and last
-   door on that level of that building, every window is a real room in its
-   real place along the corridor, and the levels stack at the heights the
-   block view uses -- so the elevation counts out the same as the floor plan,
-   245 windows for 245 rooms. What is invented is everything the plans do not
-   carry: the roof pitch, the cladding, the colour of the stone.
+   Two things follow, and are worth being plain about. The model is a portrait
+   of the setting: eight blocks, its own terrain, trees, lift, fencing and
+   skiers. It is not the floor plan, so nothing in it counts out against the
+   room list. For that, turn the toggle off: the room grid underneath is the
+   derived one, a box per real room in its real place along its corridor.
 */
 (function () {
-  if (DATA.view !== "real") return;
+  if (DATA.view !== "real" || !window.MODEL) return;
 
   root.visible = false;
   labels.style.display = "none";
 
-  var W = DATA.doorW, LH = DATA.levelH, HD = DATA.hallD;
-  var GY = -LH * 1.35;
-  var real = new THREE.Group();
-  real.position.copy(root.position);
-  scene.add(real);
-
-  function rnd(seed) {          /* repeatable noise, so the village is stable */
-    var s = seed;
-    return function () { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  function bytes(b64) {
+    var s = atob(b64), n = s.length, a = new Uint8Array(n);
+    for (var i = 0; i < n; i++) a[i] = s.charCodeAt(i);
+    return a;
   }
-  var R = rnd(7717);
+
+  var M = window.MODEL;
+  var lo = M.bounds.min, hi = M.bounds.max;
+  /* the export is Z-up and three is Y-up, so the model's z is the height */
+  var footprint = Math.max(hi[0] - lo[0], hi[1] - lo[1]);
+  var SC = 200 / footprint;                 /* a comfortable size on screen */
+  var SPAN = footprint * SC;
+  /* the model's terrain is a finite plate; the snowfield has to carry on
+     past its edge or the resort sits on a mesa in mid-air */
+  var GY = ((M.ground === undefined ? 0 : M.ground) - lo[2]) * SC;
+
+  var model = new THREE.Group();
+  model.rotation.x = -Math.PI / 2;
+  model.scale.setScalar(SC);
+  model.position.set(-(lo[0] + hi[0]) / 2 * SC, -lo[2] * SC,
+                     (lo[1] + hi[1]) / 2 * SC);
+
+  M.groups.forEach(function (g, i) {
+    var spec = M.materials[i];
+    var pb = bytes(g.pos), ib = bytes(g.idx);
+    var pos = new Float32Array(pb.buffer, pb.byteOffset, pb.byteLength / 4);
+    var idx = g.wide
+      ? new Uint32Array(ib.buffer, ib.byteOffset, ib.byteLength / 4)
+      : new Uint16Array(ib.buffer, ib.byteOffset, ib.byteLength / 2);
+
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    /* the export shares one vertex between the faces of a box and carries no
+       normals; averaging them would round every corner off, so split the
+       triangles apart first and let each face keep its own */
+    geo = geo.toNonIndexed();
+    geo.computeVertexNormals();
+
+    var mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+      color: new THREE.Color(spec.color),
+      transparent: spec.opacity < 1,
+      opacity: spec.opacity,
+      side: THREE.DoubleSide}));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.name = spec.name;
+    model.add(mesh);
+  });
+  scene.add(model);
+
+  var snow = new THREE.Mesh(new THREE.PlaneGeometry(SPAN * 26, SPAN * 26),
+                            new THREE.MeshLambertMaterial({color: 0xdfeaf4}));
+  snow.rotation.x = -Math.PI / 2;
+  snow.position.set(0, GY - 0.15, 0);
+  snow.receiveShadow = true;
+  scene.add(snow);
 
   /* ── sky: deep alpine blue overhead, washing out at the ridgeline ─────── */
   var sky = document.createElement("canvas");
   sky.width = 8; sky.height = 512;
-  var sc = sky.getContext("2d");
-  var sg = sc.createLinearGradient(0, 0, 0, 512);
+  var sc2 = sky.getContext("2d");
+  var sg = sc2.createLinearGradient(0, 0, 0, 512);
   sg.addColorStop(0.00, "#1663b4");
   sg.addColorStop(0.34, "#3d8bd2");
   sg.addColorStop(0.66, "#8fc2e6");
   sg.addColorStop(0.86, "#c8dfef");
   sg.addColorStop(1.00, "#e6f0f7");
-  sc.fillStyle = sg; sc.fillRect(0, 0, 8, 512);
+  sc2.fillStyle = sg; sc2.fillRect(0, 0, 8, 512);
   var skyTex = new THREE.CanvasTexture(sky);
   skyTex.magFilter = THREE.LinearFilter;
   scene.background = skyTex;
-  scene.fog = new THREE.Fog(0xd9e7f2, 1100, 4200);
+  scene.fog = new THREE.Fog(0xd9e7f2, SPAN * 3.0, SPAN * 9.0);
 
   /* ── a high spring sun ───────────────────────────────────────────────── */
   scene.remove(key); scene.remove(rim);
-  var sun = new THREE.DirectionalLight(0xfff6e8, 0.98);
-  sun.position.set(-520, 430, 430);
+  var sun = new THREE.DirectionalLight(0xfff6e8, 0.92);
+  sun.position.set(-SPAN * 0.9, SPAN * 0.8, SPAN * 0.8);
   sun.castShadow = true;
   sun.shadow.mapSize.width = 2048;
   sun.shadow.mapSize.height = 2048;
   var shc = sun.shadow.camera;
-  shc.left = -340; shc.right = 340; shc.top = 260; shc.bottom = -260;
-  shc.near = 1; shc.far = 1600; shc.updateProjectionMatrix();
-  sun.shadow.bias = -0.0016;
+  shc.left = -SPAN * 0.8; shc.right = SPAN * 0.8;
+  shc.top = SPAN * 0.8; shc.bottom = -SPAN * 0.8;
+  shc.near = 1; shc.far = SPAN * 4; shc.updateProjectionMatrix();
+  sun.shadow.bias = -0.0012;
   scene.add(sun);
-  scene.add(new THREE.HemisphereLight(0xdaeaff, 0x8fa3b6, 0.44));
+  scene.add(new THREE.HemisphereLight(0xdaeaff, 0x8fa3b6, 0.46));
 
-  function mat(hex, op) {
-    return new THREE.MeshLambertMaterial({
-      color: new THREE.Color(hex),
-      transparent: op !== undefined && op < 1,
-      opacity: op === undefined ? 1 : op});
+  /* ── the Tenmile range behind, which the model does not carry ────────── */
+  function rnd(seed) {
+    var s = seed;
+    return function () { s = (s * 9301 + 49297) % 233280; return s / 233280; };
   }
-
-  /* Colours read off the photographs. */
-  var SNOW   = mat("#fbfdff"),
-      CEDAR  = mat("#b5661f"),
-      PANEL  = mat("#867f78"), PANEL2 = mat("#9a938b"),
-      ROOF   = mat("#44413e"),
-      GLASS  = mat("#1d2830"), RAILG  = mat("#8aa8bd", 0.5),
-      SOFFIT = mat("#3f3a35"), STEEL  = mat("#4a4f55"),
-      PINE   = mat("#16301f"), PINE2  = mat("#1e3f2b"), TRUNK = mat("#3b2e23");
-
-  function box(w, h, d, m) { return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); }
-  function add(m, x, y, z, sh) {
-    m.position.set(x, y, z);
-    if (sh !== false) { m.castShadow = true; m.receiveShadow = true; }
-    real.add(m); return m;
-  }
-
-  /* ── cladding, drawn once and repeated at a real size on every wall ───── */
-  function sidingTexture(base, hi, lo) {
-    var c = document.createElement("canvas");
-    c.width = 64; c.height = 128;
-    var g = c.getContext("2d");
-    g.fillStyle = base; g.fillRect(0, 0, 64, 128);
-    for (var i = 0; i < 10; i++) {
-      var y = i * 12.8;
-      g.fillStyle = hi; g.fillRect(0, y + 1, 64, 4);
-      g.fillStyle = lo; g.fillRect(0, y + 11, 64, 1.8);
-    }
-    for (var j = 0; j < 80; j++) {
-      g.fillStyle = "rgba(40,22,8," + (0.04 + Math.random() * 0.08) + ")";
-      g.fillRect(Math.random() * 64, Math.random() * 128, 5 + Math.random() * 18, 1);
-    }
-    var t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    return t;
-  }
-  function stoneTexture() {
-    var c = document.createElement("canvas");
-    c.width = 256; c.height = 256;
-    var g = c.getContext("2d");
-    g.fillStyle = "#6f6659"; g.fillRect(0, 0, 256, 256);
-    var rows = 8, rh2 = 256 / rows;
-    for (var r = 0; r < rows; r++) {
-      var x = -Math.random() * 40;
-      while (x < 256) {
-        var w2 = 26 + Math.random() * 34;
-        var v = 104 + Math.random() * 36;
-        g.fillStyle = "rgb(" + Math.round(v) + "," + Math.round(v * 0.95)
-                    + "," + Math.round(v * 0.86) + ")";
-        g.fillRect(x + 1.4, r * rh2 + 1.4, w2 - 2.8, rh2 - 2.8);
-        x += w2;
-      }
-    }
-    var t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    return t;
-  }
-  var CEDAR_TEX = sidingTexture("#b5661f", "rgba(255,214,160,0.16)", "rgba(46,22,4,0.34)"),
-      PANEL_TEX = sidingTexture("#867f78", "rgba(255,255,255,0.12)", "rgba(20,20,20,0.26)"),
-      STONE_TEX = stoneTexture();
-
-  function clad(tex, w, h, sx, sy) {
-    var t = tex.clone();
-    t.needsUpdate = true;
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.repeat.set(Math.max(1, Math.round(w / (sx || 7))),
-                 Math.max(1, Math.round(h / (sy || 3.2))));
-    return new THREE.MeshLambertMaterial({map: t});
-  }
-
-  /* Where the buildings sit, so everything else can be placed around them. */
-  var MX0 = 1e9, MX1 = -1e9;
-  (DATA.mass || []).forEach(function (m) {
-    MX0 = Math.min(MX0, m.x0); MX1 = Math.max(MX1, m.x1);
-  });
-  if (MX0 > MX1) { MX0 = 0; MX1 = 200; }
-  var MIDX = (MX0 + MX1) / 2, SPAN = MX1 - MX0;
-  var WALL_D = HD * 2.5;
-  var MIDZ = HD * 0.5;
-  var FRONT = MIDZ + WALL_D / 2;        /* the face that looks down the slope */
-
-  /* ── the snowfield ───────────────────────────────────────────────────── */
-  var gc = document.createElement("canvas");
-  gc.width = gc.height = 512;
-  var gx = gc.getContext("2d");
-  gx.fillStyle = "#eff5fb"; gx.fillRect(0, 0, 512, 512);
-  for (var gi = 0; gi < 240; gi++) {
-    var cx = Math.random() * 512, cy = Math.random() * 512, gr = 24 + Math.random() * 74;
-    var gg = gx.createRadialGradient(cx, cy, 0, cx, cy, gr);
-    var tint = Math.random() < 0.55 ? "196,213,232" : "255,255,255";
-    gg.addColorStop(0, "rgba(" + tint + ",0.7)");
-    gg.addColorStop(1, "rgba(" + tint + ",0)");
-    gx.fillStyle = gg;
-    gx.fillRect(cx - gr, cy - gr, gr * 2, gr * 2);
-  }
-  /* the corduroy the groomer leaves, running down the fall line */
-  for (var ci = 0; ci < 512; ci += 7) {
-    gx.fillStyle = "rgba(190,208,228,0.30)";
-    gx.fillRect(ci, 0, 2.4, 512);
-  }
-  var gTex = new THREE.CanvasTexture(gc);
-  gTex.wrapS = gTex.wrapT = THREE.RepeatWrapping;
-  gTex.repeat.set(16, 16);
-  var ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000),
-                              new THREE.MeshLambertMaterial({map: gTex, color: 0xcfdeed}));
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.set(MIDX, GY, MIDZ);
-  ground.receiveShadow = true;
-  real.add(ground);
-
-  /* the plaza at the foot of the blocks, swept clear and paved */
-  var plaza = new THREE.Mesh(new THREE.PlaneGeometry(SPAN * 1.24, 62), mat("#c9bfb2"));
-  plaza.rotation.x = -Math.PI / 2;
-  plaza.position.set(MIDX, GY + 0.14, FRONT + 34);
-  plaza.receiveShadow = true;
-  real.add(plaza);
-
-  /* ── the backdrop: a snowy range, forested hills, then a wall of spruce ─ */
-  function ridge(dist2, height, colour, seed, jag) {
+  function ridge(back, height, colour, seed, jag) {
     var n = 78, rr = rnd(seed);
     var shape = new THREE.Shape();
-    var wide = 6400, x0 = MIDX - wide / 2;
-    shape.moveTo(x0, -320);
+    var w = SPAN * 14, x0 = -w / 2;
+    shape.moveTo(x0, -SPAN * 0.10);
     for (var i = 0; i <= n; i++) {
       var t = i / n;
       var h = height * (0.30 + 0.70 * Math.abs(Math.sin(t * jag + seed)))
               * (0.70 + 0.30 * rr());
-      shape.lineTo(x0 + t * wide, h);
+      shape.lineTo(x0 + t * w, h);
     }
-    shape.lineTo(x0 + wide, -320);
-    shape.lineTo(x0, -320);
-    var m = new THREE.Mesh(new THREE.ShapeGeometry(shape), mat(colour));
-    m.position.set(0, GY, MIDZ - dist2);
-    real.add(m);
+    shape.lineTo(x0 + w, -SPAN * 0.10);
+    shape.lineTo(x0, -SPAN * 0.10);
+    var m = new THREE.Mesh(new THREE.ShapeGeometry(shape),
+                           new THREE.MeshBasicMaterial({color: colour}));
+    m.position.set(0, GY, -back);
+    scene.add(m);
   }
-  ridge(3400, 900, "#c3d6e8", 5, 7.3);      /* the far snowy range          */
-  ridge(2900, 700, "#adc4dc", 19, 9.1);
-  ridge(2350, 470, "#8fa6b4", 31, 6.2);     /* forested hills, hazed        */
-  ridge(1850, 320, "#5d7a68", 43, 8.4);
-  ridge(1400, 215, "#3a5a46", 57, 11.0);    /* the near timber              */
-  ridge(760, 150, "#26412f", 71, 13.5);     /* and the slope it stands on   */
-
-  /* ── the forest: a dense dark wall behind the resort, thinning outward ── */
-  var coneGeo = new THREE.ConeGeometry(1, 1, 8);
-  var trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 1, 5);
-  (function forest() {
-    var N = 1000;
-    var cones = new THREE.InstancedMesh(coneGeo, PINE, N);
-    var cone2 = new THREE.InstancedMesh(coneGeo, PINE2, N);
-    var caps = new THREE.InstancedMesh(coneGeo, SNOW, N);
-    var trunks = new THREE.InstancedMesh(trunkGeo, TRUNK, N);
-    var d = new THREE.Object3D(), k = 0, guard = 0, dummy = new THREE.Matrix4();
-    while (k < N && guard < N * 16) {
-      guard++;
-      var band = Math.random(), x, z;
-      if (band < 0.70) {                 /* the hillside directly behind     */
-        x = MIDX + (Math.random() - 0.5) * SPAN * 3.0;
-        z = MIDZ - 46 - Math.random() * 700;
-      } else {                            /* thinner cover to either side    */
-        x = MIDX + (Math.random() < 0.5 ? -1 : 1)
-                 * (SPAN * 0.78 + Math.random() * SPAN * 1.5);
-        z = MIDZ - 900 + Math.random() * 1000;
-      }
-      var nearBld = x > MX0 - 110 && x < MX1 + 110 && z > MIDZ - 42 && z < FRONT + 520;
-      var onRun = Math.abs(x - (MIDX + SPAN * 0.66)) < 90 && z > MIDZ - 60;
-      if (nearBld || onRun) continue;
-      /* the ground climbs away from the resort, so the trees climb with it */
-      var up = Math.min(96, Math.max(0, MIDZ - z) * 0.105);
-      var h = 12 + Math.random() * 14, r = h * 0.23;
-      d.position.set(x, GY + up + h * 0.5, z); d.scale.set(r, h, r);
-      d.rotation.set(0, Math.random() * 3, 0); d.updateMatrix();
-      if (Math.random() < 0.5) { cones.setMatrixAt(k, d.matrix); cone2.setMatrixAt(k, dummy); }
-      else { cone2.setMatrixAt(k, d.matrix); cones.setMatrixAt(k, dummy); }
-      d.position.set(x, GY + up + h * 0.86, z);
-      d.scale.set(r * 0.44, h * 0.26, r * 0.44);
-      d.updateMatrix(); caps.setMatrixAt(k, d.matrix);
-      d.position.set(x, GY + up + 2.0, z); d.scale.set(1, 4.2, 1);
-      d.updateMatrix(); trunks.setMatrixAt(k, d.matrix);
-      k++;
-    }
-    cones.castShadow = true; cone2.castShadow = true;
-    [cones, cone2, caps, trunks].forEach(function (m) { m.count = k; real.add(m); });
-  })();
-
-  /* ── a gable roof, wherever one is wanted ────────────────────────────── */
-  function gable(cx, cy, cz, halfW, rise, len, axis) {
-    var tri = new THREE.Shape();
-    tri.moveTo(-halfW, 0); tri.lineTo(0, rise); tri.lineTo(halfW, 0);
-    tri.lineTo(-halfW, 0);
-    var g = new THREE.ExtrudeGeometry(tri, {depth: len, bevelEnabled: false});
-    /* the extrusion runs 0..len along its own z; centre it before turning it,
-       or the roof lands half a building away from the walls it belongs to */
-    g.translate(0, 0, -len / 2);
-    if (axis === "x") g.rotateY(Math.PI / 2);     /* ridge runs along x      */
-    var m = new THREE.Mesh(g, ROOF);
-    m.position.set(cx, cy, cz);
-    m.castShadow = true; m.receiveShadow = true;
-    real.add(m);
-
-    /* snow lying on both pitches, short of the ridge and short of the eaves.
-       R_x(-p) lifts the +z edge rather than dropping it, so the sign here is
-       s on the x-ridge and -s on the z-ridge, not the other way about. */
-    var k = 0.86, lift = rise * (1 - k) + 0.30;
-    var st = new THREE.Shape();
-    st.moveTo(-halfW * k, 0); st.lineTo(0, rise * k); st.lineTo(halfW * k, 0);
-    st.lineTo(-halfW * k, 0);
-    var sgeo = new THREE.ExtrudeGeometry(st, {depth: len * 1.02,
-                                              bevelEnabled: false});
-    sgeo.translate(0, 0, -len * 1.02 / 2);
-    if (axis === "x") sgeo.rotateY(Math.PI / 2);
-    var snow = new THREE.Mesh(sgeo, SNOW);
-    snow.position.set(cx, cy + lift, cz);
-    snow.castShadow = true; snow.receiveShadow = true;
-    real.add(snow);
-
-    if (axis === "x") {
-      var cap = box(len * 1.02, 0.5, 0.7, ROOF);
-      cap.position.set(cx, cy + lift + rise * k + 0.16, cz);
-      cap.castShadow = false; cap.receiveShadow = true;
-      real.add(cap);
-    }
-    return m;
-  }
-
-  /* ── the buildings ───────────────────────────────────────────────────── */
-  (DATA.mass || []).forEach(function (m) {
-    var pad = W * 1.8;
-    var x0 = m.x0 - pad, x1 = m.x1 + pad;
-    var wide = x1 - x0, midX = (x0 + x1) / 2;
-    var levels = m.levels;
-    if (!levels.length) return;
-    var yBot = levels[0].y, yTop = levels[levels.length - 1].y;
-
-    /* stone base, carrying the whole thing down to the snow */
-    var baseH = (yBot - GY) + LH * 0.5;
-    add(box(wide + W, baseH, WALL_D + 3.6, clad(STONE_TEX, wide, baseH * 2.4, 9, 3)),
-        midX, GY + baseH / 2 - LH * 0.5, MIDZ);
-
-    var wallA = clad(CEDAR_TEX, wide, LH), wallB = clad(PANEL_TEX, wide, LH);
-
-    levels.forEach(function (lv, li) {
-      /* the top storey steps back, the way the photographs show it */
-      var top = li === levels.length - 1;
-      var dep = top ? WALL_D * 0.86 : WALL_D;
-      add(box(wide, LH * 0.92, dep, li % 2 ? wallB : wallA), midX, lv.y, MIDZ);
-      add(box(wide + 0.8, LH * 0.10, dep + 0.8, SOFFIT),
-          midX, lv.y - LH * 0.46, MIDZ, false);
-
-      [["n", -1], ["s", 1]].forEach(function (pair) {
-        var side = pair[1], zf = MIDZ + side * (dep / 2);
-        (lv[pair[0]] || []).forEach(function (rx) {
-          /* the window: tall, dark, the full width of the bay */
-          add(box(W * 0.70, LH * 0.52, 0.5, GLASS), rx, lv.y + LH * 0.02,
-              zf + side * 0.28, false);
-          if (li > 0) {
-            /* balcony: a deck with a glass rail, not a timber fence */
-            add(box(W * 0.96, 0.30, 2.9, SOFFIT), rx, lv.y - LH * 0.30,
-                zf + side * 1.6);
-            add(box(W * 0.96, LH * 0.30, 0.14, RAILG), rx, lv.y - LH * 0.14,
-                zf + side * 3.0, false);
-          }
-        });
-      });
-
-      /* vertical panel strips between the bays: the facade has a rhythm */
-      var bays = Math.max(2, Math.round(wide / (W * 4.4)));
-      for (var bi = 1; bi < bays; bi++) {
-        var bx = x0 + wide * bi / bays;
-        [-1, 1].forEach(function (side) {
-          add(box(W * 0.9, LH * 0.92, 0.55, li % 2 ? PANEL : PANEL2),
-              bx, lv.y, MIDZ + side * (dep / 2 + 0.2), false);
-        });
-      }
-    });
-
-    /* ── the roofline: a main ridge broken by projecting cross-gables ──── */
-    var eave = 3.2, half = WALL_D / 2 + eave, rise = LH * 2.15;
-    var ridgeY = yTop + LH * 0.46;
-    gable(midX, ridgeY, MIDZ, half, rise, wide + W * 0.6, "x");
-
-    var wings = Math.max(3, Math.round(wide / (W * 4.6)));
-    for (var wi = 0; wi < wings; wi++) {
-      var wx = x0 + wide * (wi + 0.5) / wings;
-      var ww = W * (1.7 + R() * 0.8);           /* no two bays the same      */
-      var proj = W * (1.7 + R() * 1.1);
-      var lift2 = LH * (0.10 + R() * 0.34);     /* nor the same height       */
-
-      [1, -1].forEach(function (side) {
-        if (side < 0 && R() < 0.42) return;     /* the back is plainer       */
-        var zf = MIDZ + side * (WALL_D / 2 + proj / 2 - 0.4);
-        /* the projecting bay itself, the top two storeys of it */
-        for (var t2 = 0; t2 < 2; t2++) {
-          var lv2 = levels[levels.length - 1 - t2];
-          if (!lv2) continue;
-          var yy = lv2.y + (t2 === 0 ? lift2 : 0);
-          add(box(ww * 2, LH * 0.92, proj, t2 % 2 ? wallB : wallA), wx, yy, zf);
-          add(box(ww * 1.3, LH * 0.52, 0.5, GLASS), wx, yy + LH * 0.02,
-              MIDZ + side * (WALL_D / 2 + proj - 0.1), false);
-        }
-        /* its own gable: from the main ridge out to the front of the bay */
-        var glen = WALL_D / 2 + proj + eave * 0.8;
-        gable(wx, ridgeY + lift2, MIDZ + side * (glen / 2 - 1.2),
-              ww + eave * 0.6, rise * 0.88, glen, "z");
-      });
-    }
-
-    /* chimneys along the ridge, each with its own cap of snow */
-    var chs = Math.max(2, Math.round(wide / (W * 9)));
-    for (var chi = 0; chi < chs; chi++) {
-      var chx = x0 + wide * (chi + 0.5) / chs + (R() - 0.5) * W * 2;
-      var chh = LH * (0.9 + R() * 0.5);
-      add(box(W * 1.0, chh, W * 1.0, clad(STONE_TEX, W * 2, chh * 2, 4, 2.4)),
-          chx, ridgeY + rise + chh * 0.30, MIDZ);
-      add(box(W * 1.2, 0.5, W * 1.2, SNOW), chx,
-          ridgeY + rise + chh * 0.80, MIDZ, false);
-    }
-  });
-
-  /* the bridges between the blocks, as glazed links */
-  (DATA.spans || []).forEach(function (s) {
-    var w = Math.abs(s.x1 - s.x0);
-    add(box(w, LH * 0.72, HD * 0.55, PANEL), (s.x0 + s.x1) / 2, s.y, MIDZ);
-    add(box(w, LH * 0.40, HD * 0.58, GLASS), (s.x0 + s.x1) / 2,
-        s.y + LH * 0.08, MIDZ, false);
-    add(box(w, 0.5, HD * 0.62, SNOW), (s.x0 + s.x1) / 2,
-        s.y + LH * 0.40, MIDZ, false);
-  });
-
-  /* ── the lift out of the plaza ───────────────────────────────────────── */
-  (function lift() {
-    var lx = MIDX + SPAN * 0.66, z0 = FRONT + 150, z1 = MIDZ - 1250, N = 9;
-    var pts = [];
-    for (var i = 0; i <= N; i++) {
-      var f = i / N, z = z0 + (z1 - z0) * f, h = 26 + f * 5;
-      add(box(2.0, h, 2.0, STEEL), lx, GY + h / 2, z);
-      add(box(14, 1.1, 1.1, STEEL), lx, GY + h, z, false);
-    }
-    for (var j = 0; j <= 48; j++) {
-      var f2 = j / 48;
-      pts.push(new THREE.Vector3(lx - 6.0, GY + 25.4 + f2 * 5, z0 + (z1 - z0) * f2));
-    }
-    real.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
-                            new THREE.LineBasicMaterial({color: 0x2a3037})));
-    for (var c = 0; c < 16; c++) {
-      var f3 = c / 16, z3 = z0 + (z1 - z0) * f3, y3 = GY + 25.4 + f3 * 5;
-      add(box(0.36, 3.2, 0.36, STEEL), lx - 6.0, y3 - 1.6, z3, false);
-      add(box(3.6, 0.55, 2.0, mat("#b1362c")), lx - 6.0, y3 - 3.4, z3, false);
-    }
-    /* the terminal: a dark curved shell at the bottom of the line */
-    var shell = new THREE.Mesh(
-      new THREE.CylinderGeometry(9, 9, 34, 16, 1, false, 0, Math.PI), mat("#3a3f44"));
-    shell.rotation.z = Math.PI / 2;
-    add(shell, lx, GY + 7.5, z0 + 26);
-  })();
-
-  /* ── the slope: the fencing, and the people on it ────────────────────── */
-  (function slope() {
-    var FENCE = [mat("#e06a1c"), mat("#2f6fc4")];
-    for (var f = 0; f < 5; f++) {
-      var fx = MIDX - SPAN * 0.34 + f * SPAN * 0.20 + (R() - 0.5) * 12;
-      var fz = FRONT + 60 + R() * 90;
-      var flen = 15 + R() * 14;
-      add(box(flen, 1.9, 0.30, FENCE[f % 2]), fx, GY + 1.7, fz, false);
-      for (var pI = 0; pI <= 3; pI++) {
-        add(box(0.5, 3.0, 0.5, mat("#e8b220")),
-            fx - flen / 2 + flen * pI / 3, GY + 1.5, fz);
-      }
-    }
-    var COATS = ["#d1352c", "#2660b8", "#e8a021", "#2f8f5b", "#c0399a",
-                 "#1d2a3a", "#e0e4e8", "#7a3fb0"];
-    var PH = LH * 0.62;                 /* a storey is about five feet ten */
-    function person(px, pz, s) {
-      var b = PH * s;
-      add(box(b * 0.30, b * 0.74, b * 0.24,
-              mat(COATS[Math.floor(R() * COATS.length)])), px, GY + b * 0.37, pz);
-      add(box(b * 0.24, b * 0.24, b * 0.24, mat("#2b2f36")),
-          px, GY + b * 0.86, pz, false);
-      add(box(b * 0.92, 0.16, b * 0.20, mat("#20262e")), px, GY + 0.12, pz, false);
-    }
-    /* the ski school, in its ranks */
-    for (var r2 = 0; r2 < 7; r2++)
-      for (var c2 = 0; c2 < 9; c2++)
-        person(MIDX + SPAN * 0.30 + c2 * 7 + (R() - 0.5) * 2,
-               FRONT + 210 + r2 * 13 + (R() - 0.5) * 3, 0.8);
-    /* and everyone else, scattered down the slope */
-    for (var q = 0; q < 70; q++)
-      person(MIDX + (R() - 0.5) * SPAN * 1.5, FRONT + 40 + R() * 300, 1.0);
-    /* the plaza crowd */
-    for (var q2 = 0; q2 < 34; q2++)
-      person(MIDX + (R() - 0.5) * SPAN * 1.0, FRONT + 12 + R() * 46, 1.0);
-  })();
+  ridge(SPAN * 4.0, SPAN * 1.05, "#c3d6e8", 5, 7.3);
+  ridge(SPAN * 3.3, SPAN * 0.80, "#adc4dc", 19, 9.1);
+  ridge(SPAN * 2.6, SPAN * 0.55, "#8fa6b4", 31, 6.2);
+  ridge(SPAN * 2.0, SPAN * 0.36, "#5d7a68", 43, 8.4);
 
   /* ── frame it the way the photograph is framed ───────────────────────── */
-  yaw = -0.26; pitch = 0.215; dist = SPAN * 1.16; panX = 0; panY = LH * 1.9;
+  /* At a 42 degree field the visible width is about 1.15 times the distance,
+     so a model 200 wide sits comfortably in the frame at a little over that. */
+  yaw = -0.28; pitch = 0.285; dist = SPAN * 1.22; panX = 0; panY = SPAN * 0.13;
   place();
 })();
 </script>
@@ -714,6 +408,7 @@ HTML = """
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const DATA = __PAYLOAD__;
+window.MODEL = __MODEL__;
 
 const wrap = document.getElementById("wrap");
 const cv = document.getElementById("cv");
@@ -1210,7 +905,8 @@ PLAN_CSS = """
 if flat:
     st.markdown(PLAN_CSS + _plan_html(), unsafe_allow_html=True)
 else:
-    components.html(HTML.replace("__PAYLOAD__", payload), height=640,
+    components.html(HTML.replace("__PAYLOAD__", payload)
+                        .replace("__MODEL__", MODEL_JSON), height=640,
                     scrolling=False)
 
 # ---------------------------------------------------------------- legend
