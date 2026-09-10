@@ -35,23 +35,6 @@ if not auth.can("can_view_insp_tab"):
     st.stop()
 
 
-@st.cache_data(show_spinner=False)
-def _model():
-    """The resort as modelled, baked to one geometry per material.
-
-    property_model.json is generated from the glb by tools/glb_to_model.py.
-    It is 360KB of base64, so it is read once and held, not re-read on every
-    rerun -- and it is only sent to the browser when the realistic view is on.
-    """
-    path = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                        "property_model.json")
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return fh.read()
-    except OSError:
-        return ""
-
-
 @st.cache_data(ttl=3600, show_spinner=False)
 def _inventory():
     return db.all_known_rooms()
@@ -108,10 +91,6 @@ with c1:
                           T("prop.by_building")],
                          horizontal=True, key="prop_colour")
 with c2:
-    # The building as it looks, first; the room blocks a click away. Somebody
-    # opening this page should recognise the place before being asked to read
-    # it as a diagram.
-    realistic = st.toggle(T("prop.realistic"), value=True, key="prop_real")
     flat = st.toggle(T("prop.flat"), value=False, key="prop_flat")
     show_extras = st.toggle(T("prop.show_amenities"), value=True, key="prop_extras")
     if st.button(T("prop.refresh"), use_container_width=True):
@@ -129,7 +108,6 @@ with c3:
         f'<b>{done}</b> finished · <b>{len(spans)}</b> bridges</div>',
         unsafe_allow_html=True)
 
-VIEW = "real" if realistic else "blocks"
 MODE = ("status" if colour_by == T("prop.by_status")
         else "service" if colour_by == T("prop.by_service") else "bld")
 
@@ -142,32 +120,6 @@ SVC_COLOUR = {"Full Clean": "#2563a8", "Full Clean (IH)": "#6d5bb5",
 SVC_SHORT = {"Full Clean": "FC", "Full Clean (IH)": "IH",
              "Daily Service": "DS", "Dust n Vac": "DV"}
 OFF_TODAY = "#c3ccd8"        # in the building, not on a chart today
-
-
-
-def _massing(boxes):
-    """The buildings as solids rather than as loose rooms.
-
-    The realistic view needs walls and roofs, not a box per bedroom, so each
-    building is reduced to its footprint and the levels stacked inside it. The
-    room positions are kept per level and per side of the corridor, because
-    that is where the windows and balconies go -- one window per real room, so
-    the elevation counts out the same as the floor plan.
-    """
-    per = {}
-    for b in boxes:
-        m = per.setdefault(b["bld"], {"bld": b["bld"], "x0": 1e9, "x1": -1e9,
-                                      "levels": {}})
-        m["x0"] = min(m["x0"], b["x"])
-        m["x1"] = max(m["x1"], b["x"])
-        lv = m["levels"].setdefault(b["level"], {"y": b["y"], "n": [], "s": []})
-        (lv["n"] if b["side"] < 0 else lv["s"]).append(b["x"])
-    out = []
-    for m in per.values():
-        levels = sorted(m["levels"].values(), key=lambda l: l["y"])
-        out.append({"bld": m["bld"], "x0": m["x0"], "x1": m["x1"],
-                    "levels": levels})
-    return sorted(out, key=lambda m: m["x0"])
 
 
 def _depth(mins):
@@ -221,158 +173,10 @@ if not show_extras:
     facils = [f for f in facils if f["kind"] != "amenity"]
 
 payload = json.dumps({"boxes": boxes, "spans": spans,
-                      "mass": _massing(boxes), "view": VIEW,
                       "facils": facils, "cores": cores,
                       "levels": pmap.LEVELS,
                       "doorW": pmap.DOOR_W, "levelH": pmap.LEVEL_H,
                       "hallD": pmap.HALL_D}, separators=(",", ":"))
-MODEL_JSON = _model() if VIEW == "real" else "null"
-
-REAL_JS = r"""
-<script>
-/* ── The building as it looks ───────────────────────────────────────────────
-   This view is the modelled resort, not the floor plan. It arrives as one
-   geometry per material -- fourteen of them -- baked out of the glb, so the
-   page carries a few compact arrays instead of a model file and a loader.
-
-   Two things follow, and are worth being plain about. The model is a portrait
-   of the setting: eight blocks, its own terrain, trees, lift, fencing and
-   skiers. It is not the floor plan, so nothing in it counts out against the
-   room list. For that, turn the toggle off: the room grid underneath is the
-   derived one, a box per real room in its real place along its corridor.
-*/
-(function () {
-  if (DATA.view !== "real" || !window.MODEL) return;
-
-  root.visible = false;
-  labels.style.display = "none";
-
-  function bytes(b64) {
-    var s = atob(b64), n = s.length, a = new Uint8Array(n);
-    for (var i = 0; i < n; i++) a[i] = s.charCodeAt(i);
-    return a;
-  }
-
-  var M = window.MODEL;
-  var lo = M.bounds.min, hi = M.bounds.max;
-  /* the export is Z-up and three is Y-up, so the model's z is the height */
-  var footprint = Math.max(hi[0] - lo[0], hi[1] - lo[1]);
-  var SC = 200 / footprint;                 /* a comfortable size on screen */
-  var SPAN = footprint * SC;
-  /* the model's terrain is a finite plate; the snowfield has to carry on
-     past its edge or the resort sits on a mesa in mid-air */
-  var GY = ((M.ground === undefined ? 0 : M.ground) - lo[2]) * SC;
-
-  var model = new THREE.Group();
-  model.rotation.x = -Math.PI / 2;
-  model.scale.setScalar(SC);
-  model.position.set(-(lo[0] + hi[0]) / 2 * SC, -lo[2] * SC,
-                     (lo[1] + hi[1]) / 2 * SC);
-
-  M.groups.forEach(function (g, i) {
-    var spec = M.materials[i];
-    var pb = bytes(g.pos), ib = bytes(g.idx);
-    var pos = new Float32Array(pb.buffer, pb.byteOffset, pb.byteLength / 4);
-    var idx = g.wide
-      ? new Uint32Array(ib.buffer, ib.byteOffset, ib.byteLength / 4)
-      : new Uint16Array(ib.buffer, ib.byteOffset, ib.byteLength / 2);
-
-    var geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    geo.setIndex(new THREE.BufferAttribute(idx, 1));
-    /* the export shares one vertex between the faces of a box and carries no
-       normals; averaging them would round every corner off, so split the
-       triangles apart first and let each face keep its own */
-    geo = geo.toNonIndexed();
-    geo.computeVertexNormals();
-
-    var mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
-      color: new THREE.Color(spec.color),
-      transparent: spec.opacity < 1,
-      opacity: spec.opacity,
-      side: THREE.DoubleSide}));
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.name = spec.name;
-    model.add(mesh);
-  });
-  scene.add(model);
-
-  var snow = new THREE.Mesh(new THREE.PlaneGeometry(SPAN * 26, SPAN * 26),
-                            new THREE.MeshLambertMaterial({color: 0xdfeaf4}));
-  snow.rotation.x = -Math.PI / 2;
-  snow.position.set(0, GY - 0.15, 0);
-  snow.receiveShadow = true;
-  scene.add(snow);
-
-  /* ── sky: deep alpine blue overhead, washing out at the ridgeline ─────── */
-  var sky = document.createElement("canvas");
-  sky.width = 8; sky.height = 512;
-  var sc2 = sky.getContext("2d");
-  var sg = sc2.createLinearGradient(0, 0, 0, 512);
-  sg.addColorStop(0.00, "#1663b4");
-  sg.addColorStop(0.34, "#3d8bd2");
-  sg.addColorStop(0.66, "#8fc2e6");
-  sg.addColorStop(0.86, "#c8dfef");
-  sg.addColorStop(1.00, "#e6f0f7");
-  sc2.fillStyle = sg; sc2.fillRect(0, 0, 8, 512);
-  var skyTex = new THREE.CanvasTexture(sky);
-  skyTex.magFilter = THREE.LinearFilter;
-  scene.background = skyTex;
-  scene.fog = new THREE.Fog(0xd9e7f2, SPAN * 3.0, SPAN * 9.0);
-
-  /* ── a high spring sun ───────────────────────────────────────────────── */
-  scene.remove(key); scene.remove(rim);
-  var sun = new THREE.DirectionalLight(0xfff6e8, 0.92);
-  sun.position.set(-SPAN * 0.9, SPAN * 0.8, SPAN * 0.8);
-  sun.castShadow = true;
-  sun.shadow.mapSize.width = 2048;
-  sun.shadow.mapSize.height = 2048;
-  var shc = sun.shadow.camera;
-  shc.left = -SPAN * 0.8; shc.right = SPAN * 0.8;
-  shc.top = SPAN * 0.8; shc.bottom = -SPAN * 0.8;
-  shc.near = 1; shc.far = SPAN * 4; shc.updateProjectionMatrix();
-  sun.shadow.bias = -0.0012;
-  scene.add(sun);
-  scene.add(new THREE.HemisphereLight(0xdaeaff, 0x8fa3b6, 0.46));
-
-  /* ── the Tenmile range behind, which the model does not carry ────────── */
-  function rnd(seed) {
-    var s = seed;
-    return function () { s = (s * 9301 + 49297) % 233280; return s / 233280; };
-  }
-  function ridge(back, height, colour, seed, jag) {
-    var n = 78, rr = rnd(seed);
-    var shape = new THREE.Shape();
-    var w = SPAN * 14, x0 = -w / 2;
-    shape.moveTo(x0, -SPAN * 0.10);
-    for (var i = 0; i <= n; i++) {
-      var t = i / n;
-      var h = height * (0.30 + 0.70 * Math.abs(Math.sin(t * jag + seed)))
-              * (0.70 + 0.30 * rr());
-      shape.lineTo(x0 + t * w, h);
-    }
-    shape.lineTo(x0 + w, -SPAN * 0.10);
-    shape.lineTo(x0, -SPAN * 0.10);
-    var m = new THREE.Mesh(new THREE.ShapeGeometry(shape),
-                           new THREE.MeshBasicMaterial({color: colour}));
-    m.position.set(0, GY, -back);
-    scene.add(m);
-  }
-  ridge(SPAN * 4.0, SPAN * 1.05, "#c3d6e8", 5, 7.3);
-  ridge(SPAN * 3.3, SPAN * 0.80, "#adc4dc", 19, 9.1);
-  ridge(SPAN * 2.6, SPAN * 0.55, "#8fa6b4", 31, 6.2);
-  ridge(SPAN * 2.0, SPAN * 0.36, "#5d7a68", 43, 8.4);
-
-  /* ── frame it the way the photograph is framed ───────────────────────── */
-  /* At a 42 degree field the visible width is about 1.15 times the distance,
-     so a model 200 wide sits comfortably in the frame at a little over that. */
-  yaw = -0.28; pitch = 0.285; dist = SPAN * 1.22; panX = 0; panY = SPAN * 0.13;
-  place();
-})();
-</script>
-"""
-
 
 HTML = """
 <div id="wrap">
@@ -408,7 +212,6 @@ HTML = """
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const DATA = __PAYLOAD__;
-window.MODEL = __MODEL__;
 
 const wrap = document.getElementById("wrap");
 const cv = document.getElementById("cv");
@@ -787,7 +590,7 @@ size();
   renderer.render(scene, camera);
 })();
 </script>
-""" + REAL_JS
+"""
 
 def _ink(hexcol):
     """Dark or white text, whichever actually reads on this colour."""
@@ -905,8 +708,7 @@ PLAN_CSS = """
 if flat:
     st.markdown(PLAN_CSS + _plan_html(), unsafe_allow_html=True)
 else:
-    components.html(HTML.replace("__PAYLOAD__", payload)
-                        .replace("__MODEL__", MODEL_JSON), height=640,
+    components.html(HTML.replace("__PAYLOAD__", payload), height=640,
                     scrolling=False)
 
 # ---------------------------------------------------------------- legend

@@ -114,7 +114,6 @@ STRINGS = {
     "prop.off_today":     ("Not on a chart today", "Sin hoja hoy"),
     "prop.show_amenities": ("Amenities", "Amenidades"),
     "prop.flat":          ("2D plan", "Plano 2D"),
-    "prop.realistic":     ("The building", "El edificio"),
     "prop.size_note":     ("Box depth is the room's cleaning time — a 140 is deeper "
                            "than a 120, and a 70 deeper than a Dust n Vac. The room "
                            "number and its service are printed on the top of each box.",
