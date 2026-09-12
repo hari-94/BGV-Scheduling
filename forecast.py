@@ -230,7 +230,8 @@ def forecast(days, estimate, on_hand=None):
         extra = (on_hand or (lambda _iso: {}))(d["date"]) or {}
         est = estimate(d["minutes"], d["checkouts"], d["dailies"],
                        on_hand_hskp=extra.get("hk"),
-                       on_hand_rqs=extra.get("rqs"))
+                       on_hand_rqs=extra.get("rqs"),
+                       dustnvac=d.get("dustnvac", 0))
         merged = dict(d)
         merged.update(est)
         merged["date"] = d["date"]

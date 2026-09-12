@@ -989,6 +989,10 @@ with tab_plan:
                     "HK needed": r["hskp"],
                     "If it runs badly": f'{r["hskp_low"]}–{r["hskp_high"]}',
                     "RQS needed": r["rqs"],
+                    # The daily services are one inspector's round however many
+                    # there are, so the count is worth showing split.
+                    "of which": (f'{r["rqs_fc"]} full clean'
+                                 + (" + 1 daily" if r["rqs_ds"] else "")),
                     "In this week": "yes" if r["date"] in dates else "",
                 } for r in _frows]), hide_index=True, use_container_width=True,
                     height=38 * len(_frows) + 40)

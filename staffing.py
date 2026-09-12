@@ -21,9 +21,13 @@ estimate below does:
     supervisor, and the fraction infects the Extras row: Sunday reads "0.49
     extras" when what it means is thirty people for a thirty-person day.
 
-3.  RQS counted from checkouts alone. An inspector also walks the daily
-    services; on a heavy DS day the sheet asks for fewer inspectors than the
-    day actually needs.
+3.  RQS counted from rooms rather than from how the floor is actually run.
+    The daily services all go to RQS 2 -- one person, property-wide, by
+    design -- so they do not scale the inspector count at all. What scales it
+    is the Full Clean rooms, at the 12-13 an inspector can carry. Counting
+    dailies into the divisor asked for eleven inspectors on a day with
+    eighteen checkouts and a hundred and seven dailies, when the floor runs
+    that day on RQS 2 and two others.
 
 4.  A point estimate for a decision that is not symmetric. Being one
     housekeeper short costs a missed checkout or overtime; being one over
@@ -45,8 +49,11 @@ DS_FULL = 460
 
 #: What the sheet uses, kept for the baseline figure.
 SHEET_DIVISOR = 360
-#: Rooms one inspector covers in a day. The Reassign board uses the same 12.
+#: Full Clean rooms one inspector carries. `INSP_ROOM_MAX` in the scheduler is
+#: 13 and its comment says "an inspector can carry ~12-13 rooms"; 12 is the
+#: comfortable number to plan on and 13 the tight one.
 ROOMS_PER_RQS = 12
+RQS_ROOMS_TIGHT = 13
 
 #: Typical minutes a checkout takes here: the scheduler's Full Clean charts
 #: run 70/120/140 with 120 the common case.
@@ -69,7 +76,7 @@ def sheet_estimate(minutes, checkouts):
 
 
 def estimate(minutes=0, checkouts=0, dailies=0, on_hand_hskp=None,
-             on_hand_rqs=None, divisor=None):
+             on_hand_rqs=None, divisor=None, dustnvac=0):
     """How many people this day needs.
 
     `minutes` is the day's total cleaning labour, `checkouts` and `dailies`
@@ -101,8 +108,15 @@ def estimate(minutes=0, checkouts=0, dailies=0, on_hand_hskp=None,
     high = (fc_minutes / FC_LOW if fc_minutes else 0.0) + \
            (ds_minutes / (DS_FULL * 0.87) if ds_minutes else 0.0)
 
+    # Inspectors. The Full Clean rooms are what scales: an inspector carries
+    # 12-13 of them, which is `INSP_ROOM_MAX` in the scheduler. The daily
+    # services and the Dust n Vac round are RQS 2's, one person whatever the
+    # count, so they add a head and not a ratio -- a hundred dailies and ten
+    # need the same one inspector.
+    rqs_fc = _ceil(checkouts / ROOMS_PER_RQS) if checkouts else 0
+    rqs_fc_tight = _ceil(checkouts / RQS_ROOMS_TIGHT) if checkouts else 0
+    rqs_ds = 1 if (dailies or dustnvac) else 0
     rooms = checkouts + dailies
-    rqs = rooms / ROOMS_PER_RQS if rooms else 0.0
 
     out = OrderedDict()
     out["minutes"] = minutes
@@ -111,14 +125,18 @@ def estimate(minutes=0, checkouts=0, dailies=0, on_hand_hskp=None,
     out["hskp_low"] = _ceil(low) if minutes else 0
     out["hskp"] = _ceil(likely) if minutes else 0
     out["hskp_high"] = _ceil(high) if minutes else 0
-    out["rqs"] = _ceil(rqs) if rooms else 0
+    out["dustnvac"] = int(dustnvac or 0)
+    out["rqs_fc"] = rqs_fc
+    out["rqs_ds"] = rqs_ds
+    out["rqs"] = rqs_fc + rqs_ds
+    out["rqs_tight"] = rqs_fc_tight + rqs_ds
     out["hskp_raw"] = likely
-    out["rqs_raw"] = rqs
+    out["rqs_raw"] = float(out["rqs"])
     # A day with any work at all needs at least one of each.
     if minutes and not out["hskp"]:
         out["hskp"] = out["hskp_low"] = out["hskp_high"] = 1
     if rooms and not out["rqs"]:
-        out["rqs"] = 1
+        out["rqs"] = out["rqs_tight"] = 1
 
     sheet = sheet_estimate(minutes, checkouts)
     out["sheet_hskp"] = sheet["hskp"]

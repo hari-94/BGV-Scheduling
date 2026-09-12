@@ -319,6 +319,21 @@ Three things about that export, each of which produced wrong numbers first:
 
 The same uploader reads a single-day export; it simply comes back as one day.
 
+**Inspectors are counted from Full Clean rooms only.** The daily services all
+go to RQS 2 — one person, property-wide, whatever the count — so they add a
+head, not a ratio. What scales is the checkouts, at the 12–13 an inspector
+carries (`INSP_ROOM_MAX` in the scheduler is 13; 12 is the comfortable number
+to plan on, and `rqs_tight` uses 13). So the estimate is
+`ceil(checkouts / 12) + 1 if there is any daily-service or Dust n Vac work`.
+
+Counting dailies into the divisor, as it used to, asked for **eleven**
+inspectors on 15 September — eighteen checkouts and a hundred and seven
+dailies — when the floor runs that day on RQS 2 and two others. Over the 13–30
+September range it came to 144 inspector-days against 100. It moves the other
+way too: a checkout-heavy day with few dailies now costs slightly more, because
+RQS 2's round is a whole person rather than something absorbed into a ratio —
+27 September goes 11 → 12.
+
 **The sheet's own divisor is not ours, and that is the point.** This dashboard
 divides labour minutes by 390 for its "Daily Housekeeper Shifts"; `staffing.py`
 splits the minutes between Full Clean and Daily Service and divides each by its
