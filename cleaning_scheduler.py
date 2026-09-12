@@ -1426,91 +1426,209 @@ def parse_room_code(room: str) -> dict:
 def get_building(room): return parse_room_code(room)["bld"]
 
 def expand_compound_room(room_str: str) -> list:
-    m = re.match(r'^([1-9]\d{3})([A-Z]{2,4})$', room_str.upper())
-    if not m: return [room_str.upper()]
+    """"2232EG" is two rooms. Split the letters, but check before doing it.
+
+    Every room code the property has ever issued is four digits and exactly one
+    letter -- 174 of 174 on the September sheet, and A through I is the whole
+    alphabet of them. So a code carrying two or more letters is the front desk's
+    shorthand for a lock-off pair, and each letter is its own door.
+
+    The old rule only split letters that were consecutive, which got 1010AB and
+    1222EF right and left 2232EG alone -- and this property's lock-offs skip F
+    as often as not, so a stayover on 2232E and 2232G was being filed against a
+    room called "2232EG" that does not exist and never matched anything.
+
+    The split is checked rather than assumed: it happens only when the whole
+    code is not a real room and every single-letter part is. If the property
+    ever issues a genuine two-letter room, this leaves it alone.
+    """
+    s = str(room_str or "").strip().upper()
+    m = re.match(r'^([1-9]\d{3})([A-Z]{2,4})$', s)
+    if not m:
+        return [s]
     base, suffix = m.group(1), m.group(2)
-    if len(suffix) == 2 and ord(suffix[1]) == ord(suffix[0]) + 1:
-        return [f"{base}{suffix[0]}", f"{base}{suffix[1]}"]
-    return [room_str.upper()]
+    parts = [f"{base}{ch}" for ch in suffix]
+    try:
+        if pmap.parse(s):
+            return [s]                      # a real room that happens to be long
+        if all(pmap.parse(p) for p in parts):
+            return parts
+    except Exception:
+        # No map is not a reason to lose the rooms; fall back to the shape rule.
+        pass
+    return parts if len(suffix) <= 4 else [s]
 
 def expand_rooms(raw_list: list) -> list:
     return [r for s in raw_list for r in expand_compound_room(s)]
+
+# \u2500\u2500 the front desk's daily report \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# The shape of it changes. It has arrived as "Room Moves:" and as "-Room Moves",
+# with arrows written ">", "->", "\u2192" and as "\u00ae" -- which is what a Wingdings
+# arrow turns into when Outlook pastes it as text. The parser used to require a
+# header to begin with a letter and end with a colon, so the day the desk put a
+# hyphen in front of every heading it captured *nothing at all*: no late
+# checkouts, no pets, no room moves, and silently, because an empty result looks
+# exactly like a quiet day.
+#
+# So matching is done on a normalised form -- bullets stripped, punctuation
+# dropped, case and spacing flattened -- against a table of names each section
+# has actually been called. A heading that is not recognised still ends the
+# previous section rather than letting its contents be filed under it, which is
+# the failure that turns a format change into wrong data instead of missing data.
+
+_NOTE_SECTIONS = {
+    "vip inspections": "VIP", "vip inspection": "VIP", "vips": "VIP",
+    "room moves": "Room Move", "room move": "Room Move", "moves": "Room Move",
+    "stayovers": "Stayover", "stayover": "Stayover", "stay overs": "Stayover",
+    "robes": "Robes", "robe": "Robes",
+    "pack n play": "Pack n Play", "pack and play": "Pack n Play",
+    "packnplay": "Pack n Play", "pnp": "Pack n Play",
+    "cribs": "Pack n Play", "crib": "Pack n Play",
+    "highchairs": "Highchair", "highchair": "Highchair",
+    "high chairs": "Highchair", "high chair": "Highchair",
+    "rollaway": "Rollaway", "rollaways": "Rollaway", "roll away": "Rollaway",
+    "special requests": "Special Request", "special request": "Special Request",
+    "requests": "Special Request",
+    "dogs arriving": "Dog arriving", "dog arriving": "Dog arriving",
+    "dogs": "Dog arriving", "pets": "Dog arriving", "pets arriving": "Dog arriving",
+    "celebrations": "Celebration", "celebration": "Celebration",
+    "early ins": "Early In", "early in": "Early In", "early arrivals": "Early In",
+    "early check ins": "Early In", "early checkins": "Early In",
+    "late arrival": "Late Arrival", "late arrivals": "Late Arrival",
+}
+_LATE_SECTIONS = {"late checkouts", "late checkout", "late check outs",
+                  "late check out", "late outs", "late out", "late c o",
+                  "late cos", "late co"}
+# Headings that carry no per-room information. They are named so their contents
+# cannot leak into whichever section came before them.
+_SKIP_SECTIONS = {"check ins", "check in", "checkins", "arrivals",
+                  "check outs", "check out", "checkouts", "departures",
+                  "notes", "reminders", "general notes"}
+
+_ROOM_RE = re.compile(r'\b([1-9]\d{3}[A-Z]{1,4})\b')
+_TIME_RE = re.compile(r'\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', re.IGNORECASE)
+# \u00ae and \u00e0 are Wingdings arrows pasted as text; the rest are the real thing.
+_ARROW = r'(?:[>\u2192\u21d2\u27a1\u00ae\u00e0]|-{1,2}>|=>|\u2013|\u2014|\bto\b)'
+_MOVE_RE = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*' + _ARROW +
+                      r'\s*([1-9]\d{3}[A-Z]{1,4})', re.IGNORECASE)
+_BULLET = re.compile(r'^[\s\t]*(?:[*\u2022\u25e6\u2023\u2043\u00b7\-\u2013]+|\d+[.)])\s*')
+_CELEB_RE = re.compile(r'^(Birthday|Anniversary|Misc\.?|Other)$', re.IGNORECASE)
+_EMPTY = {"", "n/a", "na", "none", "nil", "-", "--", "x"}
+
+
+def _norm_heading(s: str) -> str:
+    """Flatten a heading so spelling and punctuation stop mattering."""
+    s = re.sub(r'[^A-Za-z ]+', ' ', str(s or ""))
+    return re.sub(r'\s+', ' ', s).strip().lower()
+
 
 def parse_email_notes(text: str) -> dict:
     late_co: dict = {}
     notes: dict = {}
     if not text or not text.strip():
         return {"late_checkout": late_co, "notes": notes}
-    ROOM_RE = re.compile(r'\b([1-9]\d{3}[A-Z]{1,4})\b')
-    TIME_RE = re.compile(r'\b(\d{1,2}:\d{2}\s*(?:am|pm))\b', re.IGNORECASE)
-    SECTION_RE = re.compile(r'^([A-Za-z][A-Za-z &\'/]+):\s*$')
-    MOVE_RE = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*[-\u2013>\u2192]+\s*([1-9]\d{3}[A-Z]{1,4})')
-    CELEB_RE = re.compile(r'^(Birthday|Anniversary|Misc\.?)$', re.IGNORECASE)
-    DEBULLET = re.compile(r'^[\s\t]*[*\u2022\u25e6\u2023\u2043\-]?\s*')
-    NOTE_LABELS = {
-        "vip inspections":"VIP","room moves":"Room Move","stayovers":"Stayover",
-        "robes":"Robes","pack n play":"Pack n Play","highchairs":"Highchair",
-        "rollaway":"Rollaway","special requests":"Special Request",
-        "dogs arriving":"Dog arriving","celebrations":"Celebration",
-        "early ins":"Early In","late arrival":"Late Arrival",
-    }
-    LATE_KEY = "late checkouts"
-    section = None; sub_label = None; late_time = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped: continue
-        hdr_m = SECTION_RE.match(stripped)
-        if hdr_m and not ROOM_RE.search(stripped):
-            hdr_key = hdr_m.group(1).strip().lower()
-            if hdr_key in NOTE_LABELS or hdr_key == LATE_KEY:
-                section = hdr_key; sub_label = None; late_time = None; continue
-        content = DEBULLET.sub('', line).strip()
-        if not content or content.lower() == "n/a": continue
-        if section == LATE_KEY:
-            time_m = TIME_RE.search(content)
-            rooms = expand_rooms(ROOM_RE.findall(content.upper()))
-            if time_m:
-                late_time = re.sub(r'\s+', ' ', time_m.group(1).strip())
-                for rm in rooms: late_co[rm] = f"Late Out: {late_time}"
-            elif rooms and late_time:
-                for rm in rooms: late_co[rm] = f"Late Out: {late_time}"
+
+    section = None           # a label, "" for a section we ignore, or None
+    sub_label = None
+    late_time = None
+
+    def add(room, txt):
+        bag = notes.setdefault(room, [])
+        if txt not in bag:
+            bag.append(txt)
+
+    def read_heading(line):
+        """(section, inline content) if this line opens a section, else None.
+
+        A heading may carry its content on the same line -- "Late Checkouts:
+        1220E 10:30am" -- so the remainder is handed back rather than dropped.
+        """
+        bulleted = bool(_BULLET.match(line))
+        body = _BULLET.sub('', line).strip()
+        head, rest = body, ""
+        if ":" in body:
+            head, rest = body.split(":", 1)
+        key = _norm_heading(head)
+        if not key:
+            return None
+        if key in _NOTE_SECTIONS:
+            return _NOTE_SECTIONS[key], rest.strip()
+        if key in _LATE_SECTIONS:
+            return "!late", rest.strip()
+        if key in _SKIP_SECTIONS:
+            return "", ""
+        # Unrecognised, but shaped like a heading: bulleted, or ending in a
+        # colon, and naming no room. Close the previous section rather than
+        # filing this under it.
+        if (bulleted or body.endswith(":")) and not _ROOM_RE.search(body.upper()):
+            if len(key.split()) <= 5:
+                return "", ""
+        return None
+
+    for raw in text.splitlines():
+        if not raw.strip():
             continue
-        if not section or section not in NOTE_LABELS: continue
-        label = NOTE_LABELS[section]
-        if section == "room moves":
-            for mv in MOVE_RE.finditer(content.upper()):
+        opened = read_heading(raw)
+        if opened is not None:
+            section, inline = opened
+            sub_label, late_time = None, None
+            if not inline:
+                continue
+            content = inline
+        else:
+            content = _BULLET.sub('', raw).strip()
+        if not content or content.strip().lower() in _EMPTY:
+            continue
+
+        if section == "!late":
+            hit = _TIME_RE.search(content)
+            rooms = expand_rooms(_ROOM_RE.findall(content.upper()))
+            if hit:
+                late_time = re.sub(r'\s+', ' ', hit.group(1).strip())
+            if rooms and late_time:
+                for rm in rooms:
+                    late_co[rm] = f"Late Out: {late_time}"
+            continue
+
+        if not section:
+            continue
+        label = section
+
+        if section == "Room Move":
+            for mv in _MOVE_RE.finditer(content.upper()):
                 for rf in expand_compound_room(mv.group(1)):
                     for rt in expand_compound_room(mv.group(2)):
-                        # Tag BOTH rooms with the full move so origin and
-                        # destination are both visible, e.g. "Room Move 2234A>2234B".
-                        move_txt = f"Room Move {rf}>{rt}"
-                        notes.setdefault(rf, []).append(move_txt)
-                        notes.setdefault(rt, []).append(move_txt)
+                        # Tag BOTH rooms so origin and destination each show it.
+                        txt = f"Room Move {rf}>{rt}"
+                        add(rf, txt)
+                        add(rt, txt)
             continue
-        if section == "celebrations":
-            cm = CELEB_RE.match(content)
+
+        if section == "Celebration":
+            cm = _CELEB_RE.match(content)
             if cm:
                 t = cm.group(1).strip()
-                sub_label = None if t.lower().startswith("misc") else t; continue
-            if sub_label: label = f"Celebration ({sub_label})"
-        rooms = expand_rooms(ROOM_RE.findall(content.upper()))
-        if not rooms: continue
-        qty = re.search(r'x(\d+)', content, re.IGNORECASE)
-        qty_s = f"x{qty.group(1)}" if qty else ""
-        if section == "special requests":
-            # Capture the actual request detail (e.g. "2135A - Humidifier" ->
-            # "Special Request: Humidifier"). Skip "n/a". Strip the room codes and
-            # surrounding punctuation to leave just the request text.
-            detail = ROOM_RE.sub('', content.upper() if False else content)
-            detail = re.sub(r'\b[1-9]\d{3}[A-Z]{1,4}\b', '', detail)
-            detail = detail.strip(" -\u2013:;,\t").strip()
-            if detail.lower() in ("n/a","na",""):
-                for rm in rooms: notes.setdefault(rm, []).append(f"{label}{qty_s}")
-            else:
-                for rm in rooms:
-                    notes.setdefault(rm, []).append(f"{label}: {detail}{qty_s}")
+                sub_label = None if t.lower().startswith(("misc", "other")) else t
+                continue
+            if sub_label:
+                label = f"Celebration ({sub_label})"
+
+        rooms = expand_rooms(_ROOM_RE.findall(content.upper()))
+        if not rooms:
             continue
-        for rm in rooms: notes.setdefault(rm, []).append(f"{label}{qty_s}")
+        qty = re.search(r'\bx\s*(\d+)\b', content, re.IGNORECASE)
+        qty_s = f" x{qty.group(1)}" if qty else ""
+
+        if section == "Special Request":
+            detail = re.sub(r'\b[1-9]\d{3}[A-Z]{1,4}\b', '', content, flags=re.I)
+            detail = detail.strip(" -\u2013:;,\t").strip()
+            for rm in rooms:
+                add(rm, f"{label}: {detail}{qty_s}" if detail.lower() not in _EMPTY
+                    else f"{label}{qty_s}")
+            continue
+
+        for rm in rooms:
+            add(rm, f"{label}{qty_s}")
     return {"late_checkout": late_co, "notes": notes}
 
 def excel_to_room_text(file_obj):

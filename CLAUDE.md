@@ -291,6 +291,27 @@ rooms it was applied to so the page can say the finish time is an estimate.
 
 ## Traps — each of these has already bitten
 
+**The front desk's report changes shape, and an empty parse looks like a quiet
+day.** `parse_email_notes` required a heading to begin with a letter and end
+with a colon. The desk started writing `-Room Moves:` instead of `Room Moves:`,
+and the parser captured **nothing at all** — no late checkouts, no pets, no
+room moves — without an error, because zero notes is indistinguishable from a
+day with no notes. It now matches on a normalised heading (bullets stripped,
+punctuation dropped, case flattened) against a table of names each section has
+actually gone by, and an *unrecognised* heading still closes the previous
+section so its contents cannot be filed under the wrong label. Arrows arrive as
+`>`, `->`, `→` and `®` — the last is a Wingdings arrow pasted out of Outlook.
+If the format shifts again, add the spelling to `_NOTE_SECTIONS` rather than
+touching the loop.
+
+**A room code carries exactly one letter.** All 174 codes on the September
+sheet do, A through I. So `2232EG` is the desk's shorthand for two doors. The
+old expander only split *consecutive* letters, which handled `1010AB` and
+`1222EF` and quietly left `2232EG` as a room that does not exist — this
+property's lock-offs skip F as often as not. The split is now verified against
+`property_map` rather than assumed: it happens only when the whole code is not
+a real room and every single-letter part is.
+
 **PostgREST rejects unknown columns.** Adding `note_at` to a `room_status` write made
 the whole upsert fail with `PGRST204`, so every note typed on the floor was thrown
 away. Check the column list above before writing a new field, or put it in
