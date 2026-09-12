@@ -964,59 +964,42 @@ with tab_plan:
                 _frows = forecast.forecast(
                     sorted(_fc_days.values(), key=lambda d: d["date"]),
                     staffing.estimate)
-                _f_first = _frows[0]["date"]
-                _f_last = _frows[-1]["date"]
-                _f_hk = sum(r["hskp"] for r in _frows)
-                _f_rqs = sum(r["rqs"] for r in _frows)
-                _peak = max(_frows, key=lambda r: r["hskp"])
-
-                _c1, _c2, _c3, _c4 = st.columns(4)
-                _c1.metric("Days", len(_frows),
-                           help=f"{_f_first} to {_f_last}")
-                _c2.metric("Housekeeper-days", _f_hk)
-                _c3.metric("Inspector-days", _f_rqs)
-                _c4.metric("Busiest day",
-                           datetime.date.fromisoformat(_peak["date"]).strftime("%a %d %b"),
-                           f'{_peak["hskp"]} HK · {_peak["rqs"]} RQS')
-
+                # Four columns and nothing else: the question is how many
+                # people to call in, and it has exactly three answers a day.
+                # Rooms, minutes and the service mix are how the numbers were
+                # arrived at, not what anybody needs off the screen.
                 st.dataframe(pd.DataFrame([{
                     "Day": datetime.date.fromisoformat(r["date"]).strftime("%a %d %b"),
-                    "Rooms": r["rooms"],
-                    "Minutes": f'{int(r["minutes"]):,}',
-                    "Checkouts": r["checkouts"],
-                    "Dailies": r["dailies"],
-                    "Dust n Vac": r["dustnvac"] or "—",
-                    "HK needed": r["hskp"],
-                    "If it runs badly": f'{r["hskp_low"]}–{r["hskp_high"]}',
-                    "RQS needed": r["rqs"],
-                    # The daily services are one inspector's round however many
-                    # there are, so the count is worth showing split.
-                    "of which": (f'{r["rqs_fc"]} full clean'
-                                 + (" + 1 daily" if r["rqs_ds"] else "")),
-                    "In this week": "yes" if r["date"] in dates else "",
+                    "Full clean": r["hskp_fc"] or "—",
+                    "Daily service": r["hskp_ds"] or "—",
+                    "Housekeepers": r["hskp"] or "—",
+                    "Inspectors": r["rqs"] or "—",
                 } for r in _frows]), hide_index=True, use_container_width=True,
-                    height=38 * len(_frows) + 40)
-
-                st.bar_chart(
-                    pd.DataFrame(
-                        {"Housekeepers": [r["hskp"] for r in _frows],
-                         "Inspectors": [r["rqs"] for r in _frows]},
-                        index=[datetime.date.fromisoformat(r["date"]).strftime("%a %d")
-                               for r in _frows]),
-                    height=240)
+                    height=36 * len(_frows) + 40)
 
                 _overlap = [d for d in dates if d in _fc_days]
-                if _overlap:
-                    st.success(f"{len(_overlap)} of this week's {len(dates)} days "
-                               "are in the file; their numbers below come from it.")
-                else:
-                    st.info("None of this week's days are in the file — the "
-                            "forecast above still stands on its own, but the "
-                            "table below is still seeded from last week.")
-                if st.button("Clear the forecast", key="pl_fc_clear"):
-                    st.session_state.pop("pl_fc_days", None)
-                    st.session_state.pop("pl_fc_token", None)
-                    st.rerun()
+                st.caption(
+                    f'{len(_frows)} days · '
+                    f'{sum(r["hskp"] for r in _frows)} housekeeper-days · '
+                    f'{sum(r["rqs"] for r in _frows)} inspector-days · '
+                    + (f'{len(_overlap)} of this week’s {len(dates)} days are in '
+                       'the file and seed the table below'
+                       if _overlap else
+                       'none of this week’s days are in the file'))
+                with st.expander("Rooms and minutes behind these numbers"):
+                    st.dataframe(pd.DataFrame([{
+                        "Day": datetime.date.fromisoformat(r["date"]).strftime("%a %d %b"),
+                        "Checkouts": r["checkouts"],
+                        "Full clean min": f'{int(r["checkout_minutes"]):,}',
+                        "Dailies": r["dailies"],
+                        "Daily min": f'{int(r["daily_minutes"]):,}',
+                        "Dust n Vac": r["dustnvac"] or "—",
+                    } for r in _frows]), hide_index=True, use_container_width=True,
+                        height=36 * len(_frows) + 40)
+                    if st.button("Clear the forecast", key="pl_fc_clear"):
+                        st.session_state.pop("pl_fc_days", None)
+                        st.session_state.pop("pl_fc_token", None)
+                        st.rerun()
 
         _tpl_metrics = template.get("metrics") or {}
         _tpl_dates = list(template.get("dates") or [])
@@ -1101,21 +1084,20 @@ with tab_plan:
                 return f"{abs(n)} SHORT"
             return "exact"
 
+        # Needed, planned, and the difference — for housekeepers and for
+        # inspectors. Minutes, rooms and the sheet's own figure are how the
+        # need was worked out, not what a planner acts on, so they live in the
+        # expander underneath with the rest of the reasoning.
         st.dataframe(pd.DataFrame([{
             "Day": datetime.date.fromisoformat(x["date"]).strftime("%a %d %b"),
-            "Minutes": f'{int(x["minutes"]):,}' if x["minutes"] else "—",
-            "Rooms": (str(x["checkouts"] + x["dailies"]) if x["checkouts"] or x["dailies"]
-                      else "—"),
+            "Full clean": x.get("hskp_fc") or "—",
+            "Daily service": x.get("hskp_ds") or "—",
             "HK needed": x["hskp"] or "—",
-            "If it runs badly": (f'{x["hskp_low"]}–{x["hskp_high"]}'
-                                 if x["minutes"] else "—"),
             "HK planned": x.get("on_hand_hskp", 0),
             "HK gap": _gap(x.get("extra_hskp", 0)),
             "RQS needed": x["rqs"] or "—",
             "RQS planned": x.get("on_hand_rqs", 0),
             "RQS gap": _gap(x.get("extra_rqs", 0)),
-            "Sheet would say": (f'{x["sheet_hskp"]:.1f} HK / {x["sheet_rqs"]:.1f} RQS'
-                                if x["minutes"] or x["checkouts"] else "—"),
         } for x in _ests]), hide_index=True, use_container_width=True,
             height=38 * len(_ests) + 40)
 

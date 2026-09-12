@@ -76,7 +76,8 @@ def sheet_estimate(minutes, checkouts):
 
 
 def estimate(minutes=0, checkouts=0, dailies=0, on_hand_hskp=None,
-             on_hand_rqs=None, divisor=None, dustnvac=0):
+             on_hand_rqs=None, divisor=None, dustnvac=0,
+             fc_minutes=None, ds_minutes=None):
     """How many people this day needs.
 
     `minutes` is the day's total cleaning labour, `checkouts` and `dailies`
@@ -92,14 +93,25 @@ def estimate(minutes=0, checkouts=0, dailies=0, on_hand_hskp=None,
     fc_target = float(divisor or FC_LOW + (FC_FULL - FC_LOW) / 2)   # 355
 
     # Split the labour between the two jobs, so each is divided by its own
-    # target rather than one number standing for both. Where the room counts
-    # are not given, it all falls to Full Clean, which is the busier side and
-    # the safer assumption.
-    ds_minutes = min(minutes, dailies * MINUTES_PER_DAILY)
-    fc_minutes = max(0.0, minutes - ds_minutes)
+    # target rather than one number standing for both. A dashboard export
+    # states the split; where it does not, a daily service is assumed to take
+    # MINUTES_PER_DAILY and the rest falls to Full Clean, which is the busier
+    # side and the safer assumption.
+    if ds_minutes is None or fc_minutes is None:
+        ds_minutes = min(minutes, dailies * MINUTES_PER_DAILY)
+        fc_minutes = max(0.0, minutes - ds_minutes)
+    else:
+        ds_minutes = float(ds_minutes or 0)
+        fc_minutes = float(fc_minutes or 0)
 
     fc_people = fc_minutes / fc_target if fc_minutes else 0.0
     ds_people = ds_minutes / DS_FULL if ds_minutes else 0.0
+    # Whole people per job, not one rounded total. A Full Clean chart and a
+    # Daily Service round are different rounds with different caps; nobody
+    # works a quarter of one and three quarters of the other, so rounding the
+    # sum understates a day that needs both.
+    hskp_fc = _ceil(fc_people) if fc_minutes else 0
+    hskp_ds = _ceil(ds_people) if ds_minutes else 0
     likely = fc_people + ds_people
 
     # The band: everyone loaded to the brim, against everyone loaded lightly.
@@ -122,9 +134,11 @@ def estimate(minutes=0, checkouts=0, dailies=0, on_hand_hskp=None,
     out["minutes"] = minutes
     out["checkouts"] = checkouts
     out["dailies"] = dailies
+    out["hskp_fc"] = hskp_fc
+    out["hskp_ds"] = hskp_ds
     out["hskp_low"] = _ceil(low) if minutes else 0
-    out["hskp"] = _ceil(likely) if minutes else 0
-    out["hskp_high"] = _ceil(high) if minutes else 0
+    out["hskp"] = (hskp_fc + hskp_ds) if minutes else 0
+    out["hskp_high"] = max(_ceil(high) if minutes else 0, hskp_fc + hskp_ds)
     out["dustnvac"] = int(dustnvac or 0)
     out["rqs_fc"] = rqs_fc
     out["rqs_ds"] = rqs_ds
@@ -134,7 +148,7 @@ def estimate(minutes=0, checkouts=0, dailies=0, on_hand_hskp=None,
     out["rqs_raw"] = float(out["rqs"])
     # A day with any work at all needs at least one of each.
     if minutes and not out["hskp"]:
-        out["hskp"] = out["hskp_low"] = out["hskp_high"] = 1
+        out["hskp"] = out["hskp_low"] = out["hskp_high"] = out["hskp_fc"] = 1
     if rooms and not out["rqs"]:
         out["rqs"] = out["rqs_tight"] = 1
 

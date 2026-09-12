@@ -228,10 +228,17 @@ def forecast(days, estimate, on_hand=None):
     out = []
     for d in days:
         extra = (on_hand or (lambda _iso: {}))(d["date"]) or {}
+        # The export states how many minutes are Full Clean and how many are
+        # Daily Service, so the estimate is given the real split rather than
+        # deriving one from an assumed minutes-per-daily. It matters here: the
+        # two are reported as separate numbers of people, and the sheet's own
+        # dailies run nearer 28 minutes than the 35 the assumption uses.
         est = estimate(d["minutes"], d["checkouts"], d["dailies"],
                        on_hand_hskp=extra.get("hk"),
                        on_hand_rqs=extra.get("rqs"),
-                       dustnvac=d.get("dustnvac", 0))
+                       dustnvac=d.get("dustnvac", 0),
+                       fc_minutes=d.get("checkout_minutes"),
+                       ds_minutes=d.get("daily_minutes"))
         merged = dict(d)
         merged.update(est)
         merged["date"] = d["date"]

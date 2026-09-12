@@ -319,6 +319,19 @@ Three things about that export, each of which produced wrong numbers first:
 
 The same uploader reads a single-day export; it simply comes back as one day.
 
+**Housekeepers are counted per job, and rounded per job.** A Full Clean chart
+and a Daily Service round are different rounds with different caps, and nobody
+works a quarter of one and three quarters of the other — so the estimate
+returns `hskp_fc` and `hskp_ds` as whole people and `hskp` is their sum, not
+one rounded total. Over 13–30 September that is 294 housekeeper-days against
+the 284 the single rounding gave; the ten are days that need both jobs.
+
+**Where the split is known, it is used.** A dashboard export states the Full
+Clean and Daily Service minutes separately, and `forecast.py` passes them to
+`estimate(fc_minutes=…, ds_minutes=…)`. The `MINUTES_PER_DAILY = 35` assumption
+is only for the hand-typed path, where the total is the only number there is —
+and it is generous: the September dailies run a median of 28 minutes.
+
 **Inspectors are counted from Full Clean rooms only.** The daily services all
 go to RQS 2 — one person, property-wide, whatever the count — so they add a
 head, not a ratio. What scales is the checkouts, at the 12–13 an inspector
