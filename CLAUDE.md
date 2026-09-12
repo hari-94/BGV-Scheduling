@@ -38,6 +38,7 @@ several of them read the *real* schedule to test against a real day.
 | `i18n.py` + `i18n_es.py` | 830 | the language switch and ~340 Spanish phrases |
 | `ui.py` | 320 | the top navigation and shared chrome |
 | `staffing.py` | 200 | how many housekeepers and RQS a day needs |
+| `forecast.py` | 230 | reads a multi-day Housekeeping Dashboard export into per-day workload |
 | `session.py` | 150 | staying signed in across a refresh |
 | `auth.py` | 155 | roles and permissions |
 | `roomstatus.py` | 105 | the one vocabulary for a room's state |
@@ -288,6 +289,47 @@ holds the incoming guest's name — not a time, so there is no per-room deadline
 only "somebody is checking in here today". Dust n Vac rooms carry **no minutes at
 all**; `UNTIMED_MINUTES` is a stated guess and `summary()["untimed"]` counts the
 rooms it was applied to so the page can say the finish time is an estimate.
+
+## Forecasting a week from the bookings
+
+**Plan a week** used to seed its three numbers — labour minutes, checkouts,
+daily services — from the same weekday last week, and a planner typed over
+them. The property already publishes the real answer: the Housekeeping
+Dashboard runs over a **date range**, and `forecast.read_dashboard` reads it
+into per-day workload. The tab now takes that file, shows what each day needs,
+and seeds the editor from it where the dates overlap the week being planned.
+`staffing.estimate` does the arithmetic, unchanged, so a forecast and a built
+schedule cannot drift apart.
+
+Three things about that export, each of which produced wrong numbers first:
+
+- **Column positions move between exports.** Time was column 4 in the
+  12 September file and column 3 in the 13–30 one. Every column is found by its
+  header label, and the header row is re-read at each date block.
+- **The sheet holds more than one table**, and *the same dates appear in each*.
+  After the cleaning services come "Housekeeping Hold, UT, Unallocated" and the
+  non-clean services. Reading to the end of the file counts the hold list as
+  cleaning work; the first pass at this reported 144 rooms for a day the sheet
+  says has 131. The cleaning table ends at its `Total Labor (Minutes):` footer,
+  and that is where the parser stops.
+- **The workbook states its own totals** — `Rooms: N` per day in the header,
+  `Daily Labor (Minutes): N` in the footer. They are compared against what was
+  counted and any disagreement is surfaced, not smoothed over. On the September
+  file the parse matches every day to the digit.
+
+The same uploader reads a single-day export; it simply comes back as one day.
+
+**The sheet's own divisor is not ours, and that is the point.** This dashboard
+divides labour minutes by 390 for its "Daily Housekeeper Shifts"; `staffing.py`
+splits the minutes between Full Clean and Daily Service and divides each by its
+own target. So the two disagree on purpose — more people than the sheet on a
+checkout-heavy day (32 against 28.9 on 13 September), fewer on a daily-service
+one (11 against 11.6 on the 15th). If they ever agree exactly, something has
+been flattened.
+
+**A `data_editor` keeps whatever it was first drawn with.** Loading a forecast
+after the table is on screen changes nothing until the widget key changes, so
+the key carries a token derived from the parsed file.
 
 ## Traps — each of these has already bitten
 

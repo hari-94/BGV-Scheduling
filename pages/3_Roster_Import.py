@@ -11,6 +11,7 @@ import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, roster_import as ri
+import forecast
 import staffing
 import ui
 
@@ -921,11 +922,114 @@ with tab_plan:
         st.markdown('<div class="sec" style="margin:1.1rem 0 .3rem">'
                     'How many people this week needs</div>', unsafe_allow_html=True)
 
+        # ── the forecast, read off a dashboard export ─────────────────────
+        # Until now the three numbers behind a week's staffing were typed in by
+        # hand, seeded from the same weekday last week. The property already
+        # publishes them: the Housekeeping Dashboard runs over a date range and
+        # states each day's rooms and labour minutes. Reading it turns the plan
+        # from a guess checked against last week into arithmetic on the actual
+        # bookings.
+        _fc_days = st.session_state.get("pl_fc_days") or {}
+        with st.expander("Forecast from a Housekeeping Dashboard export",
+                         expanded=not _fc_days):
+            st.caption("The multi-day export — File · Export · Excel from the "
+                       "Housekeeping Dashboard with a date range. Rooms and "
+                       "labour minutes are read per day and checked against the "
+                       "totals the sheet states for itself.")
+            _fc_up = st.file_uploader("Housekeeping Dashboard .xlsx",
+                                      type=["xlsx", "xlsm"], key="pl_fc_xlsx")
+            if _fc_up is not None:
+                try:
+                    _fc = forecast.read_dashboard(_fc_up)
+                except Exception as _ex:
+                    st.error(f"Could not read that workbook: {_ex}")
+                    _fc = None
+                if _fc and _fc["days"]:
+                    _fc_days = {d["date"]: d for d in _fc["days"]}
+                    st.session_state["pl_fc_days"] = _fc_days
+                    # The metrics editor keeps whatever it was first drawn with,
+                    # so it needs a new key before it will show the new numbers.
+                    st.session_state["pl_fc_token"] = _fc["days"][0]["date"] + \
+                        "_" + str(len(_fc["days"]))
+                    for _w in _fc["warnings"]:
+                        st.warning(_w)
+                elif _fc:
+                    for _w in _fc["warnings"]:
+                        st.error(_w)
+
+            if _fc_days:
+                # What the days need. What the plan currently rosters against
+                # them is the table further down; this one answers the question
+                # that comes first, and for days the plan does not cover at all.
+                _frows = forecast.forecast(
+                    sorted(_fc_days.values(), key=lambda d: d["date"]),
+                    staffing.estimate)
+                _f_first = _frows[0]["date"]
+                _f_last = _frows[-1]["date"]
+                _f_hk = sum(r["hskp"] for r in _frows)
+                _f_rqs = sum(r["rqs"] for r in _frows)
+                _peak = max(_frows, key=lambda r: r["hskp"])
+
+                _c1, _c2, _c3, _c4 = st.columns(4)
+                _c1.metric("Days", len(_frows),
+                           help=f"{_f_first} to {_f_last}")
+                _c2.metric("Housekeeper-days", _f_hk)
+                _c3.metric("Inspector-days", _f_rqs)
+                _c4.metric("Busiest day",
+                           datetime.date.fromisoformat(_peak["date"]).strftime("%a %d %b"),
+                           f'{_peak["hskp"]} HK · {_peak["rqs"]} RQS')
+
+                st.dataframe(pd.DataFrame([{
+                    "Day": datetime.date.fromisoformat(r["date"]).strftime("%a %d %b"),
+                    "Rooms": r["rooms"],
+                    "Minutes": f'{int(r["minutes"]):,}',
+                    "Checkouts": r["checkouts"],
+                    "Dailies": r["dailies"],
+                    "Dust n Vac": r["dustnvac"] or "—",
+                    "HK needed": r["hskp"],
+                    "If it runs badly": f'{r["hskp_low"]}–{r["hskp_high"]}',
+                    "RQS needed": r["rqs"],
+                    "In this week": "yes" if r["date"] in dates else "",
+                } for r in _frows]), hide_index=True, use_container_width=True,
+                    height=38 * len(_frows) + 40)
+
+                st.bar_chart(
+                    pd.DataFrame(
+                        {"Housekeepers": [r["hskp"] for r in _frows],
+                         "Inspectors": [r["rqs"] for r in _frows]},
+                        index=[datetime.date.fromisoformat(r["date"]).strftime("%a %d")
+                               for r in _frows]),
+                    height=240)
+
+                _overlap = [d for d in dates if d in _fc_days]
+                if _overlap:
+                    st.success(f"{len(_overlap)} of this week's {len(dates)} days "
+                               "are in the file; their numbers below come from it.")
+                else:
+                    st.info("None of this week's days are in the file — the "
+                            "forecast above still stands on its own, but the "
+                            "table below is still seeded from last week.")
+                if st.button("Clear the forecast", key="pl_fc_clear"):
+                    st.session_state.pop("pl_fc_days", None)
+                    st.session_state.pop("pl_fc_token", None)
+                    st.rerun()
+
         _tpl_metrics = template.get("metrics") or {}
         _tpl_dates = list(template.get("dates") or [])
 
         def _seed(i):
-            """Last week's numbers for the same weekday, as a starting point."""
+            """What the day is expected to need.
+
+            A dashboard export for this date is the best answer there is: it is
+            the bookings themselves. Failing that, the same weekday last week,
+            which is what this always used.
+            """
+            if i < len(dates):
+                got = _fc_days.get(dates[i])
+                if got:
+                    return {"minutes": got["minutes"],
+                            "checkouts": got["checkouts"],
+                            "dailies": got["dailies"]}
             if i < len(_tpl_dates):
                 return _tpl_metrics.get(_tpl_dates[i]) or {}
             return {}
@@ -951,7 +1055,11 @@ with tab_plan:
                    "it in is what makes the inspector count right.")
         _med = st.data_editor(
             pd.DataFrame(_mrows), hide_index=True, use_container_width=True,
-            num_rows="fixed", key="pl_metrics_" + tgt,
+            # A data_editor keeps whatever it was first drawn with, so the key
+            # carries the forecast's identity: load a different export and this
+            # becomes a different widget, seeded from the new numbers.
+            num_rows="fixed",
+            key="pl_metrics_" + tgt + "_" + str(st.session_state.get("pl_fc_token", "")),
             column_config={
                 "Day": st.column_config.TextColumn("Day", disabled=True),
                 "Labour minutes": st.column_config.NumberColumn(
