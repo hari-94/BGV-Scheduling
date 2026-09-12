@@ -2582,7 +2582,11 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP, one_building=Non
     # remainders is usually what saves a person -- and refusing to pool them is
     # what keeps somebody out of a second building.
     if one_building is None:
-        one_building = st.session_state.get("fc_mode") == FC_MODE_PURE
+        # Daily Service keeps the building-first split it already had. The Full
+        # Clean mode switch that used to drive this is gone, and DS was not
+        # what was wrong -- its charts are built a building at a time and only
+        # the trailing remainders are ever pooled.
+        one_building = True
 
     full, bins = _ds_by_building(rooms, cap)
     if one_building:
@@ -2619,82 +2623,48 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP, one_building=Non
     if cur: tail.append(cur)
     return full + tail
 
-FC_MODE_PURE = "Stay in one building"
-FC_MODE_FEWEST = "Fewest housekeepers"
-
-
 def _tidy_full_clean(charts):
-    """Redeal the Full Clean charts so fewer of them cross a building.
+    """Redeal the Full Clean charts through the one packer.
 
-    The solver picks the fewest housekeepers and then the tidiest arrangement
-    it can find at that number, but it packs the property as one pool, so a
-    chart boundary lands mid-building and the chart spills over. Building 1's
-    minutes, building 2's and building 3's each round up to a whole person on
-    their own, and often that still comes to the same total -- on which days
-    nobody need cross at all.
+    `solve_full_clean` already builds legal charts -- it bundles a guest's
+    adjacent rooms and checks every placement against `_fc_feasible`. What went
+    wrong was here: this function used to flatten those charts back to a plain
+    list of rooms and hand them to a packer that knew neither rule. The bundles
+    were gone by then, and nothing downstream checked the 140/120 combination,
+    so a day could come out with one guest's apartment split between two
+    housekeepers and somebody holding 140+120+120. Both were seen on the sheet
+    for 12 September.
 
-    This never spends a person on tidiness. It repacks per building, merges
-    back down to the count the solver already reached, and if it cannot get
-    there it hands back the solver's own answer untouched. So it is either an
-    improvement or a no-op, never a cost.
+    `fcpack.pack` now carries the rules itself, so the redeal cannot undo them.
+    The guard below is what makes this safe rather than merely better: the
+    result is audited, and anything worse than what came in -- a lost room, a
+    broken rule, an extra housekeeper -- means the solver's own charts are
+    handed back untouched.
     """
     charts = [c for c in charts if c]
     if len(charts) < 2:
         return charts
     rooms = [r for c in charts for r in c]
-    _pool = st.session_state.get("fc_mode") == FC_MODE_FEWEST
+    _where = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
     try:
-        _where = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
-        if _pool:
-            packed = fcpack.pack_full_clean(rooms, MAX_FC, _where,
-                                            target=len(charts),
-                                            pool_leftovers=True)
-        else:
-            # Floors in order, filled as they come, so a chart holds one
-            # corridor or two that touch -- never Plaza and level 4, which is
-            # what "scattered" means to somebody pushing a cart. No target: a
-            # target is what licenses a merge across buildings, and that is the
-            # one thing this mode exists to avoid.
-            packed = fcpack.pack_by_floor(rooms, MAX_FC, _where)
+        packed = fcpack.pack(rooms, MAX_FC, _where, LOW_MIN)
     except Exception as ex:
         print(f"[fc] could not repack, keeping the solver's charts: {ex}")
         return charts
-    # What counts as too many depends on which question was asked. "Fewest
-    # housekeepers" means never spend one on tidiness. "Stay in one building"
-    # means the opposite -- purity is the point, and the control says plainly
-    # that it may cost a person -- so it is allowed to run over, though not
-    # far: something has gone wrong if it wants several more.
-    if _pool:
-        # Never spend a housekeeper on tidiness in this mode.
-        if len(packed) > len(charts):
-            return charts
-    # In the other mode there is no ceiling. There used to be one -- a tenth or
-    # so over the solver's count -- and on the days it bit, the fallback handed
-    # back the solver's charts complete with the building crossings the mode
-    # exists to prevent. An option that quietly stops doing what it says is
-    # worse than one that costs a person, which is what its own label promises.
-    if sorted(str(r.get("room")) for c in packed for r in c) !=        sorted(str(r.get("room")) for c in charts for r in c):
+
+    if (sorted(str(r.get("room")) for c in packed for r in c)
+            != sorted(str(r.get("room")) for c in charts for r in c)):
         print("[fc] repack changed the room set, keeping the solver's charts")
         return charts
-    if any(sum(r["time"] for r in c) > MAX_FC for c in packed):
+    if len(packed) > len(charts):
+        print(f"[fc] repack wanted {len(packed)} charts for {len(charts)}; "
+              "keeping the solver's")
         return charts
 
-    # Last, gather the slack. Packing leaves several people a little short of a
-    # day each; moving a room or two between them leaves one person short
-    # instead of three, and that one can be sent home, given the stayover pile,
-    # or lent out. Every move is checked against the same rules the charts were
-    # built under, so this cannot smuggle a building crossing back in.
-    try:
-        balanced = fcpack.balance_low(packed, MAX_FC, LOW_MIN, _where,
-                                      one_building=not _pool)
-    except Exception as ex:
-        print(f"[fc] could not balance the short charts: {ex}")
-        return packed
-    if (len(balanced) <= len(packed)
-            and sorted(str(r.get("room")) for c in balanced for r in c)
-            == sorted(str(r.get("room")) for c in packed for r in c)
-            and not any(sum(r["time"] for r in c) > MAX_FC for c in balanced)):
-        return balanced
+    bad = fcpack.audit(packed, MAX_FC, _where, LOW_MIN)
+    if bad["over_cap"] or bad["bad_mix"] or bad["split_bundles"] or bad["b2_b3"]:
+        print(f"[fc] repack broke a rule {bad}; keeping the solver's charts")
+        return charts
     return packed
 
 
@@ -3721,42 +3691,13 @@ with _inp_exp:
                     f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">Today</div>'
                     f'<div> <b>{len(present_hk)}</b> HKs present</div>'
                     f'<div> <b>{len(present_insp)}</b> inspectors</div></div>', unsafe_allow_html=True)
-        # Two ways to cut the day up, because they are a real trade and only a
-        # person can price it: a housekeeper is a whole shift, a building
-        # crossing is a few minutes of walking. Neither answer is wrong.
-        # The choice is remembered for the property, not re-asked every
-        # morning. Seeded before the widget exists so Streamlit takes it as the
-        # starting value; a stale db module (see CLAUDE.md) just means the
-        # default, never a crash.
-        if "fc_mode" not in st.session_state:
-            _saved_mode = ""
-            try:
-                _lf = getattr(db, "load_fc_mode", None)
-                _saved_mode = _lf() if _lf else str(
-                    (db._load_key("fc_mode") or {}).get("mode", "") or "")
-            except Exception as ex:
-                print(f"[fc] could not read the saved split: {ex}")
-            st.session_state["fc_mode"] = (
-                _saved_mode if _saved_mode in (FC_MODE_PURE, FC_MODE_FEWEST)
-                else FC_MODE_PURE)
-
-        def _remember_fc_mode():
-            try:
-                _sf = getattr(db, "save_fc_mode", None)
-                if _sf:
-                    _sf(st.session_state.get("fc_mode", ""))
-                else:
-                    db._upsert_key("fc_mode",
-                                   {"mode": st.session_state.get("fc_mode", "")})
-            except Exception as ex:
-                print(f"[fc] could not save the split: {ex}")
-
-        st.radio(
-            "How to split the day",
-            [FC_MODE_PURE, FC_MODE_FEWEST],
-            key="fc_mode",
-            on_change=_remember_fc_mode,
-            help="Stay in one building: nobody crosses between buildings — Full Clean and Daily Service both — and each chart keeps to one floor, or two that touch. Measured over the stored days it takes about two or three more housekeepers a day than the other option. Fewest housekeepers: each building still fills its own charts and only the rooms left over are pooled, so the few crossings there are land in one or two charts.")
+        # There used to be a choice here between "stay in one building" and
+        # "fewest housekeepers". It was never a real choice: both answers split
+        # a guest's apartment between two housekeepers, and one of them also
+        # produced 140+120+120. One packer that holds the rules beats either,
+        # and on the 12 September sheet it matched the better of the two on
+        # headcount while crossing no buildings and breaking no rules -- so
+        # there is nothing left for a person to price.
         _can_gen = auth.can("can_generate")
         run = st.button("Generate", type="primary", use_container_width=True,
                         disabled=not _can_gen,

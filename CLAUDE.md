@@ -148,30 +148,49 @@ question, and not one the packer should paper over.
 
 ## Full Clean charts, and who inspects them
 
-**Two ways to split the day, chosen on the Schedule page** (`fc_mode`), because
-it is a real trade and only a person can price it: a housekeeper is a whole
-shift, a building crossing is a few minutes of walking.
+**One packer, `fcpack.pack`.** There used to be two, chosen on the Schedule
+page (`fc_mode`): "stay in one building" and "fewest housekeepers". That choice
+is gone, and so is the `fc_mode` widget — `db.save_fc_mode`/`load_fc_mode`
+survive unused.
 
-**The mode governs Daily Service too**, not only Full Clean. A DS round is long
-and each building's own rarely fills one, so pooling the remainders is usually
-what saves a person — and refusing to pool them is what keeps somebody out of a
-second building.
+It was never a real choice. Both answers broke the same two rules, and neither
+broke them in a way the other fixed. On the 12 September sheet:
 
-**Measured over 67 stored days, housekeeper rounds only** (excluding the verify
-pile and the Dust n Vac round, neither of which is one person's walk):
-1,528 rounds and **0 crossings** against 1,356 and 191 — purity costs about
-**2.6 housekeepers a day**, not the one the help text used to imply.
+| | one building | fewest HK | `fcpack.pack` |
+|---|---|---|---|
+| charts (floor 27) | 30 | 29 | **29** |
+| guest apartments split | **11** | **8** | 0 |
+| 140/120 rule broken | 0 | **1** | 0 |
+| cross-building | 0 | 3 | 0 |
+| mean floor span | 0.20 | 0.76 | 0.28 |
 
-- **Fewest housekeepers** (what the schedulers do by hand):
-  each building fills its own charts and only the rooms left over once it can
-  no longer fill one are pooled across buildings. Crossings land in one or two
-  tail charts instead of being spread about. Never uses more people than the
-  solver already found.
-- **Stay in one building** (the default): `fcpack.pack_by_floor`. Nobody
-  crosses a building, and each building's floors are walked in order and charts
-  filled as they go, so a chart holds one corridor or two that touch — never
-  Plaza and level 4. A second pass recombines charts on touching floors to buy
-  back most of what filling strictly in order would cost.
+**The rules live in `fcpack` now, at the top of the module, and every pass goes
+through `_legal`.** A chart may not split an apartment, run over the cap, hold
+more than one 140 or a 140 beside more than one 120, or hold rooms in both
+building 2 and building 3.
+
+**The 140/120 rule is `_fc_feasible`'s, and it always was.** The scheduler has
+stated it since the solver was written. The bug was that `_tidy_full_clean`
+flattened the solver's legal charts back to a list of rooms and handed them to
+a packer that knew neither that rule nor what an apartment was. `140+120+120`
+comes to exactly 380 and passes a minutes check, which is why a minutes check
+was never enough.
+
+**An apartment is guest + room number + floor**, the same test
+`_cluster_adjacent_same_guest` uses. A guest holding 2336E, 2336G and 2336H
+holds one lock-off apartment with doors between the rooms; two housekeepers in
+it is two people doing one turnover. A guest holding rooms in two *buildings*
+is two bundles — that split is real, and the floor is fine with it.
+
+**A bundle that cannot legally be a chart is split, not forced.** Two 140s
+behind one door, or more than 380 minutes, has to go to two people whatever
+anybody prefers. Without `_split_illegal` the bundle would be forced whole onto
+a fresh chart and quietly break the cap — the fault this module exists to stop.
+
+**Still only measured on one day.** The old two-mode numbers came from 67
+stored days; these come from the 12 September sheet alone, because the machine
+this was written on has no database credentials. Re-run the comparison over the
+stored days before trusting the headcount figure.
 
 **Floors per chart is the wrong measure; the span between them is the right
 one.** Counting floors treats Plaza-and-4 the same as 2-and-3, and to somebody
@@ -179,36 +198,35 @@ pushing a cart one is a lift ride past three landings and the other is a
 staircase. Over 61 stored days, packing by floor moved the mean span from 1.01
 to 0.64 for about a third of a housekeeper a day.
 
-**Then the slack is gathered.** `fcpack.balance_low` moves rooms between charts
-to cut the *number* of people short of a full day, not the spread of it: two
-housekeepers on 280 and 310 both work a short day, and one room moved between
-them leaves one on a full 350 and one on 240 — same work, same two people, but
-only one is now underused and that one can be sent home, given the stayover
-pile, or lent out. Every move is re-checked against the cap, one building and
-touching floors, so it cannot smuggle a crossing back in, and a chart emptied
-outright is dropped. Over 67 stored days: short charts 383 → 257, and 13 fewer
-charts because some emptied completely.
+**Slack-gathering is part of the same search.** `balance_low` is gone; its job
+is the third term of `fcpack._score`, which ranks an arrangement by *(fewest
+housekeepers, least walking, fewest short days)* and descends on it with three
+moves — shift one bundle, swap two, empty the lightest chart outright. The
+third is what removes a housekeeper; the first two make room for it. Every move
+goes through `_legal`, so none of them can smuggle a broken rule back in.
 
-`_tidy_full_clean` passes a target only in the pooled mode: a target is what
-licenses a merge across buildings, which is the one thing the pure mode exists
-to avoid. The choice is remembered for the property in `app_settings` under
-`fc_mode` — it is one schedule, so it is not a per-person setting — and seeded
-into session state before the widget is drawn, since that is what makes
-Streamlit take it as the starting value.
+Count comes first because a housekeeper is a whole shift and a crossing is a
+few minutes. Travel outranks fullness because a short chart is somebody's easy
+day and a long walk is nobody's.
+
+`_tidy_full_clean` **audits the redeal and can refuse it**: a lost room, a
+broken rule or an extra housekeeper and the solver's own charts are handed back
+untouched. That guard is what makes the redeal safe rather than merely better —
+`solve_full_clean` already produces legal charts, so falling back always lands
+somewhere legal.
 
 `solve_full_clean` picks the fewest housekeepers and the tidiest arrangement it
 can find at that number, but it packs the whole property as one pool, so a chart
-boundary lands mid-building and the chart spills over. `_tidy_full_clean` then
-redeals the result per building (`fcpack.pack_full_clean`), filling each chart
-from one floor before it takes another, and merges back down to the count the
-solver already reached. **It can only be free**: more charts than the solver used
-and it hands the solver's answer back untouched. Measured over every stored day —
-same 1,143 housekeepers, charts crossing a building 152 → 100, walking −2%.
+boundary lands mid-building and the chart spills over. `_tidy_full_clean` redeals
+the result through `fcpack.pack`, which seeds one building at a time down the
+floors in order and then descends on *(count, travel, short days)*. **It can only
+be free**: more charts than the solver used, or any rule broken, and it hands the
+solver's answer back untouched.
 
 Building 1's minutes, building 2's and building 3's each round up to a whole
 person on their own, and on many days that still comes to the same total, which
-is why this is usually free. Forcing it always would cost about one extra
-housekeeper a day, which is why it is not forced.
+is why building purity is usually free. On 12 September it was entirely free —
+29 charts, the same as the pooled answer, with nobody crossing at all.
 
 Inspectors are batched the same way: a building at a time, its trailing
 part-batch left alone until there are not enough inspectors, then merged

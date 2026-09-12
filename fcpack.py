@@ -1,213 +1,40 @@
-"""Packing Full Clean so nobody changes building, and few change floor.
+"""Full Clean charts: one packer, built around what a chart is not allowed to be.
 
-The building is decided first and is never crossed. Inside a building the
-number of charts is fixed at the fewest that can hold its minutes, and the
-rooms are then dealt into those charts a floor at a time, each going to the
-chart that is already on its floor. A chart therefore fills up with one
-corridor before it takes anything from another, without spending a person on
-it -- which is the difference between this and simply packing floor by floor.
+There used to be two of these and a choice on the Schedule page between them.
+The choice was never really the scheduler's to make -- both answers were wrong
+in the same two ways, and neither was wrong in a way the other fixed. This is
+one packer with the rules written down once, at the top, where every pass has
+to go through them.
+
+The rules are hard. A chart may not:
+
+  * split an apartment.  A guest holding 2336E, 2336G and 2336H holds one
+    lock-off apartment with doors between the rooms. Two housekeepers in it is
+    two people doing one turnover, and the floor notices. Rooms are bundled by
+    guest *and* room number *and* floor, so a guest who genuinely holds rooms
+    in two buildings is still two bundles -- that split is real and fine.
+  * run over the cap.
+  * hold more than one 140, or a 140 beside more than one 120.  This is the
+    rule `_fc_feasible` in the scheduler has always stated; it is here because
+    the old packers re-dealt the scheduler's legal charts and broke it. A
+    140+120+120 comes to exactly 380 and passes a minutes check, which is why
+    a minutes check is not enough.
+  * hold rooms in buildings 2 and 3.  They do not touch; building 1 is the
+    only way between them, so such a chart pays two bridge crossings.
+
+Within the rules it wants, in order: fewest housekeepers, least walking, and
+charts close to full. Count comes first because a housekeeper is a whole shift
+and a crossing is a few minutes -- but travel outranks fullness, because a
+short chart is somebody's easy day and a long walk is nobody's.
 """
-import collections, math
+import collections
 
 BORD = {3: 0, 1: 1, 2: 2}          # west to east, as the property runs
 
-
-def _fit(rs, cap, order, best_fit):
-    """Deal these rooms into charts in the given order; return the loads."""
-    bins = []
-    for r in order:
-        if best_fit:
-            room = [i for i, b in enumerate(bins) if b + r["time"] <= cap]
-            if room:
-                bins[max(room, key=lambda i: bins[i])] += r["time"]
-                continue
-        else:
-            for i, b in enumerate(bins):
-                if b + r["time"] <= cap:
-                    bins[i] += r["time"]
-                    break
-            else:
-                bins.append(r["time"])
-                continue
-            continue
-        bins.append(r["time"])
-    return bins
+SOLO = ("", "---", "unallocated", "n/a", "none")
 
 
-def _bins_needed(rs, cap, tries=40):
-    """Fewest charts that can hold these rooms.
-
-    First-fit-decreasing on its own is not enough here. Building 1 on a real
-    day holds 5,260 minutes, which is fourteen charts of 380, and FFD produced
-    fifteen -- one whole housekeeper more than the person doing this by hand.
-    The room times are a handful of repeated values (70, 120, 140), so a few
-    shuffled deals find a perfect fit where the greedy one does not; the same
-    trick the main solver already uses.
-    """
-    import math, random
-    lower = math.ceil(sum(r["time"] for r in rs) / cap) if rs else 0
-    best = None
-    for order, bf in ((sorted(rs, key=lambda r: -r["time"]), False),
-                      (sorted(rs, key=lambda r: -r["time"]), True),
-                      (list(rs), False)):
-        n = len(_fit(rs, cap, order, bf))
-        best = n if best is None else min(best, n)
-        if best <= lower:
-            return best
-    rng = random.Random(20240601)
-    shuffled = list(rs)
-    for _ in range(tries):
-        rng.shuffle(shuffled)
-        best = min(best, len(_fit(rs, cap, list(shuffled), True)))
-        if best <= lower:
-            break
-    return max(best, lower)
-
-
-def pack_full_clean(rooms, cap, loc_of, target=None, pool_leftovers=False):
-    """Charts that never cross a building and change floor as little as they can.
-
-    `loc_of(room)` gives something with .bld, .level and .x, or None. Rooms the
-    plans do not place keep the old behaviour -- they are packed last, together.
-
-    `target` is the most charts this may use. Pass the count the existing
-    solver reaches and the result can only be as good or better: the same
-    housekeepers, with the crossings removed wherever removing them is free.
-
-    `pool_leftovers` trades a little of that purity for people. Each building
-    still fills its own charts, but the rooms left over once it can no longer
-    fill one are pooled with the other buildings' leftovers and packed
-    together. Every crossing then lands in one of those few tail charts
-    instead of being spread about -- which is what the schedulers do by hand,
-    and it is the better bargain: a housekeeper is a shift, a crossing is
-    minutes.
-    """
-    placed, unplaced = [], []
-    for r in rooms:
-        (placed if loc_of(r) else unplaced).append(r)
-
-    out = []
-    by_bld = collections.defaultdict(list)
-    for r in placed:
-        by_bld[loc_of(r).bld].append(r)
-
-    leftovers = []
-    for bld in sorted(by_bld, key=lambda b: BORD.get(b, 9)):
-        rs = by_bld[bld]
-        if pool_leftovers:
-            # only the charts this building can fill by itself; whatever will
-            # not make a full one goes into the shared pool
-            rs, spare = _fill_whole(rs, cap, loc_of)
-            leftovers += spare
-            if not rs:
-                continue
-        n = max(_bins_needed(rs, cap), math.ceil(sum(r["time"] for r in rs) / cap))
-        bins = [[] for _ in range(n)]
-        load = [0.0] * n
-        floors_in = [set() for _ in range(n)]
-
-        by_floor = collections.defaultdict(list)
-        for r in rs:
-            by_floor[loc_of(r).level].append(r)
-
-        # Elevation order, and along the corridor within a floor, so a chart
-        # that does take two floors takes neighbouring ones.
-        from property_map import LEVEL_IX
-        for lv in sorted(by_floor, key=lambda lv: LEVEL_IX[lv]):
-            for r in sorted(by_floor[lv], key=lambda r: loc_of(r).x):
-                fits = [i for i in range(n) if load[i] + r["time"] <= cap]
-                if not fits:
-                    # nothing has room: open one rather than break the cap
-                    bins.append([]); load.append(0.0); floors_in.append(set())
-                    fits = [len(bins) - 1]
-                same = [i for i in fits if lv in floors_in[i]]
-                if same:
-                    # already on this floor: the fullest, so it closes out
-                    pick = max(same, key=lambda i: load[i])
-                else:
-                    # Otherwise the nearest floor, then the emptiest. Counting
-                    # floors alone treats Plaza-and-4 as no worse than 2-and-3,
-                    # and it is: one is a lift ride past three landings, the
-                    # other is a staircase. Distance first, capacity second.
-                    here = LEVEL_IX[lv]
-                    def _reach(i):
-                        if not floors_in[i]:
-                            return 0
-                        return min(abs(LEVEL_IX[f] - here) for f in floors_in[i])
-                    pick = min(fits, key=lambda i: (_reach(i), load[i]))
-                bins[pick].append(r)
-                load[pick] += r["time"]
-                floors_in[pick].add(lv)
-        out += [b for b in bins if b]
-
-    if leftovers:
-        # The tail. Packed largest-first so the crossings land in as few charts
-        # as they can, and ordered west to east so a chart that does cross takes
-        # neighbouring buildings rather than 2 and 3, which do not touch.
-        leftovers.sort(key=lambda r: (BORD.get(loc_of(r).bld, 9)
-                                      if loc_of(r) else 9, -r["time"]))
-        cur, t = [], 0.0
-        for r in leftovers:
-            if cur and t + r["time"] > cap:
-                out.append(cur); cur, t = [], 0.0
-            cur.append(r); t += r["time"]
-        if cur:
-            out.append(cur)
-
-    # Building-pure is not free every day. Each building rounds its own minutes
-    # up to a whole person, and those part-people add up: over every stored day
-    # it would cost about one extra housekeeper a day. A crossing costs some
-    # minutes of walking; a housekeeper costs a shift. So the charts are merged
-    # back down to the headcount the day would have used anyway, cheapest
-    # crossing first -- and on a day where building-pure already fits, nothing
-    # is merged and nobody crosses at all.
-    if target is not None:
-        out = _merge_to(out, target, cap, loc_of)
-
-    if unplaced:
-        cur, t = [], 0.0
-        for r in unplaced:
-            if cur and t + r["time"] > cap:
-                out.append(cur); cur, t = [], 0.0
-            cur.append(r); t += r["time"]
-        if cur:
-            out.append(cur)
-    return out
-
-
-def _fill_whole(rs, cap, loc_of):
-    """Split a building's rooms into the charts it can fill, and the rest.
-
-    "Can fill" is measured in minutes rather than guessed: a building with
-    5,260 minutes fills thirteen charts of 380 outright and has 320 left, and
-    it is those 320 that are worth pooling rather than spending a whole
-    housekeeper on.
-    """
-    total = sum(r["time"] for r in rs)
-    whole = int(total // cap)
-    if whole < 1:
-        return [], list(rs)
-    from property_map import LEVEL_IX
-    order = sorted(rs, key=lambda r: (LEVEL_IX[loc_of(r).level], loc_of(r).x)
-                   if loc_of(r) else (99, 0))
-    keep, spare, cur, t, made = [], [], [], 0.0, 0
-    for r in order:
-        if made >= whole:
-            spare.append(r)
-            continue
-        if cur and t + r["time"] > cap:
-            keep += cur; made += 1; cur, t = [], 0.0
-            if made >= whole:
-                spare.append(r)
-                continue
-        cur.append(r); t += r["time"]
-    if cur:
-        if made < whole:
-            keep += cur
-        else:
-            spare += cur
-    return keep, spare
-
+# ── what a chart may not be ──────────────────────────────────────────────────
 
 def _hops(blds):
     """Bridges anyone on a chart must cross: 0, 1 or 2, straight off the map."""
@@ -220,200 +47,379 @@ def _hops(blds):
     return worst
 
 
-def _merge_to(charts, target, cap, loc_of):
-    """Combine charts until there are no more than `target`, cheapest first.
+def _legal(time, n140, n120, blds, cap):
+    """The four hard rules, in one place, so no pass can route around them."""
+    if time > cap:
+        return False
+    if n140 > 1:
+        return False
+    if n140 >= 1 and n120 > 1:
+        return False
+    if 2 in blds and 3 in blds:
+        return False
+    return True
 
-    Cheapest means fewest bridges crossed, then fewest buildings, then the
-    fullest result -- so the crossings that do happen are between neighbours
-    and land in as few charts as possible instead of being spread about.
+
+# ── bundles: the smallest thing a chart can be given ─────────────────────────
+
+def _unit_key(r):
+    """The apartment a room belongs to, or None if it stands alone.
+
+    The room number without its lock-off letter is the apartment; the guest
+    name is what says the lock-offs are currently one household rather than
+    three separate lettings.
     """
-    items = [[c, {loc_of(r).bld for r in c if loc_of(r)},
-              sum(r["time"] for r in c)] for c in charts]
-    while len(items) > max(target, 1):
-        best = None
-        for i in range(len(items)):
-            for j in range(i + 1, len(items)):
-                if items[i][2] + items[j][2] > cap:
-                    continue
-                merged = items[i][1] | items[j][1]
-                key = (_hops(merged), len(merged), -(items[i][2] + items[j][2]))
-                if best is None or key < best[0]:
-                    best = (key, i, j)
-        if best is None:
-            break                     # nothing else fits under the cap
-        _, i, j = best
-        items[i][0] = items[i][0] + items[j][0]
-        items[i][1] |= items[j][1]
-        items[i][2] += items[j][2]
-        items.pop(j)
-
-    if len(items) > max(target, 1):
-        items = _dissolve_to(items, target, cap, loc_of)
-    return [it[0] for it in items]
+    guest = str(r.get("guest") or "").strip().lower()
+    if guest in SOLO:
+        return None
+    digits = "".join(c for c in str(r.get("room") or "") if c.isdigit())
+    if not digits:
+        return None
+    return (guest, digits)
 
 
-def _dissolve_to(items, target, cap, loc_of):
-    """Empty the lightest charts a room at a time when whole ones will not pair.
+class _Bundle(object):
+    """Rooms that go to one housekeeper or the day is wrong."""
 
-    Two remainders of three hundred minutes cannot merge under a cap of three
-    hundred and eighty, but their rooms can be dealt out among the charts that
-    have space. Each room goes to the chart that stays in its own building if
-    one has room, and otherwise the fewest bridges away -- so a chart that does
-    end up crossing takes one or two rooms, not half a corridor.
+    __slots__ = ("rooms", "time", "n140", "n120", "blds", "levels", "x")
+
+    def __init__(self, rooms, loc_of):
+        self.rooms = list(rooms)
+        self.time = sum(r.get("time", 0) for r in rooms)
+        self.n140 = sum(1 for r in rooms if r.get("time") == 140)
+        self.n120 = sum(1 for r in rooms if r.get("time") == 120)
+        locs = [loc_of(r) for r in rooms]
+        locs = [l for l in locs if l]
+        self.blds = {l.bld for l in locs}
+        self.levels = {l.level_ix for l in locs}
+        self.x = min([l.x for l in locs] or [0])
+
+
+def _legal_alone(rooms, cap):
+    """Could these rooms be a chart at all? A bundle that cannot must be split."""
+    return _legal(sum(r.get("time", 0) for r in rooms),
+                  sum(1 for r in rooms if r.get("time") == 140),
+                  sum(1 for r in rooms if r.get("time") == 120),
+                  set(), cap)
+
+
+def _split_illegal(rooms, cap):
+    """Break an apartment that cannot legally be one chart into the fewest
+    pieces that can.
+
+    Keeping rooms together is a rule, but it cannot outrank the rules that say
+    what a chart may hold: a guest holding two 140s, or more than 380 minutes
+    behind one door, has to go to two people whatever anybody prefers. Without
+    this the bundle would be forced whole onto a fresh chart and quietly break
+    the cap -- the same class of fault this module exists to stop.
     """
-    while len(items) > max(target, 1):
-        light = min(range(len(items)), key=lambda i: items[i][2])
-        moving = sorted(items[light][0], key=lambda r: -r["time"])
-        plan = []
-        loads = {i: items[i][2] for i in range(len(items)) if i != light}
-        for r in moving:
-            home = loc_of(r).bld if loc_of(r) else None
-            fits = [i for i in loads if loads[i] + r["time"] <= cap]
-            if not fits:
-                plan = None
-                break
-            pick = min(fits, key=lambda i: (_hops(items[i][1] | ({home} if home else set())),
-                                            len(items[i][1] | ({home} if home else set())),
-                                            -loads[i]))
-            plan.append((r, pick))
-            loads[pick] += r["time"]
-        if plan is None:
-            break                     # the day genuinely needs this many people
-        for r, pick in plan:
-            items[pick][0].append(r)
-            items[pick][2] += r["time"]
-            if loc_of(r):
-                items[pick][1].add(loc_of(r).bld)
-        items.pop(light)
-    return items
+    if _legal_alone(rooms, cap):
+        return [list(rooms)]
+    out, cur = [], []
+    for r in sorted(rooms, key=lambda r: -r.get("time", 0)):
+        if cur and _legal_alone(cur + [r], cap):
+            cur.append(r)
+        elif cur:
+            out.append(cur)
+            cur = [r]
+        else:
+            cur = [r]
+    if cur:
+        out.append(cur)
+    return out
 
 
-def pack_by_floor(rooms, cap, loc_of):
-    """Charts that read down the building: one floor, or two touching ones.
+def bundles(rooms, cap, loc_of):
+    """Group the rooms that must not be split, and leave the rest alone.
 
-    Each building's floors are walked in order and charts filled as they go, so
-    a chart holds one corridor, or the tail of one and the head of the floor
-    directly above it -- never two floors with others in between. That is what
-    "scattered" means to somebody carrying a cart: two floors is a staircase,
-    Plaza-and-4 is a lift ride past three landings.
-
-    A second pass then combines any two charts that sit on touching floors of
-    the same building and fit together, which buys back most of the people that
-    filling strictly in order would otherwise cost.
+    Adjacency is checked, not assumed: rooms are bundled only when they share
+    a guest, an apartment number *and* a floor. Jaramillo holds seven rooms
+    today across three floors -- that is three bundles, not one 690-minute
+    chart nobody could work.
     """
-    from property_map import LEVEL_IX
-    by_b = collections.defaultdict(list)
-    unplaced = []
+    groups = collections.defaultdict(list)
+    loose = []
     for r in rooms:
-        (by_b[loc_of(r).bld].append(r) if loc_of(r) else unplaced.append(r))
+        key = _unit_key(r)
+        if key is None:
+            loose.append(r)
+            continue
+        loc = loc_of(r)
+        where = (loc.bld, loc.level_ix) if loc else (None, None)
+        groups[(key, where)].append(r)
 
     out = []
-    for b in sorted(by_b, key=lambda x: BORD.get(x, 9)):
-        rs = sorted(by_b[b], key=lambda r: (LEVEL_IX[loc_of(r).level], loc_of(r).x))
-        cur, t = [], 0.0
-        for r in rs:
-            if cur and t + r["time"] > cap:
-                out.append(cur)
-                cur, t = [], 0.0
-            cur.append(r)
-            t += r["time"]
-        if cur:
-            out.append(cur)
+    for v in groups.values():
+        for piece in _split_illegal(v, cap):
+            out.append(_Bundle(piece, loc_of))
+    out += [_Bundle([r], loc_of) for r in loose]
+    return out
 
-    def _levels(c):
-        return {LEVEL_IX[loc_of(r).level] for r in c if loc_of(r)}
 
-    def _blds(c):
-        return {loc_of(r).bld for r in c if loc_of(r)}
+# ── a chart under construction ───────────────────────────────────────────────
 
-    merged = True
-    while merged:
-        merged = False
-        for i in range(len(out)):
-            for j in range(i + 1, len(out)):
-                if sum(r["time"] for r in out[i]) + sum(r["time"] for r in out[j]) > cap:
-                    continue
-                if _blds(out[i]) != _blds(out[j]):
-                    continue          # never across buildings here
-                lv = _levels(out[i]) | _levels(out[j])
-                if lv and max(lv) - min(lv) > 1:
-                    continue          # only floors that touch
-                out[i] = out[i] + out[j]
-                out.pop(j)
-                merged = True
+class _Chart(object):
+    __slots__ = ("buns", "time", "n140", "n120", "blds", "levels")
+
+    def __init__(self):
+        self.buns = []
+        self.time = 0
+        self.n140 = 0
+        self.n120 = 0
+        self.blds = set()
+        self.levels = set()
+
+    def accepts(self, b, cap):
+        return _legal(self.time + b.time, self.n140 + b.n140,
+                      self.n120 + b.n120, self.blds | b.blds, cap)
+
+    def add(self, b):
+        self.buns.append(b)
+        self.time += b.time
+        self.n140 += b.n140
+        self.n120 += b.n120
+        self.blds |= b.blds
+        self.levels |= b.levels
+
+    def drop(self, b):
+        self.buns.remove(b)
+        self.time -= b.time
+        self.n140 -= b.n140
+        self.n120 -= b.n120
+        self.blds = set()
+        self.levels = set()
+        for x in self.buns:
+            self.blds |= x.blds
+            self.levels |= x.levels
+
+    def rooms(self):
+        return [r for b in self.buns for r in b.rooms]
+
+    def travel(self):
+        """What this chart costs to walk, in rough minutes-equivalent.
+
+        A building crossing dwarfs everything else, and the span between the
+        top and bottom floor matters more than how many floors are touched --
+        Plaza-and-4 is a lift ride past three landings, 2-and-3 is a staircase.
+        """
+        if not self.levels:
+            return 0
+        cost = 40 * _hops(self.blds) + 25 * (len(self.blds) - 1)
+        cost += 6 * (max(self.levels) - min(self.levels))
+        cost += 2 * (len(self.levels) - 1)
+        return cost
+
+
+def _score(charts, low_min):
+    """Fewest housekeepers, then least walking, then fewest short days."""
+    live = [c for c in charts if c.buns]
+    return (len(live),
+            sum(c.travel() for c in live),
+            sum(1 for c in live if c.time < low_min))
+
+
+# ── the pack ─────────────────────────────────────────────────────────────────
+
+def _seed(buns, cap):
+    """A first arrangement: one building at a time, down the floors in order.
+
+    Bundles are placed heaviest-first within a floor, because the awkward ones
+    -- a 380-minute apartment, a 140 -- have the fewest homes and want first
+    refusal. A chart already on the floor gets it before an empty one.
+    """
+    charts = []
+    by_bld = collections.defaultdict(list)
+    for b in buns:
+        key = min(b.blds) if b.blds else 9
+        by_bld[key].append(b)
+
+    for bld in sorted(by_bld, key=lambda b: BORD.get(b, 9)):
+        here = sorted(by_bld[bld],
+                      key=lambda b: (min(b.levels) if b.levels else 99,
+                                     -b.time, b.x))
+        mine = []
+        for b in here:
+            lv = min(b.levels) if b.levels else None
+            fits = [c for c in mine if c.accepts(b, cap)]
+            same = [c for c in fits if lv is not None and lv in c.levels]
+            if same:
+                pick = max(same, key=lambda c: c.time)
+            elif fits:
+                def near(c):
+                    if not c.levels or lv is None:
+                        return 0
+                    return min(abs(l - lv) for l in c.levels)
+                pick = min(fits, key=lambda c: (near(c), -c.time))
+            else:
+                pick = _Chart()
+                mine.append(pick)
+                if not pick.accepts(b, cap):
+                    # `bundles` splits anything that cannot be a chart on its
+                    # own, so an empty chart always takes it. If that ever
+                    # stops being true, say so rather than shipping the day.
+                    raise ValueError(
+                        "bundle cannot form a legal chart: %s"
+                        % ", ".join(str(r.get("room")) for r in b.rooms))
+            pick.add(b)
+        charts += mine
+    return charts
+
+
+def _improve(charts, cap, low_min, rounds=400):
+    """Steepest descent on (count, travel, short days) with the rules held.
+
+    Three moves: shift one bundle, swap two, and empty the lightest chart
+    outright. The third is the one that removes a housekeeper; the first two
+    are what make room for it.
+    """
+    charts = [c for c in charts if c.buns]
+    best = _score(charts, low_min)
+
+    for _ in range(rounds):
+        moved = False
+
+        # empty the lightest chart if every bundle in it has somewhere legal
+        order = sorted(range(len(charts)), key=lambda i: charts[i].time)
+        for i in order:
+            src = charts[i]
+            others = [c for j, c in enumerate(charts) if j != i]
+            plan, loads = [], {id(c): c for c in others}
+            trial = []
+            ok = True
+            for b in sorted(src.buns, key=lambda b: -b.time):
+                cand = [c for c in others if c.accepts(b, cap)]
+                if not cand:
+                    ok = False
+                    break
+                pick = min(cand, key=lambda c: (_hops(c.blds | b.blds),
+                                                len(c.blds | b.blds),
+                                                -c.time))
+                pick.add(b)
+                trial.append((pick, b))
+            if ok:
+                kept = [c for c in charts if c is not src]
+                s = _score(kept, low_min)
+                if s < best:
+                    charts = kept
+                    best = s
+                    moved = True
+                    break
+            for pick, b in reversed(trial):
+                pick.drop(b)
+        if moved:
+            continue
+
+        # shift one bundle
+        for i, src in enumerate(charts):
+            for b in list(src.buns):
+                for j, dst in enumerate(charts):
+                    if i == j or not dst.accepts(b, cap):
+                        continue
+                    src.drop(b)
+                    dst.add(b)
+                    s = _score(charts, low_min)
+                    if s < best:
+                        best = s
+                        charts = [c for c in charts if c.buns]
+                        moved = True
+                        break
+                    dst.drop(b)
+                    src.add(b)
+                if moved:
+                    break
+            if moved:
                 break
-            if merged:
+        if moved:
+            continue
+
+        # swap two bundles
+        for i in range(len(charts)):
+            for j in range(i + 1, len(charts)):
+                a, d = charts[i], charts[j]
+                for x in list(a.buns):
+                    for y in list(d.buns):
+                        a.drop(x); d.drop(y)
+                        if a.accepts(y, cap) and d.accepts(x, cap):
+                            a.add(y); d.add(x)
+                            s = _score(charts, low_min)
+                            if s < best:
+                                best = s
+                                moved = True
+                                break
+                            a.drop(y); d.drop(x)
+                        a.add(x); d.add(y)
+                    if moved:
+                        break
+                if moved:
+                    break
+            if moved:
                 break
+        if not moved:
+            break
+
+    return [c for c in charts if c.buns]
+
+
+def pack(rooms, cap, loc_of, low_min=330):
+    """The one packer. Returns a list of charts, each a list of room dicts.
+
+    `loc_of(room)` gives something with .bld, .level_ix and .x, or None for a
+    room the plans cannot place. Those are packed last and together, as before
+    -- they have no location to be tidy about.
+    """
+    placed, unplaced = [], []
+    for r in rooms:
+        (placed if loc_of(r) else unplaced).append(r)
+
+    charts = []
+    if placed:
+        buns = bundles(placed, cap, loc_of)
+        charts = _improve(_seed(buns, cap), cap, low_min)
+
+    out = [c.rooms() for c in charts]
 
     if unplaced:
-        cur, t = [], 0.0
+        cur, t = [], 0
         for r in unplaced:
-            if cur and t + r["time"] > cap:
-                out.append(cur); cur, t = [], 0.0
-            cur.append(r); t += r["time"]
+            if cur and t + r.get("time", 0) > cap:
+                out.append(cur)
+                cur, t = [], 0
+            cur.append(r)
+            t += r.get("time", 0)
         if cur:
             out.append(cur)
     return out
 
 
-def _fits(chart, room, cap, loc_of, one_building):
-    """Could this room join this chart without breaking the rules?
+def audit(charts, cap, loc_of, low_min=330):
+    """What is wrong with a set of charts, for tests and for the page.
 
-    The rules are the ones the charts were built under: the cap, one building,
-    and floors that touch. A balancing move that quietly undoes them would just
-    trade one complaint for another.
+    Returns counts, never raises: a caller that wants to assert can, and one
+    that only wants to show a warning can do that instead.
     """
-    from property_map import LEVEL_IX
-    if sum(r["time"] for r in chart) + room["time"] > cap:
-        return False
-    locs = [loc_of(r) for r in chart] + [loc_of(room)]
-    locs = [l for l in locs if l]
-    if not locs:
-        return True
-    if one_building and len({l.bld for l in locs}) > 1:
-        return False
-    ix = [l.level_ix for l in locs]
-    return max(ix) - min(ix) <= 1
-
-
-def balance_low(charts, cap, low_min, loc_of, one_building=True, rounds=60):
-    """Gather the slack onto fewer people instead of spreading it thin.
-
-    Two housekeepers on 280 and 310 minutes are both short of a day. Move one
-    70-minute room between them and one has a full 350 and the other has 240 --
-    the same work, the same two people, but only one of them is now underused,
-    and that one can be sent home, given the pile of stayovers, or lent to
-    another building.
-
-    So the thing being minimised is the *number* of short charts, not the
-    spread of them. Every move is checked against the rules the charts were
-    built under, and a chart emptied completely is simply dropped, which is one
-    housekeeper the day did not need.
-    """
-    charts = [list(c) for c in charts if c]
-
-    def load(c):
-        return sum(r["time"] for r in c)
-
-    def n_low(cs):
-        return sum(1 for c in cs if load(c) < low_min)
-
-    for _ in range(rounds):
-        best = None
-        base = (n_low(charts), len(charts))
-        for i, src in enumerate(charts):
-            for ri, room in enumerate(src):
-                for j, dst in enumerate(charts):
-                    if i == j or not _fits(dst, room, cap, loc_of, one_building):
-                        continue
-                    moved = [c for c in charts]
-                    moved[i] = src[:ri] + src[ri + 1:]
-                    moved[j] = dst + [room]
-                    moved = [c for c in moved if c]
-                    key = (n_low(moved), len(moved))
-                    if key < base and (best is None or key < best[0]):
-                        best = (key, moved)
-        if best is None:
-            break
-        charts = best[1]
-    return charts
+    split = collections.defaultdict(set)
+    bad_mix = 0
+    b23 = 0
+    over = 0
+    low = 0
+    for i, c in enumerate(charts):
+        t = sum(r.get("time", 0) for r in c)
+        n140 = sum(1 for r in c if r.get("time") == 140)
+        n120 = sum(1 for r in c if r.get("time") == 120)
+        blds = {loc_of(r).bld for r in c if loc_of(r)}
+        if t > cap:
+            over += 1
+        if t < low_min:
+            low += 1
+        if n140 > 1 or (n140 >= 1 and n120 > 1):
+            bad_mix += 1
+        if 2 in blds and 3 in blds:
+            b23 += 1
+        for r in c:
+            k = _unit_key(r)
+            if k:
+                loc = loc_of(r)
+                split[(k, (loc.bld, loc.level_ix) if loc else None)].add(i)
+    return {"charts": len(charts),
+            "split_bundles": sum(1 for v in split.values() if len(v) > 1),
+            "bad_mix": bad_mix, "b2_b3": b23, "over_cap": over, "low": low}
