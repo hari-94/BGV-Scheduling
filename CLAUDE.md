@@ -370,9 +370,17 @@ day with no notes. It now matches on a normalised heading (bullets stripped,
 punctuation dropped, case flattened) against a table of names each section has
 actually gone by, and an *unrecognised* heading still closes the previous
 section so its contents cannot be filed under the wrong label. Arrows arrive as
-`>`, `->`, `→` and `®` — the last is a Wingdings arrow pasted out of Outlook.
-If the format shifts again, add the spelling to `_NOTE_SECTIONS` rather than
+`>`, `->`, `→`, `®` — the last is a Wingdings arrow pasted out of Outlook — and
+as a plain hyphen, `3351E - 3141A`, which is how the desk wrote every move on
+13 September. The en dash was on the list and the hyphen beside it on the
+keyboard was not, so that day's moves vanished without a word. If the format
+shifts again, add the spelling to `_NOTE_SECTIONS` or `_ARROW` rather than
 touching the loop.
+
+That failure has now happened twice in the same module, both times silently,
+and both times only because somebody on the floor noticed something missing. A
+parse that finds *no* room moves, *no* late checkouts and *no* pets in a report
+that is plainly not empty is worth saying out loud on the page.
 
 **A room code carries exactly one letter.** All 174 codes on the September
 sheet do, A through I. So `2232EG` is the desk's shorthand for two doors. The

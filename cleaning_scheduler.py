@@ -1542,7 +1542,13 @@ _SKIP_SECTIONS = {"check ins", "check in", "checkins", "arrivals",
 _ROOM_RE = re.compile(r'\b([1-9]\d{3}[A-Z]{1,4})\b')
 _TIME_RE = re.compile(r'\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', re.IGNORECASE)
 # \u00ae and \u00e0 are Wingdings arrows pasted as text; the rest are the real thing.
-_ARROW = r'(?:[>\u2192\u21d2\u27a1\u00ae\u00e0]|-{1,2}>|=>|\u2013|\u2014|\bto\b)'
+# The plain hyphen is last on purpose. The desk writes "3351E - 3141A" as often
+# as it draws an arrow, and the day it did that every room move was dropped in
+# silence -- the en dash was listed, the hyphen next to it on the keyboard was
+# not. Last, so "->" is still read as one arrow rather than a hyphen with a
+# stray ">" after it; and harmless, because the pattern demands a full room code
+# on both sides and is only ever run inside the Room Moves section.
+_ARROW = r'(?:[>\u2192\u21d2\u27a1\u00ae\u00e0]|-{1,2}>|=>|\u2013|\u2014|\bto\b|-)'
 _MOVE_RE = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*' + _ARROW +
                       r'\s*([1-9]\d{3}[A-Z]{1,4})', re.IGNORECASE)
 _BULLET = re.compile(r'^[\s\t]*(?:[*\u2022\u25e6\u2023\u2043\u00b7\-\u2013]+|\d+[.)])\s*')
