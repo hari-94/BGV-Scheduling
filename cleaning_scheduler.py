@@ -108,6 +108,40 @@ def is_unassigned_hk(name) -> bool:
     s = str(name or "")
     return (not s) or s.startswith(NO_HK_LABEL) or s.startswith(NEED_HK_PREFIX)
 
+def room_is_unallocated(r) -> bool:
+    """A room with no real guest on it -- it may well already be clean."""
+    return str(r.get("guest", "")).strip().lower() in ("unallocated", "---", "")
+
+
+def hk_day_loads(groups) -> dict:
+    """Minutes each real housekeeper is actually carrying, by their whole day.
+
+    Two things this gets right that counting charts does not. Somebody with two
+    part-charts has one day, not two, and it is the day that is light or not.
+    And an Unallocated Full Clean parked in a chart is not that housekeeper's
+    work -- the schedule lists it under "Unassigned" for somebody to place by
+    hand -- so it does not count towards their load either.
+
+    Both matter. The "Under 330m" tile used to count charts at their whole
+    length and disagreed with the light-staff table under it on 31 of the 75
+    stored days, in both directions: a chart carrying an unallocated room read
+    heavy to the tile and light to the table, and a housekeeper holding two
+    short charts was counted twice by the tile and not at all by the table.
+    """
+    out = {}
+    for g in groups:
+        hk = str(g.get("housekeeper") or "")
+        if not hk or hk == "Manager" or is_unassigned_hk(hk):
+            continue
+        strip = (g.get("service_type") in (SVC_FC, SVC_IH)
+                 and not g.get("verify_group"))
+        for r in (g.get("rooms") or []):
+            if strip and room_is_unallocated(r):
+                continue
+            out[hk] = out.get(hk, 0) + r.get("time", 0)
+    return out
+
+
 # RQS assigned to inspect all IH charts.
 IH_RQS = "RQS 2"
 
@@ -4112,8 +4146,9 @@ ih_rooms_n = sum(len(g["rooms"]) for g in ih_g)
 ds_rooms_n = sum(len(g["rooms"]) for g in ds_g)
 dv_rooms_n = sum(len(g["rooms"]) for g in dv_g)
 n_free_hk=sum(1 for n in present_hk if n not in used_hk_set)
-n_low_hk =sum(1 for g in fg if g.get("housekeeper") and g.get("housekeeper")!="Manager"
-              and not is_unassigned_hk(g.get("housekeeper")) and g["time"]<LOW_MIN)
+# Housekeepers with a light day -- the same count, by the same rule, as the
+# light-staff table further down. Counting charts instead disagreed with it.
+n_low_hk =sum(1 for _t in hk_day_loads(fg).values() if _t and _t < LOW_MIN)
 n_need_hk=sum(1 for g in fg if str(g.get("housekeeper","")).startswith(NEED_HK_PREFIX))
 
 # The day in one line: how much work there is, what kind, and whether
@@ -4446,8 +4481,7 @@ else:
         # had it right. Over the stored days only the "No HK available"
         # bucket ever spans two RQS, so no real housekeeper is split by this.
         by_hk = {}   # (hk_name, rqs) -> {"insp":set, "bld":set, "rooms":[], "time":int}
-        def _room_is_unalloc(r):
-            return str(r.get("guest","")).strip().lower() in ("unallocated","---","")
+        _room_is_unalloc = room_is_unallocated
         for g in fg:
             hk   = g.get("housekeeper","") or ("Unassigned" if g.get("verify_group") else "")
             insp = g.get("inspector","")
