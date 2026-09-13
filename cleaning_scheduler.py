@@ -5854,6 +5854,9 @@ td{{transition:background .15s ease}}
                 "_Unalloc":"Yes" if (_is_unalloc and not is_verify) else "No",
                 "_Verify":"Yes" if is_verify else "No",
                 "_Uncertain":"Yes" if r.get("uncertain") else "No",
+                # Same three keys the on-screen chart card sorts its room chips
+                # by, so a printed chart reads in the order the screen shows it.
+                "_Bld":r.get("bld",0),"_Floor":r.get("floor",0),"_Num":r.get("num",0),
             })
     export_df = pd.DataFrame(export_rows)
     # Order, top to bottom:
@@ -5863,7 +5866,12 @@ td{{transition:background .15s ease}}
     #   3) uncertain rooms
     #   4) stayover / verify rooms (assign manually) — dead last
     if not export_df.empty and "_Verify" in export_df.columns:
-        _sk = ["_Svc","_RQS","_HSKP","_Group"]
+        # ..._Bld/_Floor/_Num order the rooms *within* one housekeeper's chart.
+        # Without them the file kept the packer's insertion order while the
+        # screen sorted by building, floor and number, so the same chart read
+        # in two different sequences -- and the printed one, which is what
+        # somebody actually walks with, was the arbitrary one.
+        _sk = ["_Svc","_RQS","_HSKP","_Group","_Bld","_Floor","_Num"]
         base = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")]
         normal      = base[base["_Unalloc"]=="No"].sort_values(_sk)
         unallocated = base[base["_Unalloc"]=="Yes"].sort_values(_sk)
