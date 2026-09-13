@@ -4425,7 +4425,15 @@ else:
 
         # ── Build one row per housekeeper, grouped under their RQS (like the
         #    pivot). Verify/blank-housekeeper groups collect under "Unassigned". ─
-        by_hk = {}   # hk_name -> {"insp":str, "bld":set, "rooms":[...], "time":int}
+        # Keyed on (housekeeper, RQS), not the housekeeper alone. "No HK
+        # available" is one name covering work that belongs to different RQS,
+        # so keying on the name merged those groups into a single row and
+        # `_primary_rqs` then filed the lot under whichever inspector sorted
+        # first -- an In-House Full Clean for RQS 2 appearing under RQS 1,
+        # while the downloaded file, which keys each row on its own group,
+        # had it right. Over the stored days only the "No HK available"
+        # bucket ever spans two RQS, so no real housekeeper is split by this.
+        by_hk = {}   # (hk_name, rqs) -> {"insp":set, "bld":set, "rooms":[], "time":int}
         def _room_is_unalloc(r):
             return str(r.get("guest","")).strip().lower() in ("unallocated","---","")
         for g in fg:
@@ -4442,14 +4450,16 @@ else:
             unalloc_rooms = [r for r in g["rooms"] if      unalloc_here and _room_is_unalloc(r)]
 
             if alloc_rooms:
-                rec = by_hk.setdefault(hk, {"insp":set(), "bld":set(), "rooms":[], "time":0})
+                rec = by_hk.setdefault((hk, insp),
+                                       {"insp":set(), "bld":set(), "rooms":[], "time":0})
                 if insp: rec["insp"].add(insp)
                 for r in alloc_rooms:
                     rec["bld"].add(r.get("bld",0))
                     rec["rooms"].append({**r, "_svc":svc})
                     rec["time"] += r.get("time",0)
             if unalloc_rooms:
-                rec = by_hk.setdefault("Unassigned", {"insp":set(), "bld":set(), "rooms":[], "time":0})
+                rec = by_hk.setdefault(("Unassigned", ""),
+                                       {"insp":set(), "bld":set(), "rooms":[], "time":0})
                 for r in unalloc_rooms:
                     rec["bld"].add(r.get("bld",0))
                     rec["rooms"].append({**r, "_svc":svc})
@@ -4479,7 +4489,7 @@ else:
         # Group housekeepers under their (primary) RQS.
         from collections import OrderedDict as _OD
         rqs_groups = {}
-        for hk, rec in by_hk.items():
+        for (hk, _insp), rec in by_hk.items():
             if not _keep(hk, rec): continue
             rqs_groups.setdefault(_primary_rqs(rec), []).append((hk, rec))
         # Each RQS group's service rank = the best (lowest) rank among its HKs, so
@@ -4627,7 +4637,15 @@ td{{transition:background .15s ease}}
             # sorted room codes for display next to the count
             names = [str(x.get("room","")) for x in recs_rooms if x.get("room")]
             return ", ".join(sorted(names))
-        for hk, rec in by_hk.items():
+        # A housekeeper is light or not by their whole day, so the rows split
+        # per RQS above are added back together before the threshold is applied.
+        _whole_day = {}
+        for (hk, _insp), rec in by_hk.items():
+            d = _whole_day.setdefault(hk, {"insp":set(), "rooms":[], "time":0})
+            d["insp"] |= rec["insp"]
+            d["rooms"] += rec["rooms"]
+            d["time"] += rec["time"]
+        for hk, rec in _whole_day.items():
             if hk == "Unassigned" or is_unassigned_hk(hk): continue
             if rec["time"] and rec["time"] < LOW_MIN:
                 _hk_low.append((hk, f'{rec["time"]}m', "#b45309", len(rec["rooms"]),
