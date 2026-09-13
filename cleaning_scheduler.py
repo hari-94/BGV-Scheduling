@@ -2686,11 +2686,20 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP, one_building=Non
     to itself until the housekeeper budget forces a merge. Merging whenever two
     happen to fit is what makes crossings out of nothing.
 
-    The arithmetic comes out the same: full charts plus packed remainders needs
-    exactly ceil(total/cap) people, so nothing is spent on the tidiness. Where
-    remainders genuinely will not pair — three of 300 minutes under a 460 cap —
-    the leftovers are split room by room instead, because a housekeeper is 460
-    minutes and a crossing is about ten."""
+    The arithmetic usually comes out the same: full charts plus packed
+    remainders needs exactly ceil(total/cap) people, so nothing is spent on the
+    tidiness. Where remainders genuinely will not pair — three of 300 minutes
+    under a 460 cap — the leftovers are split room by room instead, because a
+    housekeeper is 460 minutes and a crossing is about ten.
+
+    "Usually" is the whole of it, and it was being assumed rather than checked.
+    On a light day no building fills a chart, so every building is a remainder
+    and each one kept a person: 12 September had 155 minutes in building 1, 115
+    in building 2 and 60 in building 3 — 330 all told, well under one 460-minute
+    round — and it went out as three housekeepers doing a third of a day each.
+    Tidiness is free only while it is free. When keeping the buildings apart
+    would cost somebody a shift, the remainders are merged cheapest-first until
+    the headcount is back to ceil(total/cap), exactly as the pooled mode does."""
     import math
     rooms = list(ds_rooms) + list(extra_rooms or [])
     if not rooms: return []
@@ -2707,7 +2716,10 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP, one_building=Non
         one_building = True
 
     full, bins = _ds_by_building(rooms, cap)
-    if one_building:
+    # Keep the buildings apart while that is free -- but only while it is. If
+    # the building-pure split needs more people than the minutes do, fall
+    # through to the merge below rather than buy the tidiness with a shift.
+    if one_building and len(full) + len(bins) <= n_min:
         return full + [b[0] for b in bins]
     while len(bins) > max(n_min - len(full), 1):
         best = None
