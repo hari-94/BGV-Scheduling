@@ -2758,6 +2758,26 @@ def _tidy_full_clean(charts):
     result is audited, and anything worse than what came in -- a lost room, a
     broken rule, an extra housekeeper -- means the solver's own charts are
     handed back untouched.
+
+    Both sides are audited, and that matters. The first version of this guard
+    checked only the redeal, on the stated grounds that `solve_full_clean`
+    already produces legal charts and so falling back always lands somewhere
+    legal. It does not.
+
+    On the day a floor complaint arrived about -- 118 full cleans, 10,930
+    minutes -- the solver's own charts paired building 2 with building 3 six
+    times, which is two bridge crossings and the one pairing the map says
+    never to make, and split an apartment besides. The redeal was clean and
+    wanted 32 charts against the solver's 31. Because the headcount test came
+    first, the clean answer was thrown away to save a housekeeper and the
+    illegal one went out unexamined.
+
+    Across the 75 stored days the solver breaks a hard rule on 46 of them.
+    Auditing both sides changes 12 days, costs 12 housekeeper-days in 1,265
+    (+0.9%), and takes the crossing charts from 126 to 104.
+
+    So headcount only decides between two *legal* days. A day that breaks a
+    hard rule loses to one that does not, whatever it costs.
     """
     charts = [c for c in charts if c]
     if len(charts) < 2:
@@ -2774,14 +2794,27 @@ def _tidy_full_clean(charts):
             != sorted(str(r.get("room")) for c in charts for r in c)):
         print("[fc] repack changed the room set, keeping the solver's charts")
         return charts
+
+    def _breaks(a):
+        return (a["over_cap"] or a["bad_mix"] or a["split_bundles"]
+                or a["b2_b3"])
+
+    bad_packed = fcpack.audit(packed, MAX_FC, _where, LOW_MIN)
+    bad_solver = fcpack.audit(charts, MAX_FC, _where, LOW_MIN)
+
+    if _breaks(bad_packed):
+        print(f"[fc] repack broke a rule {bad_packed}; keeping the solver's")
+        return charts
+    if _breaks(bad_solver):
+        # The redeal is clean and what came in is not. Take it even if it
+        # costs a housekeeper: a broken rule is somebody crossing the property
+        # twice, or two people in one apartment, every day it ships.
+        print(f"[fc] solver charts broke a rule {bad_solver}; taking the "
+              f"clean repack ({len(packed)} charts for {len(charts)})")
+        return packed
     if len(packed) > len(charts):
         print(f"[fc] repack wanted {len(packed)} charts for {len(charts)}; "
               "keeping the solver's")
-        return charts
-
-    bad = fcpack.audit(packed, MAX_FC, _where, LOW_MIN)
-    if bad["over_cap"] or bad["bad_mix"] or bad["split_bundles"] or bad["b2_b3"]:
-        print(f"[fc] repack broke a rule {bad}; keeping the solver's charts")
         return charts
     return packed
 
