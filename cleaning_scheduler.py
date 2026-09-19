@@ -3158,6 +3158,8 @@ def pack_fc_sequential(room_list):
     longer called. This is deliberately the simpler thing: a sequence somebody
     can read down the sheet and check by eye.
     """
+    import collections
+
     rooms = [r for r in room_list if r]
     if not rooms:
         return []
@@ -3180,20 +3182,46 @@ def pack_fc_sequential(room_list):
 
     units.sort(key=_key)
 
-    charts = []
-    cur, t, n140, n120, blds = [], 0, 0, 0, set()
+    # One pass down the walk left too much on the table. A group that could
+    # not take the next apartment closed there and nothing reopened it, so on
+    # 19 September it made 34 groups with thirteen under 330 -- the smallest
+    # 190 minutes. The waste is not in the order, it is in never looking back.
+    #
+    # So each building is packed on its own, by the packer that already exists
+    # and is tested, and the groups it returns are then laid out down the walk.
+    # Buildings cannot cross, because no building ever sees another's rooms.
+    # Inside a building a group is no longer strictly consecutive; that is what
+    # buys the short days back.
+    by_bld = collections.defaultdict(list)
     for u in units:
-        if cur and not fcpack._legal(t + u.time, n140 + u.n140, n120 + u.n120,
-                                     blds | u.blds, MAX_FC):
-            charts.append(cur)
-            cur, t, n140, n120, blds = [], 0, 0, 0, set()
-        cur.extend(u.rooms)
-        t += u.time
-        n140 += u.n140
-        n120 += u.n120
-        blds |= u.blds
-    if cur:
-        charts.append(cur)
+        by_bld[min(u.blds) if u.blds else 9].append(u)
+
+    def _down(chart):
+        nums = [int("".join(c for c in str(r.get("room") or "") if c.isdigit()) or 0)
+                for r in chart]
+        return -max(nums) if nums else 0
+
+    charts = []
+    for b in sorted(by_bld, key=lambda x: WALK.get(x, 9)):
+        here = [r for u in by_bld[b] for r in u.rooms]
+        try:
+            packed = fcpack.pack(here, MAX_FC, _where, LOW_MIN)
+        except Exception as ex:
+            print("[fc] building %s would not pack (%s); cutting it in order" % (b, ex))
+            packed, cur, t, n140, n120, blds = [], [], 0, 0, 0, set()
+            for u in by_bld[b]:
+                if cur and not fcpack._legal(t + u.time, n140 + u.n140,
+                                             n120 + u.n120, blds | u.blds, MAX_FC):
+                    packed.append(cur)
+                    cur, t, n140, n120, blds = [], 0, 0, 0, set()
+                cur.extend(u.rooms)
+                t += u.time
+                n140 += u.n140
+                n120 += u.n120
+                blds |= u.blds
+            if cur:
+                packed.append(cur)
+        charts.extend(sorted(packed, key=_down))
 
     kept = sorted(str(r.get("room")) for c in charts for r in c)
     if kept != sorted(str(r.get("room")) for r in rooms):
