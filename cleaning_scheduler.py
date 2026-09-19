@@ -2871,6 +2871,275 @@ def _tidy_full_clean(charts):
     return packed
 
 
+def pack_fc_ordered(room_list, iters=400000, seed=1):
+    """Group Full Clean rooms by walking the property, then annealing the result.
+
+    The packer this replaces searched for the fewest charts and the least
+    walking, and let fullness come last. This asks a different question first:
+    is anybody short of a day? A chart under LOW_MIN is somebody sent home at
+    two o'clock, and on the stored days that happens more often than a long
+    walk does.
+
+    So the cost, in the order the floor cares about:
+
+      1. minutes below LOW_MIN, weighted hardest -- a short chart is the thing
+         to avoid;
+      2. the number of charts, because a chart is a shift;
+      3. gaps in the walk order, so a chart is a stretch of corridor rather
+         than rooms gathered from all over;
+      4. unused capacity, as a tie-break.
+
+    Above those sit the four hard rules, at a weight nothing can pay: the cap,
+    one 140, a 140 beside at most one 120, and never buildings 2 and 3
+    together. If the search still lands on a rule-breaking answer -- it should
+    not, but "should not" is not a guarantee -- the old chain runs instead and
+    its answer is used.
+
+    Three places this departs from the brief, each for a reason:
+
+    The walk order is read off property_map, not off the room code. The brief
+    says building is the first digit and floor the second. Building is; floor
+    is not. Digit 0 is two levels, Plaza and Terrace, and building 3 renumbers
+    the same plate on its low levels, so 3240A, 3020A and 3010A are one door.
+    _chart_place and _insp_travel_score both had exactly this fault and both
+    were fixed by reading the map. The digits remain the fallback for a room
+    the map cannot place.
+
+    Buildings walk 2, 1, 3 as asked, which is the property west to east
+    reversed. What matters is that building 1 sits in the middle, so the two
+    that do not touch are never neighbours in the order.
+
+    "Same guest" means the apartment, not the name. Taken literally the rule
+    cannot be met: on 12 September Jaramillo held 690 minutes across three
+    floors, which no 380-minute chart can hold, and Larson held one room in
+    building 1 and one in building 2, which no legal chart can hold together.
+    fcpack.bundles groups by guest and apartment number and floor, and splits
+    anything that still cannot be a chart -- that is the rule the floor means,
+    and it is already tested.
+    """
+    import bisect as _bisect
+    import math as _math
+    import random as _random
+
+    rooms = [r for r in room_list if r]
+    if not rooms:
+        return []
+
+    _where = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
+
+    def _fallback(why):
+        print("[fc] pack_fc_ordered fell back: " + str(why))
+        return _tidy_full_clean(solve_full_clean(list(rooms)))
+
+    try:
+        units = fcpack.bundles(rooms, MAX_FC, _where)
+    except Exception as ex:
+        return _fallback("could not build the apartments (%s)" % ex)
+    if not units:
+        return []
+
+    # the walk: building 2, then 1, then 3; inside a building, up the floors
+    # and along the corridor
+    WALK = {2: 0, 1: 1, 3: 2}
+
+    def _order_key(u):
+        loc = _where(u.rooms[0])
+        if loc:
+            return (WALK.get(loc.bld, 9), loc.level_ix, loc.x)
+        code = "".join(c for c in str(u.rooms[0].get("room") or "")
+                       if c.isdigit()).ljust(4, "0")
+        return (WALK.get(int(code[0]), 9), int(code[1]), int(code[1:]))
+
+    units.sort(key=_order_key)
+    n = len(units)
+
+    u_time = [u.time for u in units]
+    u_140 = [u.n140 for u in units]
+    u_120 = [u.n120 for u in units]
+    u_mask = [sum(1 << b for b in u.blds) for u in units]
+
+    total = sum(u_time)
+    n_groups = max(1, int(_math.ceil(total / float(MAX_FC)))) + 4
+
+    # what an arrangement costs
+    W_HARD = 10 ** 7        # nothing may pay this
+    W_SHORT = 5000          # per minute below LOW_MIN   (goal 1)
+    W_GROUP = 100000        # per chart used             (goal 2)
+    W_GAP = 300             # per position skipped       (goal 3)
+    W_XBLD = 20000          # per extra building on a chart
+    W_SLACK = 1             # per unused minute          (tie-break)
+
+    g_time = [0] * n_groups
+    g_140 = [0] * n_groups
+    g_120 = [0] * n_groups
+    g_mask = [0] * n_groups
+    g_pos = [[] for _ in range(n_groups)]   # member positions, kept sorted
+    where = [0] * n                         # which group each unit is in
+
+    def _cost(g):
+        members = g_pos[g]
+        if not members:
+            return 0
+        t = g_time[g]
+        c = W_GROUP + (MAX_FC - t) * W_SLACK
+        if t < LOW_MIN:
+            c += (LOW_MIN - t) * W_SHORT
+        c += ((members[-1] - members[0] + 1) - len(members)) * W_GAP
+        # Crossing a building is the biggest gap there is. The brief allows it
+        # -- only 2-with-3 is forbidden -- but left unpriced the search spends
+        # it freely: over 26 stored days it took the crossing charts from 33 to
+        # 73 while chasing the short ones. Priced at 20,000 it still clears the
+        # short charts and holds the crossings to 56.
+        nb = 0
+        for b in (1, 2, 3):
+            if g_mask[g] & (1 << b):
+                nb += 1
+        if nb > 1:
+            c += (nb - 1) * W_XBLD
+        if t > MAX_FC:
+            c += W_HARD
+        if g_140[g] > 1:
+            c += W_HARD
+        if g_140[g] >= 1 and g_120[g] > 1:
+            c += W_HARD
+        if (g_mask[g] & 0b100) and (g_mask[g] & 0b1000):
+            c += W_HARD
+        return c
+
+    def _put(i, g):
+        _bisect.insort(g_pos[g], i)
+        g_time[g] += u_time[i]
+        g_140[g] += u_140[i]
+        g_120[g] += u_120[i]
+        g_mask[g] |= u_mask[i]
+        where[i] = g
+
+    def _take(i, g):
+        g_pos[g].remove(i)
+        g_time[g] -= u_time[i]
+        g_140[g] -= u_140[i]
+        g_120[g] -= u_120[i]
+        m = 0
+        for j in g_pos[g]:
+            m |= u_mask[j]
+        g_mask[g] = m
+
+    # Where the search starts decides what it can reach. Dealt cold along the
+    # walk it cannot: emptying a chart means first making some chart shorter,
+    # and a step down from 330 costs 350,000 on the spot, which no single move
+    # can pay. Measured, the cold start sticks at 31 charts and 7 short ones on
+    # 12 September whatever the weights or the iteration count -- 400k and 2M
+    # give the identical answer. Started from the existing packer's charts it
+    # reaches 29 and none. So the spare capacity from the brief is kept, and
+    # the arrangement it begins from is the best one already available.
+    def _deal_cold():
+        """Deal along the walk, opening a chart only when the one in hand
+        cannot legally take the next apartment."""
+        cur = 0
+        for i in range(n):
+            placed = False
+            for g in range(cur, n_groups):
+                blds = set()
+                mm = g_mask[g] | u_mask[i]
+                for b in (1, 2, 3):
+                    if mm & (1 << b):
+                        blds.add(b)
+                if fcpack._legal(g_time[g] + u_time[i], g_140[g] + u_140[i],
+                                 g_120[g] + u_120[i], blds, MAX_FC):
+                    _put(i, g)
+                    cur = g
+                    placed = True
+                    break
+            if not placed:
+                for g in range(n_groups):
+                    if not g_pos[g]:
+                        _put(i, g)
+                        placed = True
+                        break
+            if not placed:
+                raise RuntimeError("no legal chart for an apartment")
+
+    warm = None
+    try:
+        warm = fcpack.pack(rooms, MAX_FC, _where, LOW_MIN)
+    except Exception as ex:
+        print("[fc] no warm start, dealing cold instead: %s" % ex)
+    try:
+        if warm:
+            seat = {}
+            for gi, ch in enumerate(warm):
+                for r in ch:
+                    seat[str(r.get("room"))] = gi
+            for i, u in enumerate(units):
+                g = seat.get(str(u.rooms[0].get("room")), 0)
+                _put(i, g if 0 <= g < n_groups else 0)
+        else:
+            _deal_cold()
+    except Exception as ex:
+        return _fallback("could not lay out a first arrangement (%s)" % ex)
+
+    cost = sum(_cost(g) for g in range(n_groups))
+    best_cost = cost
+    best = list(where)
+
+    rng = _random.Random(seed)
+    T0, T1 = 60000.0, 1.0
+    ratio = T1 / T0
+    for step in range(iters):
+        T = T0 * (ratio ** (step / float(iters)))
+        i = rng.randrange(n)
+        gi = where[i]
+        if rng.random() < 0.65:                     # move one apartment
+            gj = rng.randrange(n_groups)
+            if gj == gi:
+                continue
+            before = _cost(gi) + _cost(gj)
+            _take(i, gi)
+            _put(i, gj)
+            delta = _cost(gi) + _cost(gj) - before
+            if delta <= 0 or rng.random() < _math.exp(max(-60.0, -delta / T)):
+                cost += delta
+            else:
+                _take(i, gj)
+                _put(i, gi)
+        else:                                       # trade two
+            j = rng.randrange(n)
+            gj = where[j]
+            if gj == gi:
+                continue
+            before = _cost(gi) + _cost(gj)
+            _take(i, gi)
+            _take(j, gj)
+            _put(i, gj)
+            _put(j, gi)
+            delta = _cost(gi) + _cost(gj) - before
+            if delta <= 0 or rng.random() < _math.exp(max(-60.0, -delta / T)):
+                cost += delta
+            else:
+                _take(i, gj)
+                _take(j, gi)
+                _put(i, gi)
+                _put(j, gj)
+        if cost < best_cost:
+            best_cost = cost
+            best = list(where)
+
+    out_pos = [[] for _ in range(n_groups)]
+    for i, g in enumerate(best):
+        out_pos[g].append(i)
+    charts = [[r for i in sorted(members) for r in units[i].rooms]
+              for members in out_pos if members]
+
+    kept = sorted(str(r.get("room")) for c in charts for r in c)
+    want = sorted(str(r.get("room")) for r in rooms)
+    if kept != want:
+        return _fallback("the search lost or duplicated a room")
+    bad = fcpack.audit(charts, MAX_FC, _where, LOW_MIN)
+    if bad["over_cap"] or bad["bad_mix"] or bad["split_bundles"] or bad["b2_b3"]:
+        return _fallback("the search broke a hard rule %s" % bad)
+    return charts
+
+
 def build_all_groups(rooms):
     verify_rooms = [r for r in rooms if r.get("verify")]
     rooms = [r for r in rooms if not r.get("verify")]
@@ -2883,8 +3152,10 @@ def build_all_groups(rooms):
     # ── Stage 1: regular Full Clean — tidy-first, minimum housekeepers ────────
     remaining_fc = list(fc_rooms)
 
-    fc_charts = solve_full_clean(remaining_fc)
-    fc_charts = _tidy_full_clean(fc_charts)
+    # Walk the property and anneal, rather than search for the fewest charts
+    # and hope fullness follows. pack_fc_ordered falls back to the old chain
+    # itself if its answer breaks a hard rule, so this is the only call site.
+    fc_charts = pack_fc_ordered(remaining_fc)
     # Whichever set of charts won above, see whether the ones whose
     # housekeeper has to move can trade apartments and walk less. Swapping
     # cannot change the headcount, so this runs whatever _tidy_full_clean
