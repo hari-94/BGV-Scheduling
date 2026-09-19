@@ -3180,6 +3180,86 @@ def pack_fc_ordered(room_list, iters=None, seed=1):
     return charts
 
 
+def _fc_fill_up(charts, seed=1, rounds=20000):
+    """Gather a building's slack onto as few groups as it can be gathered onto.
+
+    A packer that balances leaves several people short of a day; what the
+    floor wants is for the slack to pile up on one. Building 3 on 19 September
+    came out 380, 310, 260, 240 -- one full day and three people going home
+    early -- when the same twelve rooms make 360, 360, 330, 140. Same work,
+    same four people, but three of them now have a full day and the short one
+    is short enough to be sent home, lent out, or given the stayover pile.
+
+    So what is minimised is the *number* of groups under LOW_MIN, and only
+    then how full the short ones are. Never the spread: minimising spread is
+    exactly what produces four people on 310.
+
+    Hill-climbing from the packer's own answer, moving or swapping one
+    apartment at a time, seeded so the same day gives the same groups. The
+    group count is never allowed to rise and the hard rules are re-checked on
+    every candidate, so this cannot buy a full day with a broken one.
+    """
+    import collections
+    import random
+
+    charts = [c for c in charts if c]
+    if len(charts) < 2:
+        return charts
+
+    units, home = [], []
+    for gi, c in enumerate(charts):
+        seen = collections.OrderedDict()
+        for r in c:
+            seen.setdefault(fcpack._unit_key(r) or str(r.get("room")), []).append(r)
+        for u in seen.values():
+            units.append(u)
+            home.append(gi)
+
+    n, k = len(units), len(charts)
+    _loc = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
+    ut = [sum(r.get("time", 0) for r in u) for u in units]
+    u1 = [sum(1 for r in u if r.get("time") == 140) for u in units]
+    u2 = [sum(1 for r in u if r.get("time") == 120) for u in units]
+    um = [{_loc(r).bld for r in u if _loc(r)} for u in units]
+
+    def score(where):
+        t = [0] * k
+        a = [0] * k
+        b = [0] * k
+        m = [set() for _ in range(k)]
+        for i, g in enumerate(where):
+            t[g] += ut[i]
+            a[g] += u1[i]
+            b[g] += u2[i]
+            m[g] |= um[i]
+        bad = 0
+        for g in range(k):
+            if t[g] and not fcpack._legal(t[g], a[g], b[g], m[g], MAX_FC):
+                bad += 1
+        live = [x for x in t if x]
+        shorts = [x for x in live if x < LOW_MIN]
+        return (bad, len(live), len(shorts), -sum(shorts))
+
+    best = score(home)
+    bestw = list(home)
+    rng = random.Random(seed)
+    for _ in range(rounds):
+        w = list(bestw)
+        if rng.random() < 0.6:
+            w[rng.randrange(n)] = rng.randrange(k)
+        else:
+            i, j = rng.randrange(n), rng.randrange(n)
+            w[i], w[j] = w[j], w[i]
+        s = score(w)
+        if s < best:
+            best, bestw = s, w
+
+    out = [[] for _ in range(k)]
+    for i, g in enumerate(bestw):
+        out[g].extend(units[i])
+    return [c for c in out if c]
+
+
 def pack_fc_sequential(room_list):
     """Full Clean groups by walking the property once and cutting when full.
 
@@ -3261,6 +3341,10 @@ def pack_fc_sequential(room_list):
                 blds |= u.blds
             if cur:
                 packed.append(cur)
+        # The packer balances; the floor wants the slack piled on one person
+        # rather than spread over four. Gather it before the groups are laid
+        # out down the walk.
+        packed = _fc_fill_up(packed)
         charts.extend(sorted(packed, key=_down))
 
     kept = sorted(str(r.get("room")) for c in charts for r in c)
