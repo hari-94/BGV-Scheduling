@@ -5093,12 +5093,42 @@ else:
                                  f'line-height:1.5">{e(x.get("room",""))} · {e(t)}</div>')
             return "".join(parts) or '<span style="color:#9aa4b2">—</span>'
 
+        def _places(rooms):
+            """Which building, and which floors of it, a round actually covers.
+
+            Read off property_map rather than the room code. The second digit
+            is not the floor: digit 0 is Plaza *and* Terrace, and building 3
+            renumbers the same plate on its low levels, so 3240A, 3020A and
+            3010A are one door. Rounds that look like three floors by the code
+            are often one.
+            """
+            seen = {}
+            for x in rooms:
+                loc = pmap.parse(str(x.get("room", "")).strip().upper())
+                if loc:
+                    seen.setdefault(loc.bld, {})[loc.level_ix] = loc.level
+                elif x.get("bld"):
+                    seen.setdefault(x["bld"], {})
+            return [(b, [seen[b][i] for i in sorted(seen[b])])
+                    for b in sorted(seen) if b]
+
+        def _bld_badges(rooms):
+            out = []
+            for b, floors in _places(rooms):
+                fg, bg = BLD_COLORS.get(b, ("#888", "#eee"))
+                # The floors matter as much as the building -- one flight of
+                # stairs is not a lift ride past three landings -- so they ride
+                # inside the same badge rather than in a column nobody reads.
+                lv = ("<span style='font-weight:600;opacity:.75;margin-left:4px'>"
+                      + e("·".join(floors)) + "</span>") if floors else ""
+                out.append(
+                    f'<span style="background:{bg};color:{fg};border-radius:4px;'
+                    f'padding:0 6px;font-size:.62rem;font-weight:700;margin-left:5px;'
+                    f'white-space:nowrap">B{b}{lv}</span>')
+            return "".join(out)
+
         def _hk_cell(hk, rec):
-            blds = "".join(
-                f'<span style="background:{BLD_COLORS.get(b,("#888","#eee"))[1]};'
-                f'color:{BLD_COLORS.get(b,("#888","#eee"))[0]};border-radius:4px;'
-                f'padding:0 6px;font-size:.62rem;font-weight:700;margin-left:5px">B{b}</span>'
-                for b in sorted(rec["bld"]) if b)
+            blds = _bld_badges(rec["rooms"])
             low = ""
             if hk!="Unassigned" and rec["time"] and rec["time"]<LOW_MIN:
                 low = ('<span style="background:#fff4e5;color:#b45309;border-radius:4px;'
@@ -5108,10 +5138,17 @@ else:
                     f'{blds}{low}'
                     f'<div style="font-size:.66rem;color:#8a93a1;margin-top:2px">{rec["time"]}m</div>')
 
-        def _rqs_cell(rqs, span_first):
+        def _rqs_cell(rqs, span_first, members=None):
             if not span_first: return ""   # blank on repeat rows within the RQS group
             col = "#9aa4b2" if rqs=="Unassigned" else "#16202e"
-            return f'<span style="font-weight:700;color:{col};font-size:.85rem">{e(rqs)}</span>'
+            # An inspector walks every round under them, so their badge is the
+            # union of their housekeepers' -- which is the number that says
+            # whether the round is one corridor or the whole property.
+            rooms = [x for _hk, rec in (members or []) for x in rec["rooms"]]
+            return (f'<span style="font-weight:700;color:{col};font-size:.85rem">{e(rqs)}</span>'
+                    f'<div style="margin-top:3px">{_bld_badges(rooms)}</div>'
+                    if rooms else
+                    f'<span style="font-weight:700;color:{col};font-size:.85rem">{e(rqs)}</span>')
 
         # ── Render: columns lead with RQS, then Housekeeper, Rooms, Service,
         #    Notes, Late Out (same order as the pivot). ─────────────────────────
@@ -5129,7 +5166,7 @@ else:
                 delay=f"{min(ri*0.02,0.6):.2f}s"; ri += 1
                 # top border between RQS groups for visual separation
                 grp_top = (f"border-top:2px solid {_C['row_br']};" if j==0 and body else "")
-                cells = [_rqs_cell(rqs, j==0), _hk_cell(hk,rec), _rooms_cell(rec),
+                cells = [_rqs_cell(rqs, j==0, members), _hk_cell(hk,rec), _rooms_cell(rec),
                          _svc_cell(rec), _notes_cell(rec), _late_cell(rec)]
                 tds = "".join(
                     f'<td style="padding:9px 12px;border-bottom:1px solid {_C["row_br"]};{grp_top}'
@@ -5148,9 +5185,11 @@ td{{transition:background .15s ease}}
 </table></div></body></html>"""
         _row_h = 0
         for rqs in ordered_rqs:
-            for hk,rec in rqs_groups[rqs]:
+            for j,(hk,rec) in enumerate(rqs_groups[rqs]):
                 nrooms = len(rec["rooms"]) if _fsvc=="All" else len([x for x in rec["rooms"] if x["_svc"]==_fsvc])
-                _row_h += max(52, 30 + ((nrooms+5)//6)*30)
+                # the first row of each RQS group carries their building badges
+                # on a second line, so it needs the room for it
+                _row_h += max(52, 30 + ((nrooms+5)//6)*30) + (20 if j==0 else 0)
         components.html(table_html, height=min(max(_row_h+70, 160), 4000), scrolling=True)
 
         # ── Free / low summary at the END of the table ────────────────────────
