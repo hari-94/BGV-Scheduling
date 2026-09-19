@@ -5057,7 +5057,7 @@ else:
                 tm_s = f' <span style="color:#9aa4b2;font-size:.66rem">{tm}m</span>' if tm else ""
                 out.append(
                     f'<span style="display:inline-block;background:{col}14;color:{col};'
-                    f'border:1px solid {col}33;border-radius:6px;padding:2px 8px;margin:2px 3px 2px 0;'
+                    f'border:1px solid {col}33;border-radius:6px;padding:1px 6px;margin:1px 2px 1px 0;'
                     f'font-size:.72rem;font-weight:600;white-space:nowrap">'
                     f'{e(x.get("room",""))}{tm_s}</span>')
             return "".join(out) or '<span style="color:#9aa4b2">—</span>'
@@ -5109,7 +5109,12 @@ else:
                     seen.setdefault(loc.bld, {})[loc.level_ix] = loc.level
                 elif x.get("bld"):
                     seen.setdefault(x["bld"], {})
-            return [(b, [seen[b][i] for i in sorted(seen[b])])
+            # First letter only: P, T, then the numbered levels as they are.
+            # The full names made the badge wide enough to squeeze the rooms
+            # column into one room a line, which cost far more space than the
+            # words were worth.
+            short = lambda n: n[0] if n and not n[0].isdigit() else n
+            return [(b, [short(seen[b][i]) for i in sorted(seen[b])])
                     for b in sorted(seen) if b]
 
         def _bld_badges(rooms):
@@ -5119,11 +5124,11 @@ else:
                 # The floors matter as much as the building -- one flight of
                 # stairs is not a lift ride past three landings -- so they ride
                 # inside the same badge rather than in a column nobody reads.
-                lv = ("<span style='font-weight:600;opacity:.75;margin-left:4px'>"
+                lv = ("<span style='font-weight:600;opacity:.7;margin-left:3px'>"
                       + e("·".join(floors)) + "</span>") if floors else ""
                 out.append(
                     f'<span style="background:{bg};color:{fg};border-radius:4px;'
-                    f'padding:0 6px;font-size:.62rem;font-weight:700;margin-left:5px;'
+                    f'padding:0 5px;font-size:.6rem;font-weight:700;margin-left:4px;'
                     f'white-space:nowrap">B{b}{lv}</span>')
             return "".join(out)
 
@@ -5157,7 +5162,7 @@ else:
               f"color:{_C['txt3']};background:{_C['th_bg']};border-bottom:1px solid {_C['row_br']};"
               "position:sticky;top:0;z-index:2")
         cols   = ["RQS","Housekeeper","Rooms","Service","Notes","Late Out"]
-        widths = ["11%","15%","33%","8%","23%","10%"]
+        widths = ["10%","14%","38%","6%","22%","10%"]
         head = "".join(f'<th style="{th};width:{w}">{c}</th>' for c,w in zip(cols,widths))
         body = ""; ri = 0
         for rqs in ordered_rqs:
@@ -5169,7 +5174,7 @@ else:
                 cells = [_rqs_cell(rqs, j==0, members), _hk_cell(hk,rec), _rooms_cell(rec),
                          _svc_cell(rec), _notes_cell(rec), _late_cell(rec)]
                 tds = "".join(
-                    f'<td style="padding:9px 12px;border-bottom:1px solid {_C["row_br"]};{grp_top}'
+                    f'<td style="padding:6px 10px;border-bottom:1px solid {_C["row_br"]};{grp_top}'
                     f'vertical-align:top">{c}</td>' for c in cells)
                 body += f'<tr style="animation:rowIn .3s {delay} both">{tds}</tr>'
         table_html = f"""<!DOCTYPE html><html><head>{SHARED_CSS}
@@ -5189,7 +5194,7 @@ td{{transition:background .15s ease}}
                 nrooms = len(rec["rooms"]) if _fsvc=="All" else len([x for x in rec["rooms"] if x["_svc"]==_fsvc])
                 # the first row of each RQS group carries their building badges
                 # on a second line, so it needs the room for it
-                _row_h += max(52, 30 + ((nrooms+5)//6)*30) + (20 if j==0 else 0)
+                _row_h += max(42, 24 + ((nrooms+6)//7)*24) + (16 if j==0 else 0)
         components.html(table_html, height=min(max(_row_h+70, 160), 4000), scrolling=True)
 
         # ── Free / low summary at the END of the table ────────────────────────
