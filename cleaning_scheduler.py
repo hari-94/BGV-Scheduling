@@ -3140,6 +3140,68 @@ def pack_fc_ordered(room_list, iters=400000, seed=1):
     return charts
 
 
+def pack_fc_sequential(room_list):
+    """Full Clean groups by walking the property once and cutting when full.
+
+    No search. Buildings in the order 2, 1, 3 -- which puts building 1 in the
+    middle, so buildings 2 and 3, the pair with no bridge between them, are
+    never neighbours in the walk and can never land in one group. Inside a
+    building the rooms run downward by number, so a group is the top of a
+    stack worked down rather than rooms gathered from anywhere.
+
+    Then it is one pass: take the next apartment if the group can legally hold
+    it, otherwise close the group and start the next. The rules are fcpack's,
+    unchanged -- 380 minutes, one 140, a 140 beside at most one 120, never
+    buildings 2 and 3, and an apartment never split between two people.
+
+    `pack_fc_ordered` and the annealing behind it are left in place but no
+    longer called. This is deliberately the simpler thing: a sequence somebody
+    can read down the sheet and check by eye.
+    """
+    rooms = [r for r in room_list if r]
+    if not rooms:
+        return []
+
+    _where = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
+    try:
+        units = fcpack.bundles(rooms, MAX_FC, _where)
+    except Exception as ex:
+        print("[fc] pack_fc_sequential fell back: %s" % ex)
+        return _tidy_full_clean(solve_full_clean(list(rooms)))
+
+    WALK = {2: 0, 1: 1, 3: 2}
+
+    def _key(u):
+        code = "".join(c for c in str(u.rooms[0].get("room") or "") if c.isdigit())
+        num = int(code) if code else 0
+        loc = _where(u.rooms[0])
+        bld = loc.bld if loc else (int(code[0]) if code else 9)
+        return (WALK.get(bld, 9), -num, str(u.rooms[0].get("room") or ""))
+
+    units.sort(key=_key)
+
+    charts = []
+    cur, t, n140, n120, blds = [], 0, 0, 0, set()
+    for u in units:
+        if cur and not fcpack._legal(t + u.time, n140 + u.n140, n120 + u.n120,
+                                     blds | u.blds, MAX_FC):
+            charts.append(cur)
+            cur, t, n140, n120, blds = [], 0, 0, 0, set()
+        cur.extend(u.rooms)
+        t += u.time
+        n140 += u.n140
+        n120 += u.n120
+        blds |= u.blds
+    if cur:
+        charts.append(cur)
+
+    kept = sorted(str(r.get("room")) for c in charts for r in c)
+    if kept != sorted(str(r.get("room")) for r in rooms):
+        print("[fc] pack_fc_sequential lost a room; falling back")
+        return _tidy_full_clean(solve_full_clean(list(rooms)))
+    return charts
+
+
 def build_all_groups(rooms):
     verify_rooms = [r for r in rooms if r.get("verify")]
     rooms = [r for r in rooms if not r.get("verify")]
@@ -3152,25 +3214,12 @@ def build_all_groups(rooms):
     # ── Stage 1: regular Full Clean — tidy-first, minimum housekeepers ────────
     remaining_fc = list(fc_rooms)
 
-    # Walk the property and anneal, rather than search for the fewest charts
-    # and hope fullness follows. pack_fc_ordered falls back to the old chain
-    # itself if its answer breaks a hard rule, so this is the only call site.
-    fc_charts = pack_fc_ordered(remaining_fc)
-    # Whichever set of charts won above, see whether the ones whose
-    # housekeeper has to move can trade apartments and walk less. Swapping
-    # cannot change the headcount, so this runs whatever _tidy_full_clean
-    # decided -- and it is the first pass that measures walking in the
-    # seconds somebody actually walks rather than the packer's proxy.
-    try:
-        _where_w = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
-        _rooms_before = sorted(str(r.get("room")) for c in fc_charts for r in c)
-        _short = fcpack.shorten_walk(fc_charts, MAX_FC, _where_w, low_min=LOW_MIN)
-        if sorted(str(r.get("room")) for c in _short for r in c) == _rooms_before:
-            fc_charts = _short
-        else:
-            print("[fc] the walking pass changed the room set; ignoring it")
-    except Exception as _sw_ex:
-        print(f"[fc] could not shorten the walking, keeping the charts: {_sw_ex}")
+    # One walk, buildings 2 then 1 then 3, cut when a group is full. The
+    # annealing in pack_fc_ordered is on hold, not deleted.
+    fc_charts = pack_fc_sequential(remaining_fc)
+    # fcpack.shorten_walk is held too. It trades apartments between charts to
+    # cut walking seconds, which is the one thing that would break the walk
+    # this packer exists to produce.
     fc_groups_normal = [mk(c, SVC_FC) for c in fc_charts]
     fc_groups = fc_groups_normal
 
