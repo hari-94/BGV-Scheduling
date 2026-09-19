@@ -78,6 +78,16 @@ def make_labels(prefix: str, n: int) -> list:
 
 LOW_MIN = 330
 MAX_FC = 380
+
+# ── pack_fc_ordered's search, and what it charges for a scattered group ──────
+# Tuning knobs, kept together and named so they can be moved without reading
+# the cost function. They sit below the penalty for a group under LOW_MIN, on
+# purpose: proximity never outranks somebody's short day. It only decides
+# between arrangements that are equally good on minutes.
+FC_SA_ITERS = 400000        # simulated-annealing iterations
+FC_W_FLOOR = 150            # per extra floor, within one building
+FC_W_BLD = 400              # for a group holding more than one building
+FC_W_ROOMNUM = 2            # per 10 room numbers apart on the same floor
 MAX_DS = 560
 DS_OVER = 700
 LOW_FILL = 350
@@ -2871,7 +2881,7 @@ def _tidy_full_clean(charts):
     return packed
 
 
-def pack_fc_ordered(room_list, iters=400000, seed=1):
+def pack_fc_ordered(room_list, iters=None, seed=1):
     """Group Full Clean rooms by walking the property, then annealing the result.
 
     The packer this replaces searched for the fewest charts and the least
@@ -2921,6 +2931,8 @@ def pack_fc_ordered(room_list, iters=400000, seed=1):
     import math as _math
     import random as _random
 
+    if iters is None:
+        iters = FC_SA_ITERS
     rooms = [r for r in room_list if r]
     if not rooms:
         return []
@@ -2957,6 +2969,16 @@ def pack_fc_ordered(room_list, iters=400000, seed=1):
     u_140 = [u.n140 for u in units]
     u_120 = [u.n120 for u in units]
     u_mask = [sum(1 << b for b in u.blds) for u in units]
+    # An apartment is one building and one floor by construction -- that is how
+    # fcpack.bundles keys them -- so each unit has a single place, and the
+    # proximity terms can be read straight off these.
+    u_bld, u_lvl, u_num = [], [], []
+    for u in units:
+        loc = _where(u.rooms[0])
+        u_bld.append(loc.bld if loc else 9)
+        u_lvl.append(loc.level_ix if loc else 99)
+        digits = "".join(c for c in str(u.rooms[0].get("room") or "") if c.isdigit())
+        u_num.append(int(digits) if digits else 0)
 
     total = sum(u_time)
     n_groups = max(1, int(_math.ceil(total / float(MAX_FC)))) + 4
@@ -2996,6 +3018,24 @@ def pack_fc_ordered(room_list, iters=400000, seed=1):
                 nb += 1
         if nb > 1:
             c += (nb - 1) * W_XBLD
+
+        # Where the rooms actually are, rather than how far apart they sit in
+        # the walk. The gap term above counts positions skipped in the order,
+        # which is a proxy; a group can be tight in the order and still be a
+        # floor apart. These three read the map.
+        lv_by_bld = {}
+        span_by_floor = {}
+        for i in members:
+            lv_by_bld.setdefault(u_bld[i], set()).add(u_lvl[i])
+            k = (u_bld[i], u_lvl[i])
+            lo, hi = span_by_floor.get(k, (u_num[i], u_num[i]))
+            span_by_floor[k] = (min(lo, u_num[i]), max(hi, u_num[i]))
+        for lvs in lv_by_bld.values():
+            c += (len(lvs) - 1) * FC_W_FLOOR
+        if len(lv_by_bld) > 1:
+            c += FC_W_BLD
+        for lo, hi in span_by_floor.values():
+            c += min(9, (hi - lo) // 10) * FC_W_ROOMNUM
         if t > MAX_FC:
             c += W_HARD
         if g_140[g] > 1:
