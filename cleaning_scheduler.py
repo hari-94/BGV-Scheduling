@@ -3164,7 +3164,7 @@ def build_all_groups(rooms):
     try:
         _where_w = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
         _rooms_before = sorted(str(r.get("room")) for c in fc_charts for r in c)
-        _short = fcpack.shorten_walk(fc_charts, MAX_FC, _where_w)
+        _short = fcpack.shorten_walk(fc_charts, MAX_FC, _where_w, low_min=LOW_MIN)
         if sorted(str(r.get("room")) for c in _short for r in c) == _rooms_before:
             fc_charts = _short
         else:

@@ -391,7 +391,7 @@ def pack(rooms, cap, loc_of, low_min=330):
     return out
 
 
-def shorten_walk(charts, cap, loc_of, rounds=300):
+def shorten_walk(charts, cap, loc_of, rounds=300, low_min=330):
     """Swap between the charts whose housekeeper has to move, to walk less.
 
     The search inside `pack` scores walking with `_Chart.travel`, a cheap
@@ -439,6 +439,12 @@ def shorten_walk(charts, cap, loc_of, rounds=300):
                       sum(1 for r in chart if r.get("time") == 120),
                       {l.bld for l in (loc_of(r) for r in chart) if l}, cap)
 
+    def n_blds(chart):
+        return len({l.bld for l in (loc_of(r) for r in chart) if l})
+
+    def is_short(chart):
+        return sum(r.get("time", 0) for r in chart) < low_min
+
     def units(chart):
         g = collections.OrderedDict()
         for r in chart:
@@ -456,11 +462,27 @@ def shorten_walk(charts, cap, loc_of, rounds=300):
                 i, j = pool[a], pool[b]
                 A, B = charts[i], charts[j]
                 base = secs(A) + secs(B)
+                base_b = n_blds(A) + n_blds(B)
+                base_s = is_short(A) + is_short(B)
                 for ua in units(A):
                     for ub in units(B):
                         na = [r for r in A if r not in ua] + ub
                         nb = [r for r in B if r not in ub] + ua
                         if not na or not nb or not ok(na) or not ok(nb):
+                            continue
+                        # Seconds are not the only thing a swap can spend.
+                        # Buildings 1 and 3 share a bridge at Plaza and level
+                        # 1, so chart_travel can score a chart holding both
+                        # *cheaper* than one pure building 3 chart spanning
+                        # four of its levels -- and on 26 September it did,
+                        # taking the crossings from 1 to 5 and putting a
+                        # housekeeper back under 330. Both are worse on the
+                        # floor than the seconds are better. A swap may lower
+                        # the walking; it may not buy that with a building or
+                        # with somebody's short day.
+                        if n_blds(na) + n_blds(nb) > base_b:
+                            continue
+                        if is_short(na) + is_short(nb) > base_s:
                             continue
                         if secs(na) + secs(nb) < base:
                             charts[i], charts[j] = na, nb
