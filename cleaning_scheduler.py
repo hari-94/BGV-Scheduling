@@ -3260,20 +3260,21 @@ def _fc_fill_up(charts, seed=1, rounds=20000):
     return [c for c in out if c]
 
 
-def _fc_tighten_floors(charts, sweeps=40):
-    """Trade apartments between groups so a housekeeper stays on fewer floors.
+def _fc_tighten(charts, sweeps=40):
+    """Trade apartments between groups: fewer short days, then fewer floors.
 
     The packer and `_fc_fill_up` before it are both about minutes -- how many
     people, and whether anybody goes home early. Neither looks at where the
     rooms are once the minutes work out, so a group can end up holding Terrace
     and level 4 when the same minutes were available one floor apart.
 
-    This runs last and changes nothing but position. A swap is taken only when
-    it strictly reduces the floors walked, and only when it leaves everything
-    else exactly as it found it:
+    This runs last and moves no minutes into or out of the day. A trade is
+    taken when it strictly improves (short days, floors walked) in that order
+    -- so a group lifted over LOW_MIN is worth taking even if it costs a floor,
+    because a short day is somebody sent home at two o'clock and a floor is
+    minutes. Everything else is left exactly as it was found:
 
       * the same number of groups -- no group may empty
-      * no more groups under LOW_MIN than there were
       * no group gains a building it did not already have
       * every hard rule still holds, checked through `fcpack._legal`
       * apartments move whole, never split
@@ -3334,8 +3335,7 @@ def _fc_tighten_floors(charts, sweeps=40):
                 if i == j:
                     continue
                 A, B = charts[i], charts[j]
-                base = cost(A) + cost(B)
-                shb = short(A) + short(B)
+                was = (short(A) + short(B), cost(A) + cost(B))
                 bA, bB = blds(A), blds(B)
                 # a swap of one apartment each way, then a one-way move
                 cands = [(ua, ub) for ua in units(A) for ub in units(B)]
@@ -3345,9 +3345,12 @@ def _fc_tighten_floors(charts, sweeps=40):
                     nb = [r for r in B if r not in (ub or [])] + ua
                     if not na or not nb:
                         continue            # a group would empty: not ours to do
-                    if cost(na) + cost(nb) >= base:
-                        continue
-                    if short(na) + short(nb) > shb:
+                    # Short days first, floors second. The two charts are the
+                    # only ones that change, so an improvement to this pair is
+                    # an improvement to the day; and since the pair can only
+                    # ever go down, and neither term can go below zero, the
+                    # sweep stops on its own.
+                    if (short(na) + short(nb), cost(na) + cost(nb)) >= was:
                         continue
                     if not blds(na) <= bA or not blds(nb) <= bB:
                         continue
@@ -3450,9 +3453,9 @@ def pack_fc_sequential(room_list):
         # rather than spread over four. Gather it before the groups are laid
         # out down the walk.
         packed = _fc_fill_up(packed)
-        # Then, without moving anybody's minutes, put each group back onto as
-        # few floors as it can be put on.
-        packed = _fc_tighten_floors(packed)
+        # Then, without moving minutes into or out of the day, lift what can be
+        # lifted over LOW_MIN and put each group onto as few floors as it fits.
+        packed = _fc_tighten(packed)
         charts.extend(sorted(packed, key=_down))
 
     kept = sorted(str(r.get("room")) for c in charts for r in c)
