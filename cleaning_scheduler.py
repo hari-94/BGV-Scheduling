@@ -3220,23 +3220,17 @@ def _fc_fill_up(charts, seed=1, rounds=20000):
     ut = [sum(r.get("time", 0) for r in u) for u in units]
     u1 = [sum(1 for r in u if r.get("time") == 140) for u in units]
     u2 = [sum(1 for r in u if r.get("time") == 120) for u in units]
-    u3 = [sum(1 for r in u if r.get("time") == 70) for u in units]
-    uc = [len(u) for u in units]
     um = [{_loc(r).bld for r in u if _loc(r)} for u in units]
 
     def score(where):
         t = [0] * k
         a = [0] * k
         b = [0] * k
-        s7 = [0] * k
-        nr = [0] * k
         m = [set() for _ in range(k)]
         for i, g in enumerate(where):
             t[g] += ut[i]
             a[g] += u1[i]
             b[g] += u2[i]
-            s7[g] += u3[i]
-            nr[g] += uc[i]
             m[g] |= um[i]
         bad = 0
         for g in range(k):
@@ -3244,17 +3238,7 @@ def _fc_fill_up(charts, seed=1, rounds=20000):
                 bad += 1
         live = [x for x in t if x]
         shorts = [x for x in live if x < LOW_MIN]
-        # A lone 120 padded out with three 70s. It is legal and it is a full
-        # day, so it never outranks anything above -- but it is the shape a
-        # 120 falls into when it fails to find another 120, and two 120s with
-        # two 70s is 380, the only combination that reaches the cap. Ranked
-        # last it can only decide between arrangements already equal on
-        # groups and on short days, so it is taken when there is a choice and
-        # left alone when there is not.
-        lone = sum(1 for g in range(k)
-                   if t[g] == 330 and a[g] == 0 and b[g] == 1
-                   and s7[g] == 3 and nr[g] == 4)
-        return (bad, len(live), len(shorts), -sum(shorts), lone)
+        return (bad, len(live), len(shorts), -sum(shorts))
 
     best = score(home)
     bestw = list(home)
