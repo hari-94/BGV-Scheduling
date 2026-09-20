@@ -3223,7 +3223,6 @@ def _fc_fill_up(charts, seed=1, rounds=20000):
     u3 = [sum(1 for r in u if r.get("time") == 70) for u in units]
     uc = [len(u) for u in units]
     um = [{_loc(r).bld for r in u if _loc(r)} for u in units]
-    uv = [{_loc(r).level_ix for r in u if _loc(r)} for u in units]
 
     def score(where):
         t = [0] * k
@@ -3232,7 +3231,6 @@ def _fc_fill_up(charts, seed=1, rounds=20000):
         s7 = [0] * k
         nr = [0] * k
         m = [set() for _ in range(k)]
-        v = [set() for _ in range(k)]
         for i, g in enumerate(where):
             t[g] += ut[i]
             a[g] += u1[i]
@@ -3240,7 +3238,6 @@ def _fc_fill_up(charts, seed=1, rounds=20000):
             s7[g] += u3[i]
             nr[g] += uc[i]
             m[g] |= um[i]
-            v[g] |= uv[i]
         bad = 0
         for g in range(k):
             if t[g] and not fcpack._legal(t[g], a[g], b[g], m[g], MAX_FC):
@@ -3257,17 +3254,7 @@ def _fc_fill_up(charts, seed=1, rounds=20000):
         lone = sum(1 for g in range(k)
                    if t[g] == 330 and a[g] == 0 and b[g] == 1
                    and s7[g] == 3 and nr[g] == 4)
-        # Floors, which this used not to look at. fcpack.pack charges a chart
-        # six a level for the span between its top and bottom floor, and then
-        # this ran afterwards and moved apartments about with no idea floors
-        # existed -- so gathering the slack was free to put Terrace and level 4
-        # on one cart. The span is what costs, not the count: Plaza-and-4 is a
-        # lift ride past three landings where 2-and-3 is a staircase. It is
-        # charged below everybody's short day, so it can still never buy a full
-        # day with a broken one, and it pays for the inspector too, whose round
-        # can be no tighter than the charts it is made of.
-        span = sum((max(s) - min(s)) + (len(s) - 1) for s in v if s)
-        return (bad, len(live), len(shorts), -sum(shorts), span, lone)
+        return (bad, len(live), len(shorts), -sum(shorts), lone)
 
     best = score(home)
     bestw = list(home)
