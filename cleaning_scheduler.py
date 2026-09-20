@@ -3260,6 +3260,111 @@ def _fc_fill_up(charts, seed=1, rounds=20000):
     return [c for c in out if c]
 
 
+def _fc_tighten_floors(charts, sweeps=40):
+    """Trade apartments between groups so a housekeeper stays on fewer floors.
+
+    The packer and `_fc_fill_up` before it are both about minutes -- how many
+    people, and whether anybody goes home early. Neither looks at where the
+    rooms are once the minutes work out, so a group can end up holding Terrace
+    and level 4 when the same minutes were available one floor apart.
+
+    This runs last and changes nothing but position. A swap is taken only when
+    it strictly reduces the floors walked, and only when it leaves everything
+    else exactly as it found it:
+
+      * the same number of groups -- no group may empty
+      * no more groups under LOW_MIN than there were
+      * no group gains a building it did not already have
+      * every hard rule still holds, checked through `fcpack._legal`
+      * apartments move whole, never split
+
+    That list is not caution for its own sake. `fcpack.shorten_walk` had the
+    same job and only the hard rules to obey, and it spent buildings and short
+    days buying walking seconds -- five housekeepers crossing between buildings
+    1 and 3 on a day the packer had sent one. A pass that may only improve one
+    thing, and may not pay for it with anything, cannot do that.
+
+    Steepest descent in a fixed order with no randomness, so the same sheet
+    gives the same groups every time.
+    """
+    import collections
+
+    charts = [list(c) for c in charts if c]
+    if len(charts) < 2:
+        return charts
+
+    _loc = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
+
+    def cost(chart):
+        """Floors walked, then how far along the corridors, as a tie-break."""
+        locs = [l for r in chart if (l := _loc(r)) is not None]
+        if not locs:
+            return 0.0
+        lv = {l.level_ix for l in locs}
+        by = {}
+        for l in locs:
+            by.setdefault((l.bld, l.level_ix), []).append(l.x)
+        return (6.0 * (max(lv) - min(lv)) + 2.0 * (len(lv) - 1)
+                + 0.3 * sum(max(xs) - min(xs) for xs in by.values()))
+
+    def legal(chart):
+        locs = [l for r in chart if (l := _loc(r)) is not None]
+        return fcpack._legal(
+            sum(r.get("time", 0) for r in chart),
+            sum(1 for r in chart if r.get("time") == 140),
+            sum(1 for r in chart if r.get("time") == 120),
+            {l.bld for l in locs}, MAX_FC)
+
+    def blds(chart):
+        return {l.bld for r in chart if (l := _loc(r)) is not None}
+
+    def short(chart):
+        return 1 if sum(r.get("time", 0) for r in chart) < LOW_MIN else 0
+
+    def units(chart):
+        out = collections.OrderedDict()
+        for r in chart:
+            out.setdefault(fcpack._unit_key(r) or str(r.get("room")), []).append(r)
+        return list(out.values())
+
+    for _ in range(sweeps):
+        moved = False
+        for i in range(len(charts)):
+            for j in range(len(charts)):
+                if i == j:
+                    continue
+                A, B = charts[i], charts[j]
+                base = cost(A) + cost(B)
+                shb = short(A) + short(B)
+                bA, bB = blds(A), blds(B)
+                # a swap of one apartment each way, then a one-way move
+                cands = [(ua, ub) for ua in units(A) for ub in units(B)]
+                cands += [(ua, None) for ua in units(A)]
+                for ua, ub in cands:
+                    na = [r for r in A if r not in ua] + (ub or [])
+                    nb = [r for r in B if r not in (ub or [])] + ua
+                    if not na or not nb:
+                        continue            # a group would empty: not ours to do
+                    if cost(na) + cost(nb) >= base:
+                        continue
+                    if short(na) + short(nb) > shb:
+                        continue
+                    if not blds(na) <= bA or not blds(nb) <= bB:
+                        continue
+                    if not legal(na) or not legal(nb):
+                        continue
+                    charts[i], charts[j] = na, nb
+                    moved = True
+                    break
+                if moved:
+                    break
+            if moved:
+                break
+        if not moved:
+            break
+    return charts
+
+
 def pack_fc_sequential(room_list):
     """Full Clean groups by walking the property once and cutting when full.
 
@@ -3345,6 +3450,9 @@ def pack_fc_sequential(room_list):
         # rather than spread over four. Gather it before the groups are laid
         # out down the walk.
         packed = _fc_fill_up(packed)
+        # Then, without moving anybody's minutes, put each group back onto as
+        # few floors as it can be put on.
+        packed = _fc_tighten_floors(packed)
         charts.extend(sorted(packed, key=_down))
 
     kept = sorted(str(r.get("room")) for c in charts for r in c)
