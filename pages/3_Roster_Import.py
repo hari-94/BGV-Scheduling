@@ -465,11 +465,17 @@ with tab_week:
             groups = ["All", "Housekeepers", "RQS", "Other teams"]
             sel_grp = st.selectbox("Show", groups, key="ri_grp")
         with cc[2]:
+            # Built outside the f-string: a backslash inside an f-string's
+            # braces is a SyntaxError before Python 3.12, and the devcontainer
+            # runs 3.11, where it took the whole page down.
+            _edited = (' &nbsp;·&nbsp; <span style="color:#7c3aed">'
+                       + str(len(applied)) + ' edited here</span>') if applied else ''
+            _synced = (' &nbsp;·&nbsp; <span style="color:#b45309">'
+                       + str(len(changed_set)) + ' changed at last sync</span>') if changed_set else ''
             st.markdown(
                 f'<div style="padding-top:26px;font-size:.76rem;color:#5b6675">'
                 f'Sheet <b>{e(week["sheet"])}</b> &nbsp;·&nbsp; {len(eff["people"])} people'
-                f'{" &nbsp;·&nbsp; <span style=\"color:#7c3aed\">" + str(len(applied)) + " edited here</span>" if applied else ""}'
-                f'{" &nbsp;·&nbsp; <span style=\"color:#b45309\">" + str(len(changed_set)) + " changed at last sync</span>" if changed_set else ""}'
+                f'{_edited}{_synced}'
                 f'</div>', unsafe_allow_html=True)
 
         def wanted(rec):
