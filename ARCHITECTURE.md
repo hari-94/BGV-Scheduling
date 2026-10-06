@@ -43,6 +43,7 @@ graph TD
 
     subgraph core["Core, no Streamlit — testable alone"]
         FCPACK["fcpack.py<br/>533<br/>Full Clean packer"]
+        FCSOLVE["fcsolve.py<br/>217<br/>exact Full Clean solver"]
         PMAP["property_map.py<br/>603<br/>the building's shape"]
         DAY["daystart.py<br/>302<br/>ordering + pacing"]
         RI["roster_import.py<br/>1,600<br/>staff-sheet parser"]
@@ -61,7 +62,8 @@ graph TD
         CLK["clock.py<br/>35<br/>property-local time"]
     end
 
-    CS --> AUTH & DB & FCPACK & PMAP & UI
+    CS --> AUTH & DB & FCPACK & FCSOLVE & PMAP & UI
+    FCSOLVE --> FCPACK
     P1 --> AUTH & DB & DAY & RS & UI & CLK
     P2 --> AUTH & DB & UI
     P3 --> AUTH & DB & RI & STAFF & FC & UI & CLK
@@ -100,6 +102,7 @@ costs and nothing else.
 | `pages/6_Property.py` | 778 | the property in 3-D (Three.js) or a flat plan, coloured by room status |
 | `property_map.py` | 603 | the building's shape, travel costs, bridges. No Streamlit |
 | `fcpack.py` | 533 | Full Clean packer: the hard rules, the search, slack-gathering, walk-shortening |
+| `fcsolve.py` | 217 | exact Full Clean solver per building (OR-Tools CP-SAT): fewest charts, then fewest short, then nearest together |
 | `i18n_es.py` | 494 | ~340 Spanish phrases |
 | `pages/2_Admin.py` | 414 | accounts and sign-in history |
 | `i18n.py` | 402 | the language switch; wraps Streamlit's text calls |
@@ -124,7 +127,7 @@ Six thousand lines in one file is real; this is where each part lives.
 |---|---|
 | Constants | `SVC_*` service types, `MAX_FC` 380, `LOW_MIN` 330, `DS_CAP` 460 |
 | CSS | shared page styling, the width cap that every page must match |
-| Full Clean grouping | `pack_fc_ordered` (annealed, unused), `pack_fc_sequential` (**live**), `_fc_fill_up`, `_tidy_full_clean`, `solve_full_clean` |
+| Full Clean grouping | `pack_fc_ordered` (annealed, unused), `pack_fc_sequential` (**live**), `_fc_fill_up`, `_fc_tighten`, `_fc_exact`, `_tidy_full_clean`, `solve_full_clean` |
 | Daily Service | `split_daily_service`, `_ds_by_building`, `_ds_hops` |
 | Session state | `_init_state`, `_auto_apply_today`, `_save_reassignment`, undo |
 | Login gate | the sign-in form on the entry page itself |
@@ -167,6 +170,7 @@ sequenceDiagram
     CS->>CS: parse rows, split by service type<br/>(Full Clean / Daily Service / Dust n Vac / IH)
     CS->>FCP: pack_fc_sequential(full_clean_rooms)
     FCP-->>CS: charts (buildings 2→1→3, hard rules enforced)
+    CS->>CS: _fc_exact — fcsolve per building, audited, heuristic kept on any doubt
     CS->>CS: split_daily_service(daily_service_rooms)
     CS->>CS: assign charts to housekeepers & inspectors
     RQS->>CS: adjust on the Reassign board (drag a room/chart)

@@ -33,6 +33,7 @@ several of them read the *real* schedule to test against a real day.
 | `pages/2_Admin.py` | 410 | accounts and sign-in history |
 | `pages/7_Profile.py` | 90 | your own account: changing your password |
 | `pages/4_My_Home.py` | 370 | one person's own week, from the staff sheet |
+| `fcsolve.py` | 217 | the exact Full Clean solver (OR-Tools CP-SAT) — no Streamlit, testable alone |
 | `roster_import.py` | 1600 | the staff sheet parser — no Streamlit, so it is testable alone |
 | `db.py` | 710 | every Supabase read and write, 55 functions |
 | `i18n.py` + `i18n_es.py` | 830 | the language switch and ~340 Spanish phrases |
@@ -228,6 +229,33 @@ Building 1's minutes, building 2's and building 3's each round up to a whole
 person on their own, and on many days that still comes to the same total, which
 is why building purity is usually free. On 12 September it was entirely free —
 29 charts, the same as the pooled answer, with nobody crossing at all.
+
+**The last word on each building is `fcsolve.pack`, an exact solver.** The
+passes above are local search -- one apartment moved or swapped at a time --
+and they stop where no single move helps. Lifting a short group usually needs
+a chain (A gives to B, B gives to C), which no pairwise trade can see; the 19
+September commit said so in as many words, counting 138 forced short groups
+against 170 shipped. `fcsolve` states the same hard rules to OR-Tools CP-SAT and
+solves in three steps, each holding the one before fixed: **fewest groups**,
+then **fewest under `LOW_MIN`**, then **nearest together** -- level span,
+floors touched, corridor walked, a short group topped up from nearby rooms,
+and 120+70+70+70 avoided. Its weights are named at the top of the module.
+
+`_fc_exact` is the guard, in the same spirit as `_tidy_full_clean`: the
+heuristic's groups go in as the solver's starting point and come back
+untouched if ortools is missing, nothing is found in time, a room is lost, a
+rule is broken *beyond what the heuristic already had* (an apartment over 380
+is split on purpose, and `audit` counts that split on both sides), or the
+answer has more groups -- or as many with more people short. So it can only be
+free. The three buildings solve in parallel threads; CP-SAT releases the GIL,
+and the deterministic time limit keeps the same sheet giving the same groups.
+
+Measured on 30 sample days drawn from the room plan (no database on the
+machine it was written on -- re-run `bench.py` over the stored days): see the
+commit for the table. **Banning 120+70+70+70 outright is free at the optimum**
+-- the solver proved it on all 30 days. The ten housekeeper-days it cost in
+`381d35d` were the heuristic's, not the rule's; it is a soft price in step 3
+here only because a hard ban buys nothing a price does not.
 
 Inspectors are batched the same way: a building at a time, its trailing
 part-batch left alone until there are not enough inspectors, then merged

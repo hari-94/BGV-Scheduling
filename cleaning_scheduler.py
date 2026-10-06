@@ -20,6 +20,7 @@ st.set_page_config(
 # Import local modules after set_page_config
 import auth, db
 import fcpack
+import fcsolve
 import property_map as pmap
 import ui
 
@@ -3368,6 +3369,52 @@ def _fc_tighten(charts, sweeps=40):
     return charts
 
 
+def _fc_exact(rooms, charts):
+    """One building's groups from fcsolve, or `charts` untouched.
+
+    The heuristic above is a local search and stops where no single move or
+    swap helps; fcsolve states the same rules to a constraint solver and asks
+    for (fewest groups, then fewest under LOW_MIN, then nearest together). On
+    30 sample days that was 894 housekeeper-days down to 875 with tighter
+    floors -- the heuristic was a person or two over on nearly half the days.
+
+    `charts` goes in as the solver's starting point and is what comes back if
+    anything is off: no ortools on the host, a timeout with nothing found, a
+    lost room, a broken rule, more groups than the heuristic, or -- at the same
+    count -- more people short of a day. So this can only ever be free.
+    """
+    _where = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
+    try:
+        solved = fcsolve.pack(rooms, MAX_FC, _where, LOW_MIN, hint=charts)
+    except Exception as ex:
+        print("[fc] exact solve skipped, keeping the heuristic's groups: %s" % ex)
+        return charts
+    # The solver's nearness step runs to a time limit, and when it has just
+    # saved a housekeeper it starts from a scattered arrangement it may not
+    # finish tidying: building 3 on one sample day came out 17 groups spanning
+    # 50 levels. _fc_tighten's trades take that to 14 and can cost nothing --
+    # same count, no more short days, no new building, every rule re-checked.
+    solved = _fc_tighten(solved)
+
+    if (sorted(str(r.get("room")) for c in solved for r in c)
+            != sorted(str(r.get("room")) for r in rooms)):
+        print("[fc] exact solve changed the room set; keeping the heuristic's")
+        return charts
+    a = fcpack.audit(solved, MAX_FC, _where, LOW_MIN)
+    b = fcpack.audit(charts, MAX_FC, _where, LOW_MIN)
+    # Measured against the heuristic, not against zero: an apartment over the
+    # cap (140+120+70+70 is 400) is split by fcpack.bundles on purpose and the
+    # audit counts it in both. Anything beyond that is the solver's fault.
+    if any(a[k] > b[k] for k in ("over_cap", "bad_mix", "split_bundles", "b2_b3")):
+        print("[fc] exact solve broke a rule %s; keeping the heuristic's" % a)
+        return charts
+    if (a["charts"], a["low"]) > (b["charts"], b["low"]):
+        print("[fc] exact solve was worse (%d groups, %d short against %d, %d); "
+              "keeping the heuristic's" % (a["charts"], a["low"], b["charts"], b["low"]))
+        return charts
+    return solved
+
+
 def pack_fc_sequential(room_list):
     """Full Clean groups by walking the property once and cutting when full.
 
@@ -3429,7 +3476,7 @@ def pack_fc_sequential(room_list):
                 for r in chart]
         return -max(nums) if nums else 0
 
-    charts = []
+    charts, per_bld = [], []
     for b in sorted(by_bld, key=lambda x: WALK.get(x, 9)):
         here = [r for u in by_bld[b] for r in u.rooms]
         try:
@@ -3456,6 +3503,16 @@ def pack_fc_sequential(room_list):
         # Then, without moving minutes into or out of the day, lift what can be
         # lifted over LOW_MIN and put each group onto as few floors as it fits.
         packed = _fc_tighten(packed)
+        per_bld.append((here, packed))
+
+    # Finally hand each building to the exact solver, with the groups above as
+    # its starting point; it keeps them unless it can do better. The solver
+    # releases the GIL and the buildings share nothing, so all three run at
+    # once -- 8.6s a day one after another, 3.4s together, identical charts.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=max(1, len(per_bld))) as pool:
+        solved = list(pool.map(lambda hp: _fc_exact(*hp), per_bld))
+    for packed in solved:
         charts.extend(sorted(packed, key=_down))
 
     kept = sorted(str(r.get("room")) for c in charts for r in c)
