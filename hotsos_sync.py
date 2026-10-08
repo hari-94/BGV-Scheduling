@@ -99,14 +99,16 @@ def tab_date(name: str, year: int):
         return None
 
 
-def pick_tab(sheet_names, day: _dt.date):
-    """The tab for `day`, or None. If two tabs claim the day, the last wins --
-    a copied tab is usually added after the one it was copied from."""
-    hit = None
-    for name in sheet_names:
-        if tab_date(name, day.year) == day:
-            hit = name
-    return hit
+def pick_tab(sheet_names, day: _dt.date, hidden=()):
+    """The tab for `day`, or None.
+
+    Hidden tabs are still read -- the team hides past days while they work,
+    and a hidden tab is no less the day's. But if two tabs claim the day, a
+    visible one beats a hidden one (the hidden copy is the stale one), and
+    otherwise the last wins: a copied tab is added after its original."""
+    hits = [n for n in sheet_names if tab_date(n, day.year) == day]
+    visible = [n for n in hits if n not in hidden]
+    return (visible or hits or [None])[-1]
 
 
 # ── reading a tab ────────────────────────────────────────────────────────────
@@ -168,7 +170,8 @@ def read_workbook(path, day: _dt.date):
     import openpyxl
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     try:
-        tab = pick_tab(wb.sheetnames, day)
+        hidden = {ws.title for ws in wb.worksheets if ws.sheet_state != "visible"}
+        tab = pick_tab(wb.sheetnames, day, hidden)
         if tab is None:
             raise LookupError(
                 f"No tab for {day:%a %b %d} in {len(wb.sheetnames)} tabs. "

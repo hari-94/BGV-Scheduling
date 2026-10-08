@@ -304,6 +304,10 @@ def run_loop():
                 done_req = req["id"]
                 log(f"{req.get('mode')} for {req.get('date')} requested by {req.get('by')}")
                 cfg = load_config(required=False)    # pick up a re-run of setup
+                # The loop runs for days; re-read the sheet logic so a fix to it
+                # takes effect on the next press, not the next reboot.
+                import importlib
+                importlib.reload(hs)
                 if not cfg.get("workbook"):
                     db._upsert_key(hs.RESULT_KEY, {
                         "id": req["id"], "date": req.get("date"), "mode": req.get("mode"),
