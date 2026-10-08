@@ -15,21 +15,24 @@ i18n.install()
 
 #: Every destination, with the permission that reveals it. Order is the order
 #: they appear across the bar.
-#: (path, label, icon, permission, translation key). The label doubles as the
+#: (path, label, icon, permission, translation key). Icons are Material
+#: Symbols (":material/name:", built into Streamlit): one line-drawn set that
+#: takes the text colour and reads the same on every phone, where emoji were
+#: drawn differently by each device. The label doubles as the
 #: `active` marker, so it stays English in the code and is translated only on
 #: the way to the screen.
 NAV_ITEMS = [
-    ("pages/4_My_Home.py",       "My Home",       "🏠", None, "nav.my_home"),
-    ("pages/5_My_Rooms.py",      "My Rooms",      "🛎️", "_my_rooms", "nav.my_rooms"),
-    ("cleaning_scheduler.py",    "Schedule",      "🧹", "can_generate", "nav.schedule"),
-    ("pages/1_Dashboard.py",     "Dashboard",     "📊", "can_view_dashboard", "nav.dashboard"),
-    ("pages/3_Roster_Import.py", "Roster Import", "📥", "can_generate", "nav.roster_import"),
-    ("pages/6_Property.py",      "Property",      "🏔️", "can_view_insp_tab", "nav.property"),
-    ("pages/9_Forecast.py",      "Forecast",      "📈", "can_view_dashboard", "nav.forecast"),
-    ("pages/10_Health.py",       "Health",        "🩺", "can_view_dashboard", "nav.health"),
-    ("pages/8_HotSOS.py",        "HotSOS",        "🛰️", "can_generate", "nav.hotsos"),
-    ("pages/7_Profile.py",       "Profile",       "👤", None, "nav.profile"),
-    ("pages/2_Admin.py",         "Admin",         "⚙️", "can_manage_users", "nav.admin"),
+    ("pages/4_My_Home.py",       "My Home",       ":material/home:", None, "nav.my_home"),
+    ("pages/5_My_Rooms.py",      "My Rooms",      ":material/bed:", "_my_rooms", "nav.my_rooms"),
+    ("cleaning_scheduler.py",    "Schedule",      ":material/cleaning_services:", "can_generate", "nav.schedule"),
+    ("pages/1_Dashboard.py",     "Dashboard",     ":material/dashboard:", "can_view_dashboard", "nav.dashboard"),
+    ("pages/3_Roster_Import.py", "Roster Import", ":material/upload_file:", "can_generate", "nav.roster_import"),
+    ("pages/6_Property.py",      "Property",      ":material/apartment:", "can_view_insp_tab", "nav.property"),
+    ("pages/9_Forecast.py",      "Forecast",      ":material/trending_up:", "can_view_dashboard", "nav.forecast"),
+    ("pages/10_Health.py",       "Health",        ":material/monitor_heart:", "can_view_dashboard", "nav.health"),
+    ("pages/8_HotSOS.py",        "HotSOS",        ":material/sync_alt:", "can_generate", "nav.hotsos"),
+    ("pages/7_Profile.py",       "Profile",       ":material/account_circle:", None, "nav.profile"),
+    ("pages/2_Admin.py",         "Admin",         ":material/admin_panel_settings:", "can_manage_users", "nav.admin"),
 ]
 
 CHROME_CSS = """
@@ -325,12 +328,13 @@ def topnav(active: str = "", hide_sidebar: bool = True):
         # The button shows the language you would be switching *to*, which is
         # the only way round that reads correctly in both.
         code, label = i18n.other()
-        if st.button(f"🌐 {label}", key=f"nav_lang_{active or 'x'}",
+        if st.button(label, key=f"nav_lang_{active or 'x'}", icon=":material/translate:",
                      use_container_width=True, help="English / Español"):
             i18n.set_lang(code)
             st.rerun()
     with cols[len(items) + 3]:
         if st.button(i18n.t("nav.sign_out"), key=f"nav_signout_{active or 'x'}",
+                     icon=":material/logout:",
                      use_container_width=True):
             auth.logout()
             st.switch_page("cleaning_scheduler.py")
