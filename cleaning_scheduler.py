@@ -1653,7 +1653,9 @@ _ARROW = r'(?:[>\u2192\u21d2\u27a1\u00ae\u00e0]|-{1,2}>|=>|\u2013|\u2014|\bto\b|
 _MOVE_RE = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*' + _ARROW +
                       r'\s*([1-9]\d{3}[A-Z]{1,4})', re.IGNORECASE)
 _BULLET = re.compile(r'^[\s\t]*(?:[*\u2022\u25e6\u2023\u2043\u00b7\-\u2013]+|\d+[.)])\s*')
-_CELEB_RE = re.compile(r'^(Birthday|Anniversary|Misc\.?|Other)$', re.IGNORECASE)
+# The front desk's template spells it "Anniverary"; any "Anniver..." is the
+# anniversary list, or its rooms are filed under the Birthday heading above it.
+_CELEB_RE = re.compile(r'^(Birthday|Anniver\w*|Misc\.?|Other)$', re.IGNORECASE)
 _EMPTY = {"", "n/a", "na", "none", "nil", "-", "--", "x"}
 
 
@@ -1749,6 +1751,8 @@ def parse_email_notes(text: str) -> dict:
             cm = _CELEB_RE.match(content)
             if cm:
                 t = cm.group(1).strip()
+                if t.lower().startswith("anniver"):
+                    t = "Anniversary"
                 sub_label = None if t.lower().startswith(("misc", "other")) else t
                 continue
             if sub_label:
