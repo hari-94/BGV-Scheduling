@@ -113,23 +113,25 @@ if c3.button("Push to HotSOS", type="primary", use_container_width=True,
 @st.fragment(run_every=5)
 def result_panel():
     req = db._load_key(hs.REQUEST_KEY) or {}
-    res = db._load_key(hs.RESULT_KEY) or {}
-    if req.get("id") and req["id"] != res.get("id"):
+    cur = db._load_key(hs.RESULT_KEY) or {}
+    # What's happening now goes in a banner; below it stays the last run that
+    # finished, until a newer one replaces it -- a press never blanks the page.
+    if req.get("id") and req["id"] != cur.get("id"):
         st.info(f"⏳ {req.get('mode', '').title()} for {req.get('date')} asked by "
-                f"{req.get('by')} — waiting for the office PC…")
-        return
-    if not res or res.get("mode") == "staff":
+                f"{req.get('by')} — waiting for the office PC… (last result below)")
+    elif cur.get("status") == "running":
+        st.info(f"⏳ {cur['mode'].title()} for {cur['date']} is running — about a minute… "
+                "(last result below)")
+    elif cur.get("status") == "error":
+        st.error(f"{cur.get('mode', '').title()} for {cur.get('date')} · "
+                 f"{_ago(_age(cur.get('finished_at')))}: {cur.get('error')}")
+    res = db._load_key(hs.LAST_KEY) or (cur if cur.get("plan") is not None else {})
+    if not res:
         st.caption("No preview yet — press **Preview** to see what would change.")
-        return
-    if res.get("status") == "running":
-        st.info(f"⏳ {res['mode'].title()} for {res['date']} is running — about a minute…")
         return
 
     head = (f"**{res['mode'].title()}** for **{res['date']}** · tab “{res.get('tab', '?')}” · "
             f"{res.get('by', '')} · {_ago(_age(res.get('finished_at')))}")
-    if res.get("status") == "error":
-        st.error(f"{head}\n\n{res.get('error')}")
-        return
     if res["mode"] == "push":
         (st.success if res["status"] == "done" else st.warning)(
             f"{head} — **{res.get('sent', 0)} rooms sent to HotSOS**")
@@ -216,7 +218,7 @@ result_panel()
 # ── a name HotSOS doesn't know yet (a new hire, a new spelling) ────────────
 # Outside the auto-refreshing panel on purpose: a table being edited must not
 # redraw under someone's cursor every five seconds.
-_res = db._load_key(hs.RESULT_KEY) or {}
+_res = db._load_key(hs.LAST_KEY) or db._load_key(hs.RESULT_KEY) or {}
 _new = _res.get("unmatched_names") or []
 _labels = sorted(a["label"] for a in sn.attendants())
 if _new and _labels:

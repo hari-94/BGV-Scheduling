@@ -244,3 +244,47 @@ def forecast(days, estimate, on_hand=None):
         merged["date"] = d["date"]
         out.append(merged)
     return out
+
+
+def scheduled(weeks, overrides, iso):
+    """Who the staff schedule (Schedule.xlsx, as stored) has on `iso`.
+
+    Counted the way the rest of the app reads a cell (roster_import): a
+    housekeeper on "3"/"ON" is on Full Clean, "Daily service" on dailies; an
+    RQS row that is working is an inspector. Deep clean ("2135A + 2136G"),
+    HSP, projects and the like are a worked day but not rooms, so they are
+    counted apart -- they are the people a short day could borrow. In-app
+    edits and red no-call fills count, as they do everywhere else.
+
+    Returns None when no stored week covers the day (not scheduled yet).
+    """
+    import roster_import as ri
+    wk = ri.find_week_key(sorted(weeks), iso)
+    if not wk:
+        return None
+    week, _ = ri.apply_overrides(weeks[wk], overrides or {}, wk)
+    out = {"hk_fc": [], "hk_ds": [], "rqs": [], "other": [], "off": [], "nocall": []}
+    seen = set()
+    for name, rec in (week.get("people") or {}).items():
+        group = rec.get("group")
+        if group not in ("hk", "rqs"):
+            continue
+        base = name.split(" · ")[0]        # a second section row is the same person
+        kind, _known = ri.cell_kind(rec, iso)
+        raw = str((rec.get("cells") or {}).get(iso, "") or "").strip()
+        if (base, kind) in seen:
+            continue
+        seen.add((base, kind))
+        if kind == ri.KIND_NOCALL:
+            out["nocall"].append(base)
+        elif kind == ri.KIND_DAILY and group == "hk":
+            out["hk_ds"].append(base)
+        elif kind == ri.KIND_WORKING:
+            out["rqs" if group == "rqs" else "hk_fc"].append(base)
+        elif kind in (ri.KIND_OTHER, ri.KIND_UNKNOWN) and raw:
+            out["other"].append(f"{base} ({raw})")
+        elif kind in (ri.KIND_OFF, ri.KIND_VTO) and raw:
+            out["off"].append(base)
+    out = {k: sorted(set(v)) for k, v in out.items()}
+    out["hskp"] = len(out["hk_fc"]) + len(out["hk_ds"])
+    return out

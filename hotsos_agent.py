@@ -286,6 +286,10 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
         res["finished_at"] = clock.stamp()
         if store:
             db._upsert_key(hs.RESULT_KEY, res)
+            # The page keeps showing the last finished plan while a new one
+            # runs or fails, so the result doesn't vanish on every press.
+            if mode in ("preview", "push") and res.get("plan") is not None:
+                db._upsert_key(hs.LAST_KEY, res)
     return res
 
 

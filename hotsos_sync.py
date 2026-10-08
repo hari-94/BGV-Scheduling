@@ -25,6 +25,7 @@ import re
 # ── app_settings keys shared by the page and the agent ──────────────────────
 REQUEST_KEY = "hotsos_push_request"     # {id, date, mode, by, at}
 RESULT_KEY = "hotsos_push_result"       # {id, date, mode, status, plan, ...}
+LAST_KEY = "hotsos_last_result"         # the last preview/push that finished
 NAMES_KEY = "hotsos_names"              # {sheet name: HotSOS attendant label}
 FORECAST_KEY = "ssrs_forecast"          # {pulled_at, days: [...], warnings}
 FORECAST_REQUEST_KEY = "ssrs_forecast_request"   # {id, by, at}
