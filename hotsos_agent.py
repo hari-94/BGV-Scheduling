@@ -312,7 +312,11 @@ def read_day(cfg, day):
 
 def run_build(cfg, day=None, by="5 AM", publish=True):
     """Build the day's schedule and write its tab. Never pushes to HotSOS."""
+    import importlib
     import daily_build
+    # The agent runs for weeks; a fix to the builder must reach the next 5 AM
+    # run without anyone restarting it.
+    daily_build = importlib.reload(daily_build)
     day = day or clock.today()
     # A later day is a look-ahead: built from that day's rooms and roster,
     # written as its tab, never saved to the app (which holds today only).

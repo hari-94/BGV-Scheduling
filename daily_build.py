@@ -289,6 +289,85 @@ def _fingerprint(ws) -> str:
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
+def _write_summary(ws, top, frame):
+    """Under the rooms: minutes per housekeeper, then suggestions for the
+    light ones. Nothing in either table starts with a room code, so a push
+    -- which reads only rows whose first cell is a room -- never sees them."""
+    from openpyxl.styles import Font, PatternFill
+    if frame is None or frame.empty:
+        return
+    bold = Font(name="Arial", size=11, bold=True, color="16202E")
+    hdr = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+    reg = Font(name="Arial", size=10)
+    blue = PatternFill("solid", fgColor="2563A8")
+    fills = {"Light": PatternFill("solid", fgColor="FFF4E5"),
+             "Over": PatternFill("solid", fgColor="FDECEC"),
+             "Full": PatternFill("solid", fgColor="EAF7EE"),
+             "RQS 2 · Dust n Vac": PatternFill("solid", fgColor="EEF0F3")}
+    summary = staff_summary(frame)
+    moves, after = suggest_moves(frame)
+
+    def header(row, cols):
+        for ci, h in enumerate(cols, 1):
+            c = ws.cell(row=row, column=ci, value=h)
+            c.font, c.fill = hdr, blue
+
+    r = top
+    ws.cell(row=r, column=1, value="Staff summary — minutes per housekeeper").font = bold
+    ws.cell(row=r + 1, column=1, value=f"Light = under {LOW_MIN} min · Full Clean chart up to "
+                                       f"{CAP_FC} · Daily Service up to {CAP_DS}").font = reg
+    r += 2
+    header(r, ["Housekeeper", "Rooms", "Minutes", "Full Clean min", "Daily min",
+               "Dust n Vac rooms", "Status", "After suggestions"])
+    for p in summary:
+        r += 1
+        vals = [p["name"], p["rooms"], p["minutes"], p["Full Clean"], p["Daily Service"],
+                p["Dust n Vac"], p["status"],
+                after[p["name"]] if after.get(p["name"]) != p["minutes"] else ""]
+        for ci, v in enumerate(vals, 1):
+            c = ws.cell(row=r, column=ci, value=v)
+            c.font, c.fill = reg, fills[p["status"]]
+    recs = frame.to_dict("records")
+    unst = [x for x in recs if _needs_person(x.get("HSKP"))]
+    blank = [x for x in recs if not str(x.get("HSKP") or "").strip()
+             and str(x.get("Room") or "").strip()
+             and not str(x.get("Service") or "").startswith("Dust")]
+    if blank:
+        r += 1
+        vals = ["Left blank to check", len(blank), sum(_minutes(x.get("Time (min)")) for x in blank),
+                "", "", "", "Unallocated / stayovers — RQS decides"]
+        for ci, v in enumerate(vals, 1):
+            ws.cell(row=r, column=ci, value=v).font = Font(name="Arial", size=10, italic=True)
+    if unst:
+        r += 1
+        mins = sum(_minutes(x.get("Time (min)")) for x in unst)
+        charts = -(-mins // CAP_FC)
+        vals = ["No housekeeper available", len(unst), mins, "", "", "",
+                f"≈ {charts} more chart{'s' if charts != 1 else ''} of {CAP_FC} min"]
+        for ci, v in enumerate(vals, 1):
+            ws.cell(row=r, column=ci, value=v).font = Font(name="Arial", size=10, italic=True)
+
+    r += 3
+    ws.cell(row=r, column=1, value="Suggestions to fill light charts — check, then edit the "
+                                   "HSKP column above if you agree").font = bold
+    r += 1
+    if not moves:
+        light = [p["name"] for p in summary if p["status"] == "Light"]
+        ws.cell(row=r, column=1, value=("Nobody is light." if not light else
+                                        "No rooms fit: " + ", ".join(light) +
+                                        " stay light (no unstaffed or spare rooms of the same "
+                                        "service).")).font = reg
+        return
+    header(r, ["Suggestion", "Give rooms", "Service", "Minutes", "From", "To",
+               "To's minutes", "Why"])
+    for i, m in enumerate(moves, 1):
+        r += 1
+        vals = [f"Suggestion {i}", ", ".join(map(str, m["rooms"])), m["service"], m["minutes"],
+                m["from"], m["to"], f"{m['before']} → {m['after']}", m["why"]]
+        for ci, v in enumerate(vals, 1):
+            ws.cell(row=r, column=ci, value=v).font = reg
+
+
 def write_tab(path, day: _dt.date, frame, state: dict):
     """Write `frame` as the day's tab. Returns "written", "replaced" or
     "kept (edited)". `state` remembers the fingerprint of what was written,
@@ -325,6 +404,7 @@ def write_tab(path, day: _dt.date, frame, state: dict):
                 except (TypeError, ValueError):
                     v = v or ""
             ws.cell(row=ri, column=ci, value=v if v not in (None, "nan") else "").font = reg
+    _write_summary(ws, len(frame) + 3, frame)
     ws.freeze_panes = "A2"
     # Day tabs in date order, the newest last, and only the last month kept.
     from hotsos_sync import tab_date
@@ -359,6 +439,123 @@ def assign_dust_n_vac(frame):
     fill = dv & hskp.eq("") & rqs.ne("") & ~placeholder
     frame.loc[fill, "HSKP"] = frame.loc[fill, "RQS"]
     return frame
+
+
+# ── who is light, and what would fill their chart ───────────────────────────
+LOW_MIN, CAP_FC, CAP_DS = 330, 380, 460      # the Schedule page's LOW_MIN, MAX_FC, DS_CAP
+
+
+def _unstaffed(name) -> bool:
+    n = str(name or "").strip().lower()
+    return not n or n.startswith(("no hk", "need housekeeper"))
+
+
+def _needs_person(name) -> bool:
+    """A chart the app couldn't staff ("No HK available 1"). A blank HSKP is
+    different: the app leaves Unallocated rooms (maybe already clean) and
+    stayovers to verify blank on purpose, for the RQS to decide."""
+    return str(name or "").strip().lower().startswith(("no hk", "need housekeeper"))
+
+
+def _minutes(v) -> int:
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return 0
+
+
+def staff_summary(frame):
+    """One line per housekeeper: rooms, minutes by service, and whether the
+    day is Light (under LOW_MIN), Full, or Over the chart's cap."""
+    people = {}
+    for r in frame.to_dict("records"):
+        who = str(r.get("HSKP") or "").strip()
+        if _unstaffed(who):
+            continue
+        p = people.setdefault(who, {"name": who, "rooms": 0, "minutes": 0,
+                                    "Full Clean": 0, "Daily Service": 0, "Dust n Vac": 0})
+        svc = str(r.get("Service") or "").strip()
+        m = _minutes(r.get("Time (min)"))
+        p["rooms"] += 1
+        p["minutes"] += m
+        key = next((k for k in ("Full Clean", "Daily Service", "Dust n Vac") if svc.startswith(k)), None)
+        if key:
+            p[key] += m if key != "Dust n Vac" else 1
+    out = []
+    for p in people.values():
+        p["main"] = "Daily Service" if p["Daily Service"] > p["Full Clean"] else "Full Clean"
+        p["cap"] = CAP_DS if p["main"] == "Daily Service" else CAP_FC
+        # Dust n Vac carries no minutes on the sheet, and it is RQS 2's round:
+        # someone whose day is only that is not a light housekeeper.
+        if p["Dust n Vac"] and not (p["Full Clean"] or p["Daily Service"]):
+            p["status"] = "RQS 2 · Dust n Vac"
+        else:
+            p["status"] = ("Light" if p["minutes"] < LOW_MIN else
+                           "Over" if p["minutes"] > p["cap"] else "Full")
+        out.append(p)
+    return sorted(out, key=lambda p: p["minutes"])
+
+
+def _bundles(rows):
+    """Rooms that move together: one guest's rooms on one floor are an
+    apartment (the app's own rule), and two people in one apartment is two
+    people doing one turnover."""
+    groups = {}
+    for r in rows:
+        room = str(r["Room"])
+        key = (str(r.get("Current Guest or Status") or room), room[:2], str(r.get("Service")))
+        groups.setdefault(key, []).append(r)
+    return [{"rooms": [x["Room"] for x in g], "minutes": sum(_minutes(x.get("Time (min)")) for x in g),
+             "service": str(g[0].get("Service") or ""), "bld": str(g[0]["Room"])[0],
+             "floor": int(str(g[0]["Room"])[1]) if str(g[0]["Room"])[1].isdigit() else 0,
+             "from": str(g[0].get("HSKP") or "") or "nobody"} for g in groups.values()]
+
+
+def suggest_moves(frame):
+    """For each Light housekeeper, lightest first: rooms that would fill the
+    chart toward a full day without passing its cap -- unstaffed rooms first,
+    then rooms from anyone Over. Same service only, the same building first,
+    then the nearest floor. Advice for the RQS, not a change."""
+    rows = [r for r in frame.to_dict("records") if str(r.get("Room") or "").strip()]
+    summary = {p["name"]: p for p in staff_summary(frame)}
+    loads = {n: p["minutes"] for n, p in summary.items()}
+    taken, moves = set(), []
+
+    def place(person, pool, source):
+        p = summary[person]
+        mine = [r for r in rows if r.get("HSKP") == person]
+        blds = {str(r["Room"])[0] for r in mine}
+        floors = [int(str(r["Room"])[1]) for r in mine if str(r["Room"])[1].isdigit()] or [0]
+        for b in sorted(pool, key=lambda b: (b["bld"] not in blds,
+                                             min(abs(b["floor"] - f) for f in floors),
+                                             -b["minutes"])):
+            if loads[person] >= LOW_MIN:
+                return
+            if tuple(b["rooms"]) in taken or not b["minutes"]:
+                continue
+            if not b["service"].startswith(p["main"]):
+                continue
+            if loads[person] + b["minutes"] > p["cap"]:
+                continue
+            if source == "over" and loads[b["from"]] - b["minutes"] < LOW_MIN:
+                continue                       # don't make the giver light
+            taken.add(tuple(b["rooms"]))
+            before = loads[person]
+            loads[person] += b["minutes"]
+            if source == "over":
+                loads[b["from"]] -= b["minutes"]
+            moves.append({"rooms": b["rooms"], "service": b["service"], "minutes": b["minutes"],
+                          "from": b["from"], "to": person, "before": before, "after": loads[person],
+                          "why": ("unstaffed" if source == "unstaffed" else f"{b['from']} is over")
+                                 + ("" if b["bld"] in blds else ", other building")})
+
+    unstaffed = _bundles([r for r in rows if _needs_person(r.get("HSKP"))
+                          and not str(r.get("Service") or "").startswith("Dust")])
+    over = _bundles([r for r in rows if summary.get(r.get("HSKP"), {}).get("status") == "Over"])
+    for person in [n for n, p in summary.items() if p["status"] == "Light"]:
+        place(person, unstaffed, "unstaffed")
+        place(person, over, "over")
+    return moves, loads
 
 
 def tab_edited(path, day: _dt.date, state: dict) -> bool:
