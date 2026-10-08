@@ -73,6 +73,8 @@ STRINGS = {
     "rooms.startwith":    ("Start with", "Empieza con"),
     "rooms.by":           ("by", "para las"),
     "nav.property":       ("Property", "Propiedad"),
+    "nav.hotsos":         ("HotSOS", "HotSOS"),
+    "nav.forecast":       ("Forecast", "Pronóstico"),
     "nav.profile":        ("Profile", "Mi perfil"),
     "profile.hello":      ("Signed in as", "Sesión iniciada como"),
     "profile.change_pw":  ("Change your password", "Cambia tu contraseña"),

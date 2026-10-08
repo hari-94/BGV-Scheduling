@@ -304,6 +304,19 @@ def _history(_token: str):
 #  UPLOAD & SYNC
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_sync:
+    # The office PC imports the SharePoint copy by itself when it changes;
+    # say when it last did, and say so loudly if it failed.
+    try:
+        _rs = db._load_key("roster_sync_status") or {}
+    except Exception:
+        _rs = {}
+    if _rs.get("error"):
+        st.error(f"Automatic import from SharePoint failed ({_rs.get('at', '')[:16]}): "
+                 f"{_rs['error']}")
+    elif _rs:
+        st.caption(f"🔄 Imported automatically from SharePoint at {_rs.get('at', '')[:16]} — "
+                   f"{_rs.get('saved', 0)} week(s) saved, {_rs.get('changed_cells', 0)} "
+                   f"cell(s) changed. Upload here only to load a different file.")
     st.markdown('<p class="sec">Upload the weekly workbook</p>', unsafe_allow_html=True)
     up = st.file_uploader("Schedule.xlsx", type=["xlsx", "xlsm"], key="ri_xlsx",
                           help="One sheet per week, Sunday–Saturday in columns B–H.")
@@ -390,46 +403,14 @@ with tab_sync:
         if st.button("Save to app", type="primary", key="ri_save"):
             touched = set(d["new_weeks"]) | set(d["changed_weeks"])
             with st.spinner(f"Saving {len(touched) or len(incoming)} week(s)…"):
-                to_write = touched if stored else set(incoming)
-                ok, failed = 0, []
-                for wk in sorted(to_write):
-                    try:
-                        db.save_staff_week(wk, incoming[wk]); ok += 1
-                    except Exception as ex:
-                        failed.append(f"{wk}: {ex}")
-                all_dates = sorted(x for w in incoming.values() for x in w["dates"])
-                try:
-                    db.save_staff_meta({
-                        "uploaded_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                        "uploaded_by": st.session_state.get("username", "unknown"),
-                        "file_name":   st.session_state.get("ri_file_name", ""),
-                        "n_sheets":    n_sheets,
-                        "n_weeks":     len(incoming),
-                        "date_min":    all_dates[0] if all_dates else "",
-                        "date_max":    all_dates[-1] if all_dates else "",
-                        "last_diff": {
-                            "new_weeks": d["new_weeks"],
-                            "n_changed_cells": d["n_changed_cells"],
-                            # Bounded so the meta row stays small.
-                            "changed": [
-                                {"week": wk, **ch}
-                                for wk, dd in sorted(d["changed_weeks"].items())
-                                for ch in dd["changed"]][:500],
-                        },
-                    })
-                except Exception as ex:
-                    failed.append(f"meta: {ex}")
-                # Keep the workbook itself so the Excel export works any day,
-                # not only in a session where someone happened to upload it.
-                try:
-                    db.save_staff_file(raw, st.session_state.get("ri_file_name", ""))
-                except Exception as ex:
-                    failed.append(f"workbook: {ex}")
-                # A fresh upload supersedes today's auto-apply, so let it re-run.
-                try:
-                    db.save_autoapply({})
-                except Exception:
-                    pass
+                # The same save the office-PC agent runs when the SharePoint
+                # copy changes -- one path, so the two can't drift apart.
+                import roster_sync
+                out = roster_sync.save(
+                    raw, st.session_state.get("ri_file_name", ""),
+                    st.session_state.get("username", "unknown"),
+                    incoming=incoming, n_sheets=n_sheets, stored=stored)
+                ok, failed = out["saved"], out["failed"]
             if failed:
                 st.error("Some writes failed:\n\n" + "\n\n".join(f"- {f}" for f in failed))
             else:

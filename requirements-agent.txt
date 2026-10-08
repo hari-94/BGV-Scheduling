@@ -1,0 +1,6 @@
+# The office-PC agent (hotsos_agent.py) only -- not the app server.
+# Install on the PC with:  pip install -r requirements.txt -r requirements-agent.txt
+# Playwright drives the installed Chrome, so `playwright install` is not needed.
+playwright>=1.45
+keyring>=25
+tzdata
