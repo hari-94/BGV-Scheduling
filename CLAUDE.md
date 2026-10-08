@@ -256,13 +256,13 @@ commit for the table. **Banning 120+70+70+70 outright is free at the optimum**
 -- the solver proved it on all 30 days. The ten housekeeper-days it cost in
 `381d35d` were the heuristic's, not the rule's. It was a soft price in step 3
 for a while, cheaper than one level of walking, and the solver paid it to save
-a staircase: seven 120+70+70+70 charts on 8 October. **It is a hard rule now,
+a staircase: seven 120+70+70+70 charts on 4 October. **It is a hard rule now,
 in `fcpack._legal`**, so every pass refuses it. The one exception is a single
 apartment of that shape, which cannot be split.
 
 **Short of people, the short charts are filled from the unstaffed ones.** The
 packer plans one housekeeper per chart, so on a short-staffed day the last
-charts go to "No HK available" while a short chart still goes home early -- 8
+charts go to "No HK available" while a short chart still goes home early -- 4
 October had Josseling on 120 and Nury on 210 beside 1,410 unstaffed minutes.
 `fill_from_unstaffed` runs after housekeepers are assigned: lightest person
 first, it tops each staffed chart as close to 380 as the rules allow from the
@@ -431,6 +431,17 @@ old expander only split *consecutive* letters, which handled `1010AB` and
 property's lock-offs skip F as often as not. The split is now verified against
 `property_map` rather than assumed: it happens only when the whole code is not
 a real room and every single-letter part is.
+
+**The dashboard repeats rows, and "possibly clean" is more than Unallocated.**
+Sheet Exchange came through twice a day for 2233D for a week, and beside its own
+Daily Service; 3020D had a Sheet and two Towel Exchanges. `_drop_duplicate_rows`
+in `parse_rooms` keeps one row per job: an exchange goes when the room has any
+other service, otherwise the longest one stays. Towel Exchange had no rule and
+fell through to Full Clean. Separately, `room_is_unallocated` counts
+**Buyback, Buyback** as well as Unallocated, and `build_all_groups` keeps those
+Full Cleans out of the packing entirely -- a `CHECK` group (`unalloc_group`,
+riding on `verify_group` so nothing assigns it) at the bottom of the screen and
+the file. On 4 October that was 13 rooms, 980 minutes, two charts.
 
 **PostgREST rejects unknown columns.** Adding `note_at` to a `room_status` write made
 the whole upsert fail with `PGRST204`, so every note typed on the floor was thrown

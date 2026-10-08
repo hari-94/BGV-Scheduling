@@ -120,8 +120,13 @@ def is_unassigned_hk(name) -> bool:
     return (not s) or s.startswith(NO_HK_LABEL) or s.startswith(NEED_HK_PREFIX)
 
 def room_is_unallocated(r) -> bool:
-    """A room with no real guest on it -- it may well already be clean."""
-    return str(r.get("guest", "")).strip().lower() in ("unallocated", "---", "")
+    """A room with no real guest on it -- it may well already be clean.
+
+    "Buyback, Buyback" is the resort holding the room back, not a guest
+    leaving it, so it is the same case as Unallocated.
+    """
+    g = re.sub(r"\s+", " ", str(r.get("guest", "")).strip().lower())
+    return g in ("unallocated", "---", "") or g.startswith("buyback")
 
 
 def hk_day_loads(groups) -> dict:
@@ -1448,6 +1453,9 @@ def normalize_service(raw: str) -> str:
     # Sheet Exchange is a light turn-down service handled by the Daily Service
     # crew, so it's grouped with Daily Service.
     if "sheet" in s: return SVC_DS
+    # Towel Exchange is the same kind of drop-off. Unmatched, it fell through
+    # to Full Clean and a ten-minute towel run was packed into a 380 chart.
+    if "towel" in s: return SVC_DS
     # "Full Clean (IH)" / "Full Clean( IH)" / "... IH" -> separate IH stream,
     # packed apart from regular Full Clean and inspected by RQS 2.
     if ("full clean" in s or s.startswith("fc")) and "ih" in s:
@@ -1759,6 +1767,50 @@ def excel_to_room_text(file_obj):
         n_rooms += 1
     return "\n".join(lines), n_rooms, sheet
 
+def _is_exchange(rec) -> bool:
+    s = str(rec.get("ServiceRaw", "")).lower()
+    return "sheet" in s or "towel" in s
+
+
+def _drop_duplicate_rows(records):
+    """One row per job. The dashboard repeats rows, Sheet Exchange most of all:
+    2233D came through twice a day for a week in September, and alongside its
+    own Daily Service on the 15th; 3020D had a Sheet Exchange and two Towel
+    Exchanges on 1 October. Every copy became its own Daily Service stop.
+
+      * an exchange is dropped when the room has any other service that day --
+        a Daily Service or a Full Clean already changes the linen;
+      * otherwise one exchange is kept per room, the longest (Sheet over
+        Towel on a tie);
+      * any other row repeated exactly (same room, same service) is kept once.
+
+    Order is kept, so the sheet still reads the way it was exported.
+    """
+    room = lambda r: str(r.get("Room", "")).strip().upper()
+    has_real = {room(r) for r in records if not _is_exchange(r)}
+    best_x = {}
+    for r in records:
+        if _is_exchange(r) and room(r) not in has_real:
+            # longest wins; on a tie a sheet change beats a towel drop
+            rank = lambda x: (x["Time"], "sheet" in str(x.get("ServiceRaw", "")).lower())
+            if room(r) not in best_x or rank(r) > rank(best_x[room(r)]):
+                best_x[room(r)] = r
+    out, seen = [], set()
+    for r in records:
+        if _is_exchange(r):
+            if best_x.get(room(r)) is r:
+                out.append(r)
+            continue
+        key = (room(r), re.sub(r"\s+", " ", str(r.get("ServiceRaw", "")).strip().lower()))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    if len(out) != len(records):
+        print("[parse] dropped %d duplicate row(s)" % (len(records) - len(out)))
+    return out
+
+
 def parse_rooms(text: str) -> pd.DataFrame:
     lines = [l for l in text.strip().splitlines() if l.strip()]
     if not lines: return pd.DataFrame()
@@ -1849,6 +1901,7 @@ def parse_rooms(text: str) -> pd.DataFrame:
             "ResType":get(row,i_restype),"uncertain":is_uncertain,
             "verify":needs_verify,
         })
+    records = _drop_duplicate_rows(records)
     if not records: return pd.DataFrame()
     df = pd.DataFrame(records)
     pc = df["Room"].apply(parse_room_code)
@@ -3534,6 +3587,16 @@ def pack_fc_sequential(room_list):
 def build_all_groups(rooms):
     verify_rooms = [r for r in rooms if r.get("verify")]
     rooms = [r for r in rooms if not r.get("verify")]
+    # Buyback and Unallocated Full Cleans are probably clean already. They used
+    # to be packed into charts and then hidden from the housekeeper on the
+    # screen and in the file, so the chart was planned on minutes nobody was
+    # going to spend -- and Buyback was not recognised at all, so it went out
+    # as real work. Now they are kept out of the packing altogether and sit in
+    # their own group at the bottom, for somebody to check and hand out.
+    unalloc_rooms = [r for r in rooms
+                     if r.get("service") in (SVC_FC, SVC_IH) and room_is_unallocated(r)]
+    rooms = [r for r in rooms
+             if not (r.get("service") in (SVC_FC, SVC_IH) and room_is_unallocated(r))]
 
     fc_rooms = [r for r in rooms if r.get("service")==SVC_FC]
     ih_rooms = [r for r in rooms if r.get("service")==SVC_IH]
@@ -3592,8 +3655,21 @@ def build_all_groups(rooms):
         }]
     else:
         verify_groups = []
+    # Buyback / Unallocated: held back like verify rooms (no HK, no RQS), but
+    # their own group, so the file can say what they are.
+    if unalloc_rooms:
+        unalloc_groups = [{
+            "rooms":list(unalloc_rooms),
+            "time":sum(r.get("time",0) for r in unalloc_rooms),
+            "blds":set(r["bld"] for r in unalloc_rooms),
+            "floors":set(r.get("floor",0) for r in unalloc_rooms),
+            "c140":0,"c120":0,"service_type":SVC_FC,
+            "verify_group":True,"unalloc_group":True,
+        }]
+    else:
+        unalloc_groups = []
     # Sequencing: Full Clean (regular + IH) first, then Daily Service, then DV.
-    return fc_groups + ih_groups + ds_groups + dv_groups + verify_groups
+    return fc_groups + ih_groups + ds_groups + dv_groups + unalloc_groups + verify_groups
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STAFF ASSIGNMENT
@@ -3690,6 +3766,10 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
     def _order(g):
         st_ = g.get("service_type","")
         return {SVC_FC:0, SVC_IH:1, SVC_DV:2, SVC_DS:3}.get(st_, 4)
+    # Unstaffed charts are numbered, like the Daily Service placeholders: the
+    # schedule view has one row per housekeeper name, so a shared name merged
+    # every unstaffed chart into one row far over the cap.
+    no_hk_n = 0
     for g in sorted(groups, key=_order):
         if g["label"] in assignment: continue
         if g.get("verify_group"):
@@ -3698,7 +3778,10 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
         # housekeeper field blank here; assign_inspectors puts it on RQS 2.
         if g.get("dv_rqs2"): assignment[g["label"]]=""; continue
         is_ds = (g.get("service_type") == SVC_DS)
-        matched = find_hk(g.get("blds",{1}), is_ds) or NO_HK_LABEL
+        matched = find_hk(g.get("blds",{1}), is_ds)
+        if not matched:
+            no_hk_n += 1
+            matched = f"{NO_HK_LABEL} {no_hk_n}"
         assignment[g["label"]] = matched
         if not is_unassigned_hk(matched): used.add(matched)
     return assignment, used
@@ -3711,7 +3794,7 @@ def fill_from_unstaffed(groups, roster):
     per chart, so it piles a building's slack onto one short chart. On a day
     with fewer people than charts the last charts go to "No HK available" --
     and the short chart still goes home at two o'clock while those rooms sit
-    there. On 8 October that was Josseling on 120 minutes and Nury on 210
+    there. On 4 October that was Josseling on 120 minutes and Nury on 210
     beside 1,410 minutes nobody was on.
 
     So once the names are on, each staffed chart under the cap is filled from
@@ -3830,9 +3913,10 @@ def fill_from_unstaffed(groups, roster):
                 print("[fc] could not re-pack the unstaffed rooms (%s)" % ex)
                 leftover += [by_bld[b]]
     new_spare = []
-    for c in leftover:
+    for n, c in enumerate(leftover, 1):
         ng = mk(c, SVC_FC)
-        ng["housekeeper"] = NO_HK_LABEL
+        # numbered, so each shows as its own row: one name merged them all
+        ng["housekeeper"] = f"{NO_HK_LABEL} {n}"
         ng["cross_bld"] = len(ng["blds"]) > 1
         new_spare.append(ng)
 
@@ -4875,12 +4959,14 @@ if run:
                     ih_gs=[g for g in fg if g.get("service_type")==SVC_IH and not g.get("verify_group")]
                     ds_gs=[g for g in fg if g.get("service_type")==SVC_DS and not g.get("verify_group")]
                     dv_gs=[g for g in fg if g.get("service_type")==SVC_DV and not g.get("verify_group")]
-                    vr_gs=[g for g in fg if g.get("verify_group")]
+                    vr_gs=[g for g in fg if g.get("verify_group") and not g.get("unalloc_group")]
+                    ua_gs=[g for g in fg if g.get("unalloc_group")]
                     for g,lbl in zip(fc_gs, make_labels("FC",len(fc_gs))): g["label"]=lbl
                     for g,lbl in zip(ih_gs, make_labels("IH",len(ih_gs))): g["label"]=lbl
                     for g,lbl in zip(ds_gs, make_labels("DS",len(ds_gs))): g["label"]=lbl
                     for g,lbl in zip(dv_gs, make_labels("DV",len(dv_gs))): g["label"]=lbl
                     for g,lbl in zip(vr_gs, make_labels("VERIFY",len(vr_gs))): g["label"]=lbl
+                    for g,lbl in zip(ua_gs, make_labels("CHECK",len(ua_gs))): g["label"]=lbl
                     for g in fg: g["cross_bld"] = len(g["blds"])>1
 
                     # (The new solve_full_clean already consolidates to the fewest
@@ -4891,12 +4977,14 @@ if run:
                     ih2=[g for g in fg if g.get("service_type")==SVC_IH and not g.get("verify_group")]
                     ds2=[g for g in fg if g.get("service_type")==SVC_DS and not g.get("verify_group")]
                     dv2=[g for g in fg if g.get("service_type")==SVC_DV and not g.get("verify_group")]
-                    vr2=[g for g in fg if g.get("verify_group")]
+                    vr2=[g for g in fg if g.get("verify_group") and not g.get("unalloc_group")]
+                    ua2=[g for g in fg if g.get("unalloc_group")]
                     for g,lbl in zip(n_fc, make_labels("FC",len(n_fc))): g["label"]=lbl
                     for g,lbl in zip(ih2, make_labels("IH",len(ih2))): g["label"]=lbl
                     for g,lbl in zip(ds2, make_labels("DS",len(ds2))): g["label"]=lbl
                     for g,lbl in zip(dv2, make_labels("DV",len(dv2))): g["label"]=lbl
                     for g,lbl in zip(vr2, make_labels("VERIFY",len(vr2))): g["label"]=lbl
+                    for g,lbl in zip(ua2, make_labels("CHECK",len(ua2))): g["label"]=lbl
                     for g in fg: g["cross_bld"]=len(g["blds"])>1
 
                     hk_asgn, used_hk_set = assign_hk_building_aware(
@@ -6737,13 +6825,14 @@ td{{transition:background .15s ease}}
     _SVC_ORDER = {SVC_FC:0, SVC_IH:1, SVC_DS:2, SVC_DV:3}
     export_rows=[]
     for g in fg:
-        is_verify = g.get("verify_group", False)
+        is_unalloc_g = g.get("unalloc_group", False)
+        is_verify = g.get("verify_group", False) and not is_unalloc_g
         svc_rank = _SVC_ORDER.get(g.get("service_type",""), 4)
         for r in g["rooms"]:
             _guest = r.get("guest","")
             # "Unallocated" (and blank) rooms may already be clean — flag them so
             # they drop to the bottom of the download for manual review/assignment.
-            _is_unalloc = str(_guest).strip().lower() in ("unallocated","---","")
+            _is_unalloc = is_unalloc_g or room_is_unallocated(r)
             _svc_type = g.get("service_type","")
             # For Unallocated FULL CLEAN / IH rooms we don't pre-assign anyone —
             # leave HSKP and RQS blank so they can be assigned manually later.

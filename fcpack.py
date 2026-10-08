@@ -24,7 +24,7 @@ The rules are hard. A chart may not:
   * be exactly 120+70+70+70.  It reaches 330 with the lightest work there is,
     and the floor does not accept it as a day. It used to be a soft price in
     the solver, cheaper than one level of walking, so it kept coming back --
-    seven of them on 8 October. One apartment that happens to be that shape
+    seven of them on 4 October. One apartment that happens to be that shape
     is the exception: it cannot be split, so it may still be a chart alone.
 
 Within the rules it wants, in order: fewest housekeepers, least walking, and
