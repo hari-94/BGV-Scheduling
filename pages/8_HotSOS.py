@@ -160,6 +160,10 @@ def result_panel():
 
     head = (f"**{res['mode'].title()}** for **{res['date']}** · tab “{res.get('tab', '?')}” · "
             f"{res.get('by', '')} · {_ago(_age(res.get('finished_at')))}")
+    if res.get("sheet_saved_at"):
+        _sv = _dt.datetime.fromisoformat(res["sheet_saved_at"]).astimezone(clock.MTN)
+        head += (f"  \n📄 Read the sheet as saved at **{_sv:%I:%M:%S %p}**".replace(" 0", " ")
+                 + " — if your last edit is newer, wait a few seconds and Preview again.")
     if res["mode"] == "push":
         (st.success if res["status"] == "done" else st.warning)(
             f"{head} — **{res.get('sent', 0)} rooms sent to HotSOS**"

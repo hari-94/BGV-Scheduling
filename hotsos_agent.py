@@ -298,12 +298,17 @@ def read_day(cfg, day):
     for path in (daily, cfg.get("workbook")):
         if path and Path(path).exists():
             try:
-                found.append((Path(path).name,) + hs.read_workbook(path, day))
+                saved = _dt.datetime.fromtimestamp(Path(path).stat().st_mtime, clock.MTN)
+                found.append((Path(path).name,) + hs.read_workbook(path, day) + (saved,))
             except LookupError as ex:
                 last = ex
     if not found:
         raise last or LookupError(f"No workbook with a tab for {day}")
-    name, tab, rows = found[0]
+    name, tab, rows, saved = found[0]
+    # When this PC's copy was last written -- by OneDrive bringing down the
+    # RQS's edits. The page shows it, so an edit made seconds before the press
+    # (not synced down yet) is visible as missing rather than silently absent.
+    read_day.saved_at = saved.isoformat(timespec="seconds")
     read_day.warning = (f"{day:%b %d} has a tab in both {found[0][0]} ('{found[0][1]}') and "
                         f"{found[1][0]} ('{found[1][1]}'). Using {found[0][0]}; make the "
                         "changes there." if len(found) > 1 else "")
@@ -379,6 +384,7 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
         if mode != "staff":
             tab, rows = read_day(cfg, day)
             res["tab"] = tab
+            res["sheet_saved_at"] = getattr(read_day, "saved_at", None)
             if read_day.warning:
                 res["warning"] = read_day.warning
             if only_room:
