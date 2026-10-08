@@ -97,9 +97,33 @@ else:
     st.warning(f"The office PC isn't connected (last seen {_ago(beat_age)}). "
                "Requests will wait until it's back on.")
 
-st.caption("Reads the day's tab of **GC8 Inspections 2026** in SharePoint as it is when "
-           "you press the button, so make call-off changes there first. **Preview** "
-           "shows what would change; **Push** sends it.")
+# ── today's sheet: built at 5 AM, edited by the team, pushed when final ───
+import daily_build  # noqa: E402
+_b = db._load_key(daily_build.BUILD_KEY) or {}
+_bc1, _bc2 = st.columns([4, 1.3])
+if _b.get("date") == clock.today_iso() and _b.get("status") == "done":
+    _arr = "✓ Arrival Report" if _b.get("arrival") else "⚠️ no Arrival Report found"
+    _bc1.markdown(
+        f"📄 **Today's sheet** — tab **{_b.get('tab')}** in **{_b.get('workbook')}** "
+        f"(SharePoint › Office › GC8 Inspections) · built "
+        f"{_ago(_age(_b.get('finished_at')))} by {_b.get('by')} · {_b.get('rooms')} rooms, "
+        f"{_b.get('charts')} charts · {_arr}"
+        + (" · *kept: someone has edited it*" if "edited" in str(_b.get("outcome")) else ""))
+elif _b.get("status") == "running":
+    _bc1.info("⏳ Building today's sheet…")
+elif _b.get("status") == "error" and _b.get("date") == clock.today_iso():
+    _bc1.error(f"Today's sheet wasn't built: {_b.get('error')}")
+else:
+    _bc1.caption("📄 Today's sheet hasn't been built yet — it's built at 5 AM.")
+if _bc2.button("Build today's sheet", use_container_width=True,
+               help="Builds the schedule like pressing Generate, and writes today's tab. "
+                    "A tab someone has already edited is never overwritten."):
+    _request("build", clock.today())
+    st.toast("Asked the office PC to build today's sheet.")
+
+st.caption("Edit the day's tab in SharePoint (call-offs, swaps), then **Preview** to see "
+           "what would change and **Push** when it's final — that updates HotSOS and the "
+           "app's charts.")
 c1, c2, c3, c4 = st.columns([1.3, 1, 1, 2.2])
 day = c1.date_input("Day", value=clock.today(), key="hs_day")
 final = c4.checkbox("The sheet is final", key="hs_final",
@@ -134,9 +158,14 @@ def result_panel():
             f"{res.get('by', '')} · {_ago(_age(res.get('finished_at')))}")
     if res["mode"] == "push":
         (st.success if res["status"] == "done" else st.warning)(
-            f"{head} — **{res.get('sent', 0)} rooms sent to HotSOS**")
+            f"{head} — **{res.get('sent', 0)} rooms sent to HotSOS**"
+            + (f" · app charts updated ({res['app']['renamed']} charts changed hands, "
+               f"{res['app']['moved']} rooms moved)" if (res.get("app") or {}).get("changed")
+               else ""))
     else:
         st.info(f"{head} — preview only, nothing was sent")
+    if res.get("warning"):
+        st.warning(res["warning"])
     for err in res.get("errors", []):
         st.error(err)
 

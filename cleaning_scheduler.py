@@ -129,6 +129,88 @@ def room_is_unallocated(r) -> bool:
     return g in ("unallocated", "---", "") or g.startswith("buyback")
 
 
+def build_export_frame(fg):
+    """The day's schedule as the 12-column sheet the team prints and edits.
+
+    One function for the Download button and the 5 AM run (hotsos_agent
+    writes it as the day's tab of GC8 Daily Schedule.xlsx), so the two
+    can never lay out a day differently."""
+    _SVC_ORDER = {SVC_FC:0, SVC_IH:1, SVC_DS:2, SVC_DV:3}
+    export_rows=[]
+    for g in fg:
+        is_unalloc_g = g.get("unalloc_group", False)
+        is_verify = g.get("verify_group", False) and not is_unalloc_g
+        svc_rank = _SVC_ORDER.get(g.get("service_type",""), 4)
+        for r in g["rooms"]:
+            _guest = r.get("guest","")
+            # "Unallocated" (and blank) rooms may already be clean — flag them so
+            # they drop to the bottom of the download for manual review/assignment.
+            _is_unalloc = is_unalloc_g or room_is_unallocated(r)
+            _svc_type = g.get("service_type","")
+            # For Unallocated FULL CLEAN / IH rooms we don't pre-assign anyone —
+            # leave HSKP and RQS blank so they can be assigned manually later.
+            # Dust n Vac keeps its RQS 2, and Daily Service keeps the app's
+            # assignment, as usual.
+            _blank_assign = _is_unalloc and _svc_type in (SVC_FC, SVC_IH)
+            _hskp = "" if (is_verify or _blank_assign) else g.get("housekeeper","")
+            _rqs  = "" if (is_verify or _blank_assign) else g.get("inspector","")
+            # Fold the late-checkout into Notes so it shows in the download. Format
+            # as "Late Out: <time>" and keep any existing room note alongside it.
+            _note = (r.get("notes","") or "").strip()
+            _lc = (r.get("late_checkout","") or "").strip()
+            if _lc:
+                _lc_txt = _lc if _lc.lower().startswith("late out") else f"Late Out: {_lc}"
+                _note = f"{_lc_txt}" + (f" · {_note}" if _note else "")
+            export_rows.append({
+                "Room":r.get("room",""),"Service":r.get("service",""),
+                "Time (min)":r.get("time",""),"Pet":r.get("pet",""),
+                "Current Guest or Status":_guest,
+                "HSKP":_hskp,
+                "RQS":_rqs,
+                # Status is intentionally left BLANK in the downloaded file.
+                "Notes":_note,"Status":"",
+                "Carpet":"","Stripping":"","Arriving Guest":r.get("arriving",""),
+                # kept only for internal sort ordering below (dropped before export)
+                "_Group":("VERIFY — assign manually" if is_verify else g["label"]),
+                "_Svc":svc_rank,
+                "_RQS":(_rqs or "").lower(),
+                "_HSKP":(_hskp or "").lower(),
+                "_Unalloc":"Yes" if (_is_unalloc and not is_verify) else "No",
+                "_Verify":"Yes" if is_verify else "No",
+                "_Uncertain":"Yes" if r.get("uncertain") else "No",
+                # Same three keys the on-screen chart card sorts its room chips
+                # by, so a printed chart reads in the order the screen shows it.
+                "_Bld":r.get("bld",0),"_Floor":r.get("floor",0),"_Num":r.get("num",0),
+            })
+    export_df = pd.DataFrame(export_rows)
+    # Order, top to bottom:
+    #   1) confirmed rooms with a real guest — by service (FC→IH→DS→DV), RQS, HK
+    #   2) "Unallocated" rooms (may already be clean) — dropped to the bottom for
+    #      manual review, still grouped by service/RQS/HK
+    #   3) uncertain rooms
+    #   4) stayover / verify rooms (assign manually) — dead last
+    if not export_df.empty and "_Verify" in export_df.columns:
+        # ..._Bld/_Floor/_Num order the rooms *within* one housekeeper's chart.
+        # Without them the file kept the packer's insertion order while the
+        # screen sorted by building, floor and number, so the same chart read
+        # in two different sequences -- and the printed one, which is what
+        # somebody actually walks with, was the arbitrary one.
+        _sk = ["_Svc","_RQS","_HSKP","_Group","_Bld","_Floor","_Num"]
+        base = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")]
+        normal      = base[base["_Unalloc"]=="No"].sort_values(_sk)
+        unallocated = base[base["_Unalloc"]=="Yes"].sort_values(_sk)
+        unconfirmed = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="Yes")].sort_values(_sk)
+        verify_rows = export_df[export_df["_Verify"]=="Yes"].sort_values("_Group")
+        export_df   = pd.concat([normal,unallocated,unconfirmed,verify_rows],ignore_index=True)
+    # Drop the internal sort-only helper columns so the file has exactly the
+    # requested columns, in order.
+    _EXPORT_COLS = ["Room","Service","Time (min)","Pet","Current Guest or Status",
+                    "HSKP","RQS","Notes","Status","Carpet","Stripping","Arriving Guest"]
+    if not export_df.empty:
+        export_df = export_df[[c for c in _EXPORT_COLS if c in export_df.columns]]
+    return export_df
+
+
 def hk_day_loads(groups) -> dict:
     """Minutes each real housekeeper is actually carrying, by their whole day.
 
@@ -6822,79 +6904,7 @@ td{{transition:background .15s ease}}
     st.markdown("---")
     # Service ordering for the download: Full Clean first, then IH, Daily Service,
     # Dust n Vac; uncertain rooms after those; stayover/verify rooms dead last.
-    _SVC_ORDER = {SVC_FC:0, SVC_IH:1, SVC_DS:2, SVC_DV:3}
-    export_rows=[]
-    for g in fg:
-        is_unalloc_g = g.get("unalloc_group", False)
-        is_verify = g.get("verify_group", False) and not is_unalloc_g
-        svc_rank = _SVC_ORDER.get(g.get("service_type",""), 4)
-        for r in g["rooms"]:
-            _guest = r.get("guest","")
-            # "Unallocated" (and blank) rooms may already be clean — flag them so
-            # they drop to the bottom of the download for manual review/assignment.
-            _is_unalloc = is_unalloc_g or room_is_unallocated(r)
-            _svc_type = g.get("service_type","")
-            # For Unallocated FULL CLEAN / IH rooms we don't pre-assign anyone —
-            # leave HSKP and RQS blank so they can be assigned manually later.
-            # Dust n Vac keeps its RQS 2, and Daily Service keeps the app's
-            # assignment, as usual.
-            _blank_assign = _is_unalloc and _svc_type in (SVC_FC, SVC_IH)
-            _hskp = "" if (is_verify or _blank_assign) else g.get("housekeeper","")
-            _rqs  = "" if (is_verify or _blank_assign) else g.get("inspector","")
-            # Fold the late-checkout into Notes so it shows in the download. Format
-            # as "Late Out: <time>" and keep any existing room note alongside it.
-            _note = (r.get("notes","") or "").strip()
-            _lc = (r.get("late_checkout","") or "").strip()
-            if _lc:
-                _lc_txt = _lc if _lc.lower().startswith("late out") else f"Late Out: {_lc}"
-                _note = f"{_lc_txt}" + (f" · {_note}" if _note else "")
-            export_rows.append({
-                "Room":r.get("room",""),"Service":r.get("service",""),
-                "Time (min)":r.get("time",""),"Pet":r.get("pet",""),
-                "Current Guest or Status":_guest,
-                "HSKP":_hskp,
-                "RQS":_rqs,
-                # Status is intentionally left BLANK in the downloaded file.
-                "Notes":_note,"Status":"",
-                "Carpet":"","Stripping":"","Arriving Guest":r.get("arriving",""),
-                # kept only for internal sort ordering below (dropped before export)
-                "_Group":("VERIFY — assign manually" if is_verify else g["label"]),
-                "_Svc":svc_rank,
-                "_RQS":(_rqs or "").lower(),
-                "_HSKP":(_hskp or "").lower(),
-                "_Unalloc":"Yes" if (_is_unalloc and not is_verify) else "No",
-                "_Verify":"Yes" if is_verify else "No",
-                "_Uncertain":"Yes" if r.get("uncertain") else "No",
-                # Same three keys the on-screen chart card sorts its room chips
-                # by, so a printed chart reads in the order the screen shows it.
-                "_Bld":r.get("bld",0),"_Floor":r.get("floor",0),"_Num":r.get("num",0),
-            })
-    export_df = pd.DataFrame(export_rows)
-    # Order, top to bottom:
-    #   1) confirmed rooms with a real guest — by service (FC→IH→DS→DV), RQS, HK
-    #   2) "Unallocated" rooms (may already be clean) — dropped to the bottom for
-    #      manual review, still grouped by service/RQS/HK
-    #   3) uncertain rooms
-    #   4) stayover / verify rooms (assign manually) — dead last
-    if not export_df.empty and "_Verify" in export_df.columns:
-        # ..._Bld/_Floor/_Num order the rooms *within* one housekeeper's chart.
-        # Without them the file kept the packer's insertion order while the
-        # screen sorted by building, floor and number, so the same chart read
-        # in two different sequences -- and the printed one, which is what
-        # somebody actually walks with, was the arbitrary one.
-        _sk = ["_Svc","_RQS","_HSKP","_Group","_Bld","_Floor","_Num"]
-        base = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="No")]
-        normal      = base[base["_Unalloc"]=="No"].sort_values(_sk)
-        unallocated = base[base["_Unalloc"]=="Yes"].sort_values(_sk)
-        unconfirmed = export_df[(export_df["_Verify"]=="No") & (export_df["_Uncertain"]=="Yes")].sort_values(_sk)
-        verify_rows = export_df[export_df["_Verify"]=="Yes"].sort_values("_Group")
-        export_df   = pd.concat([normal,unallocated,unconfirmed,verify_rows],ignore_index=True)
-    # Drop the internal sort-only helper columns so the file has exactly the
-    # requested columns, in order.
-    _EXPORT_COLS = ["Room","Service","Time (min)","Pet","Current Guest or Status",
-                    "HSKP","RQS","Notes","Status","Carpet","Stripping","Arriving Guest"]
-    if not export_df.empty:
-        export_df = export_df[[c for c in _EXPORT_COLS if c in export_df.columns]]
+    export_df = build_export_frame(fg)
 
     # ── Build a formatted Excel workbook: the 12-column schedule up top, a 7-row
     # gap, then a pivot summary (RQS HSKP rooms, with subtotals and a grand

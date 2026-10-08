@@ -225,6 +225,85 @@ def sync_roster(path, force=False):
     return status
 
 
+# ── the 5 AM build (daily_build.py) ──────────────────────────────────────────
+BUILD_HOUR = 5
+
+
+def daily_paths(cfg):
+    """GC8 Daily Schedule.xlsx and the Arrival Reports folder sit beside the
+    synced GC8 Inspections workbook, so they're in SharePoint without anyone
+    doing anything."""
+    base = Path(cfg["workbook"]).parent if cfg.get("workbook") else None
+    wb = cfg.get("daily_workbook") or (str(base / "GC8 Daily Schedule.xlsx") if base else None)
+    arr = cfg.get("arrival_folder") or (str(base / "Arrival Reports") if base else None)
+    return wb, arr
+
+
+def read_day(cfg, day):
+    """The day's tab: the daily workbook the 5 AM build writes first, then
+    the big GC8 Inspections workbook for days built by hand."""
+    daily, _ = daily_paths(cfg)
+    found, last = [], None
+    for path in (daily, cfg.get("workbook")):
+        if path and Path(path).exists():
+            try:
+                found.append((Path(path).name,) + hs.read_workbook(path, day))
+            except LookupError as ex:
+                last = ex
+    if not found:
+        raise last or LookupError(f"No workbook with a tab for {day}")
+    name, tab, rows = found[0]
+    read_day.warning = (f"{day:%b %d} has a tab in both {found[0][0]} ('{found[0][1]}') and "
+                        f"{found[1][0]} ('{found[1][1]}'). Using {found[0][0]}; make the "
+                        "changes there." if len(found) > 1 else "")
+    return f"{tab} ({name})", rows
+
+
+def run_build(cfg, day=None, by="5 AM", publish=True):
+    """Build the day's schedule and write its tab. Never pushes to HotSOS."""
+    import daily_build
+    day = day or clock.today()
+    status = {"date": str(day), "by": by, "started_at": clock.stamp(), "status": "running"}
+    db._upsert_key(daily_build.BUILD_KEY, status)
+    try:
+        # The Schedule page builds with today's roster and saves as today's
+        # schedule; it has no notion of another day. Refuse rather than write
+        # tomorrow's rooms under today's crew.
+        if day != clock.today():
+            raise ValueError(f"Can only build today ({clock.today()}), not {day}.")
+        wb_path, arr_folder = daily_paths(cfg)
+        if not wb_path:
+            raise RuntimeError("Not set up: no GC8 Inspections workbook path (run setup).")
+        path = pull_ssrs(day, day)
+        ssrs = path.read_bytes()
+        path.unlink(missing_ok=True)
+        arr = daily_build.find_arrival_report(arr_folder, day) if arr_folder else None
+        arrival = arr.read_text(encoding="utf-8", errors="replace") if arr else ""
+        st = _state()
+        tabs = st.setdefault("tabs", {})
+        # The app's charts are replaced only if they're the 5 AM build's own (or
+        # there are none yet). A schedule somebody generated or adjusted in the
+        # app today is theirs; the build then only writes the sheet.
+        sched = db.load_full_schedule() or {}
+        mine = not sched.get("groups_data") or sched.get("generated_by") == "auto-5am"
+        status["app_saved"] = bool(publish and mine)
+        if publish and not mine:
+            log(f"build: app schedule by {sched.get('generated_by')} kept; writing the sheet only")
+        out = daily_build.build(day, ssrs, arrival, wb_path, tabs,
+                                publish=publish and mine)
+        STATE.write_text(json.dumps(st))
+        status.update(out, status="done", arrival=arr.name if arr else None,
+                      workbook=Path(wb_path).name)
+        log(f"built {day}: {out['rooms']} rooms, {out['charts']} charts, tab {out['tab']} "
+            f"{out['outcome']}; arrival report {'found' if arr else 'MISSING'}")
+    except Exception as ex:
+        status.update(status="error", error=f"{type(ex).__name__}: {ex}")
+        log(f"build failed: {traceback.format_exc()}")
+    status["finished_at"] = clock.stamp()
+    db._upsert_key(daily_build.BUILD_KEY, status)
+    return status
+
+
 # ── push / preview ───────────────────────────────────────────────────────────
 def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
     """Build the plan for `day` and, for mode 'push', send it. Returns the
@@ -240,8 +319,10 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
     try:
         import staff_names
         if mode != "staff":
-            tab, rows = hs.read_workbook(cfg["workbook"], day)
+            tab, rows = read_day(cfg, day)
             res["tab"] = tab
+            if read_day.warning:
+                res["warning"] = read_day.warning
             if only_room:
                 rows = [r for r in rows if r["room"] == only_room.upper()]
         h = _hotsos(cfg)
@@ -276,6 +357,20 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
                     errors.append(f"{who}: HTTP {st}: {str(body)[:300]}")
                 log(f"  {who}: {len(gids)} rooms -> HTTP {st}")
             res.update(sent=sent, errors=errors)
+            # The sheet is final and HotSOS has it: make the app's charts (what
+            # the phones show) say the same. Only for today -- the app holds
+            # one day's schedule.
+            if day == clock.today():
+                try:
+                    import app_sync
+                    app = app_sync.apply(plan)
+                    res["app"] = {"renamed": len(app.get("renamed", [])),
+                                  "moved": len(app.get("moved", [])),
+                                  "changed": app.get("changed", False),
+                                  "why": app.get("why", "")}
+                    log(f"  app charts: {res['app']}")
+                except Exception as ex:
+                    res.setdefault("errors", []).append(f"App charts not updated: {ex}")
         res["status"] = "done" if not res.get("errors") else "done with errors"
     except Exception as ex:
         res.update(status="error", error=f"{type(ex).__name__}: {ex}")
@@ -353,6 +448,12 @@ def run_loop():
                         "error": "The office PC isn't set up for HotSOS yet -- run "
                                  "'python hotsos_agent.py setup' on it."})
                     continue
+                if req.get("mode") == "build":
+                    run_build(cfg, _dt.date.fromisoformat(req["date"]), by=req.get("by", ""))
+                    db._upsert_key(hs.RESULT_KEY, {"id": req["id"], "mode": "build",
+                                                   "date": req["date"], "status": "done",
+                                                   "finished_at": clock.stamp()})
+                    continue
                 run_push(cfg, _dt.date.fromisoformat(req["date"]), req.get("mode", "preview"),
                          req_id=req["id"], by=req.get("by", ""))
 
@@ -364,6 +465,12 @@ def run_loop():
                     log(f"Schedule.xlsx not readable yet: {ex}")
 
             now = clock.now()
+            st_ = _state()
+            if now.hour == BUILD_HOUR and st_.get("built") != str(now.date()) and cfg.get("workbook"):
+                st_["built"] = str(now.date())
+                STATE.write_text(json.dumps(st_))
+                run_build(cfg)
+
             slot = (now.date(), now.hour)
             freq = db._load_key(hs.FORECAST_REQUEST_KEY) or {}
             asked = freq.get("id") and freq["id"] != done_fc
@@ -380,7 +487,8 @@ def run_loop():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["setup", "forecast", "roster", "staff", "preview", "push", "run"])
+    ap.add_argument("cmd", choices=["setup", "forecast", "roster", "staff", "build",
+                                    "preview", "push", "run"])
     ap.add_argument("--date", default=None)
     ap.add_argument("--only-room", default=None)
     a = ap.parse_args()
@@ -389,6 +497,10 @@ def main():
     if a.cmd == "forecast":
         for d in refresh_forecast():
             print(d)
+        return
+    if a.cmd == "build":
+        print(run_build(load_config(), _dt.date.fromisoformat(a.date) if a.date else None,
+                        by="console"))
         return
     if a.cmd == "roster":
         print(sync_roster(load_config()["staff_workbook"], force=True))
