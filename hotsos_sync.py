@@ -216,11 +216,17 @@ def match_name(sheet_name: str, attendants, saved=None):
     return hits[0] if len(hits) == 1 else None
 
 
+_VISITING = re.compile(r"\b(peak\s*7|gl\s*7)\b", re.I)   # as roster_import
+
+
 def team_members(hskp: str):
     """The people in an HSKP cell: "Jenifer S/ Ana C" -> ["Jenifer S", "Ana C"].
     Placeholders like "No HK" or "Manager" are not people."""
     parts = re.split(r"\s*(?:/|,|&|\+|\band\b|\by\b)\s*", _clean(hskp))
-    return [p for p in parts if p and _norm(p) not in _NOT_A_PERSON]
+    # Help from a sister property ("PEAK 7", "PEAK 7 - Adriana", "Jaritza
+    # GL7") isn't in this property's HotSOS; their rooms are left as they are.
+    return [p for p in parts if p and _norm(p) not in _NOT_A_PERSON
+            and not _VISITING.search(p)]
 
 
 # ── the plan ─────────────────────────────────────────────────────────────────
