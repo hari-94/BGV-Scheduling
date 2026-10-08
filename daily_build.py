@@ -368,6 +368,37 @@ def _write_summary(ws, top, frame):
             ws.cell(row=r, column=ci, value=v).font = reg
 
 
+def _save_in_place(path, data: bytes, tries=30, wait=20):
+    """Overwrite the workbook's bytes in the same file.
+
+    Saving to a temporary file and renaming it over the old one looked safe,
+    but OneDrive reads a rename as a delete plus a brand-new file: a full
+    re-upload, version history broken, and -- with the file open in Excel
+    Online at the time -- an upload that sat spinning. Writing into the same
+    file is an ordinary edit, which OneDrive uploads in seconds.
+
+    The bytes are built in memory first, so the file is only open for the
+    write itself. If Excel or OneDrive has it locked, wait and retry rather
+    than fail (or fight the sync)."""
+    import time
+    path = Path(path)
+    for attempt in range(tries):
+        try:
+            if path.exists():
+                with open(path, "r+b") as f:
+                    f.seek(0)
+                    f.write(data)
+                    f.truncate()
+            else:
+                path.write_bytes(data)
+            return
+        except PermissionError:
+            if attempt == tries - 1:
+                raise PermissionError(f"{path.name} stayed locked for {tries * wait // 60} "
+                                      "minutes (open in Excel, or OneDrive busy).")
+            time.sleep(wait)
+
+
 def write_tab(path, day: _dt.date, frame, state: dict):
     """Write `frame` as the day's tab. Returns "written", "replaced" or
     "kept (edited)". `state` remembers the fingerprint of what was written,
@@ -381,8 +412,10 @@ def write_tab(path, day: _dt.date, frame, state: dict):
         wb.remove(wb.active)
     name = tab_name(day)
     outcome = "written"
+    old_fp = None
     if name in wb.sheetnames:
-        if state.get(name) != _fingerprint(wb[name]):
+        old_fp = _fingerprint(wb[name])
+        if state.get(name) != old_fp:
             return "kept (edited)"
         wb.remove(wb[name])
         outcome = "replaced"
@@ -403,7 +436,9 @@ def write_tab(path, day: _dt.date, frame, state: dict):
                     v = int(float(v))
                 except (TypeError, ValueError):
                     v = v or ""
-            ws.cell(row=ri, column=ci, value=v if v not in (None, "nan") else "").font = reg
+            if v is None or (isinstance(v, float) and v != v) or v == "nan":
+                v = ""                         # NaN is pandas' blank; write it as one
+            ws.cell(row=ri, column=ci, value=v).font = reg
     _write_summary(ws, len(frame) + 3, frame)
     ws.freeze_panes = "A2"
     # Day tabs in date order, the newest last, and only the last month kept.
@@ -413,9 +448,13 @@ def write_tab(path, day: _dt.date, frame, state: dict):
         wb.remove(wb[s])
     wb._sheets.sort(key=lambda ws_: tab_date(ws_.title, day.year) or _dt.date.min)
     wb.active = len(wb.sheetnames) - 1
-    tmp = path.with_suffix(".tmp.xlsx")
-    wb.save(tmp)
-    tmp.replace(path)                 # one rename: OneDrive never sees a half-written file
+    # Nothing new: don't touch the file. Every save is an upload, and a
+    # rebuild that changes nothing shouldn't put the file back in the queue.
+    if old_fp is not None and _fingerprint(ws) == old_fp:
+        return "unchanged"
+    buf = io.BytesIO()
+    wb.save(buf)
+    _save_in_place(path, buf.getvalue())
     state[name] = _fingerprint(openpyxl.load_workbook(path)[name])
     return outcome
 
