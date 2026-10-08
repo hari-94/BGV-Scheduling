@@ -105,6 +105,93 @@ def card(state, title, main, sub="", fix=""):
             + (f'<div class="hl-fix">→ {fix}</div>' if fix else "") + "</div>")
 
 
+# ── the process, drawn ───────────────────────────────────────────────────────
+# Where each step sits (x, y) on a 1180 x 330 canvas, and what it's called.
+_NODES = {
+    "email":  (20, 20,  "Front desk email", "Arrival Report"),
+    "flow":   (200, 20, "Power Automate", "saves it to SharePoint"),
+    "arr":    (380, 20, "Arrival Reports", "SharePoint folder"),
+    "ssrs":   (20, 135, "SSRS", "Housekeeping Dashboard"),
+    "staff":  (20, 250, "Schedule.xlsx", "staff roster"),
+    "agent":  (380, 135, "Office PC", "agent"),
+    "build":  (560, 135, "5 AM build", "app's Generate"),
+    "sheet":  (740, 135, "Daily sheet", "GC8 Daily Schedule"),
+    "push":   (920, 135, "Edit → Push", "RQS, when final"),
+    "hotsos": (1020, 250, "HotSOS", "room assignments"),
+    "db":     (560, 250, "App database", "Supabase"),
+    "app":    (740, 250, "App & phones", "charts · forecast"),
+}
+_EDGES = [("email", "flow"), ("flow", "arr"), ("arr", "agent"), ("ssrs", "agent"),
+          ("staff", "agent"), ("agent", "build"), ("build", "sheet"), ("sheet", "push"),
+          ("push", "hotsos"), ("agent", "db"), ("db", "app"), ("push", "db")]
+_W, _H = 150, 60
+_RANK = {"bad": 3, "warn": 2, "idle": 1, "ok": 0, "human": 0}
+_COL = {"ok": "#0ca30c", "warn": "#e8a200", "bad": "#d03b3b", "idle": "#9aa3ae", "human": "#2a78d6"}
+_WORD = {"ok": "OK", "warn": "Check", "bad": "Down", "idle": "Waiting", "human": "People"}
+
+
+def flow_svg(state):
+    """The morning as a diagram. Healthy links carry moving dots; a link out
+    of (or into) a step that's down turns red, stops, and is crossed out --
+    so where the chain is broken reads at a glance."""
+    parts = []
+    for a, b in _EDGES:
+        ax, ay = _NODES[a][0] + _W, _NODES[a][1] + _H / 2
+        bx, by = _NODES[b][0], _NODES[b][1] + _H / 2
+        if b == "hotsos":                      # down from Push into HotSOS
+            ax, ay = _NODES[a][0] + _W / 2 + 20, _NODES[a][1] + _H
+            bx, by = _NODES[b][0] + _W / 2, _NODES[b][1]
+            d = f"M{ax},{ay} C{ax},{ay + 50} {bx},{by - 50} {bx},{by}"
+        elif a == "push" and b == "db":        # Push also updates the app's charts
+            ax, ay = _NODES[a][0] + 20, _NODES[a][1] + _H
+            bx, by = _NODES[b][0] + _W / 2, _NODES[b][1]
+            d = f"M{ax},{ay} C{ax},{ay + 30} {bx},{by - 45} {bx},{by}"
+        else:
+            mx = (ax + bx) / 2
+            d = f"M{ax},{ay} C{mx},{ay} {mx},{by} {bx},{by}"
+        worst = max(state.get(a, "idle"), state.get(b, "idle"), key=lambda s: _RANK[s])
+        cls = {"bad": "e-bad", "warn": "e-warn"}.get(worst, "e-ok")
+        parts.append(f'<path class="edge {cls}" d="{d}"/>')
+        if worst == "bad":
+            cx, cy = (ax + bx) / 2, (ay + by) / 2
+            parts.append(f'<g class="x"><circle cx="{cx}" cy="{cy}" r="9"/>'
+                         f'<text x="{cx}" y="{cy + 4}">✕</text></g>')
+    for k, (x, y, title, sub) in _NODES.items():
+        s = state.get(k, "idle")
+        col = _COL[s]
+        pulse = ' class="pulse"' if s == "bad" else ""
+        parts.append(
+            f'<g{pulse}><rect x="{x}" y="{y}" width="{_W}" height="{_H}" rx="12" '
+            f'fill="#ffffff" stroke="{col}" stroke-width="{3 if s in ("bad", "warn") else 2}"/>'
+            f'<circle cx="{x + 16}" cy="{y + 18}" r="5" fill="{col}"/>'
+            f'<text class="nt" x="{x + 28}" y="{y + 22}">{html.escape(title)}</text>'
+            f'<text class="ns" x="{x + 14}" y="{y + 41}">{html.escape(sub)}</text>'
+            f'<text class="nw" x="{x + _W - 10}" y="{y + 52}" fill="{col}" '
+            f'text-anchor="end">{_WORD[s]}</text></g>')
+    # Returned as a self-contained SVG image: st.html sanitises inline <svg>
+    # away, but an <img> of an SVG keeps its own <style> -- animations included.
+    svg = ("""<svg xmlns="http://www.w3.org/2000/svg" class="pf" viewBox="0 0 1190 330"
+ font-family="DM Sans, Segoe UI, Helvetica, Arial, sans-serif"><style>
+.pf{background:#fff}
+.pf .edge{fill:none;stroke-width:2.5;stroke-linecap:round}
+.pf .e-ok{stroke:#86b6ef;stroke-dasharray:6 8;animation:pf-run 1.1s linear infinite}
+.pf .e-warn{stroke:#e8a200;stroke-dasharray:6 8;animation:pf-run 2.6s linear infinite}
+.pf .e-bad{stroke:#d03b3b;stroke-dasharray:3 6}
+@keyframes pf-run{to{stroke-dashoffset:-28}}
+.pf .x circle{fill:#d03b3b}.pf .x text{fill:#fff;font-size:11px;font-weight:700;text-anchor:middle}
+.pf .nt{font-size:13px;font-weight:700;fill:#16202e}
+.pf .ns{font-size:10.5px;fill:#5b6675}.pf .nw{font-size:10.5px;font-weight:700}
+.pf .pulse rect{animation:pf-pulse 1.4s ease-in-out infinite}
+@keyframes pf-pulse{0%,100%{stroke-opacity:1}50%{stroke-opacity:.25}}
+@media (prefers-reduced-motion:reduce){.pf .edge,.pf .pulse rect{animation:none}}
+</style><rect width="1190" height="330" fill="#ffffff"/>"""
+           + "".join(parts) + "</svg>")
+    import base64
+    data = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return (f'<img src="data:image/svg+xml;base64,{data}" alt="The morning process, step by '
+            f'step, with the health of each step" style="width:100%;height:auto;'
+            f'border:1px solid #e6e9ee;border-radius:14px;background:#fff"/>')
+
 st.markdown("## 🩺 Health")
 st.caption("Every part of the morning, as it last reported. Refreshes every 15 seconds.")
 
@@ -290,6 +377,14 @@ def health():
     else:
         st.markdown('<div class="hl-banner hl-ok">✓ Everything is running</div>',
                     unsafe_allow_html=True)
+    # The cards are made in a fixed order; name them for the diagram.
+    agent_s, db_s, ssrs_s, sync_s, build_s, _ahead_s, arr_s, hot_s, files_s, app_s = states
+    st.markdown(flow_svg({
+        "email": arr_s, "flow": arr_s, "arr": files_s, "ssrs": ssrs_s, "staff": sync_s,
+        "agent": agent_s, "build": build_s, "sheet": build_s, "push": "human",
+        "hotsos": hot_s, "db": db_s, "app": app_s}), unsafe_allow_html=True)
+    st.caption("Moving lines: data flowing normally · amber: worth a look · red ✕: broken "
+               "there — see that step's card below.")
     cols = st.columns(3)
     for i, c in enumerate(cards):
         cols[i % 3].markdown(c, unsafe_allow_html=True)
