@@ -167,10 +167,18 @@ class _NoWrites:
             setattr(self.db, name, f)
 
 
-def generate(room_text: str, arrival_text: str, publish=True, timeout=900):
+def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=None):
     """Run the Schedule page's Generate with these inputs. Returns the groups
     (charts) it produced. With publish=True the page saves them as today's
-    schedule, exactly as a person pressing Generate would."""
+    schedule, exactly as a person pressing Generate would.
+
+    `day` other than today builds a look-ahead: that day's roster is put on
+    the page before Generate, and nothing is saved (the app holds one day's
+    schedule, today's)."""
+    import clock
+    ahead = day is not None and day != clock.today()
+    if ahead and publish:
+        raise ValueError("A day other than today can only be built as a preview (publish=False).")
     from contextlib import nullcontext
     from streamlit.testing.v1 import AppTest
     with (nullcontext() if publish else _NoWrites()):
@@ -180,7 +188,10 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900):
             at.session_state[k] = v
         at.run()                                   # first open: today's roster is applied
         _raise(at, "opening the Schedule page")
-        _day_roles(at)
+        if ahead:
+            _apply_roster(at, day.isoformat())
+        else:
+            _day_roles(at)
         at.text_area(key="room_input").set_value(room_text)
         at.text_area(key="email_input").set_value(arrival_text or "")
         next(b for b in at.button if b.label == "Generate").click()
@@ -217,6 +228,44 @@ def _day_roles(at):
     for k in ("rqs1", "rqs2"):
         if not (at.session_state[k] if k in at.session_state else None) and update.get(k):
             at.session_state[k] = update[k]
+
+
+def _apply_roster(at, iso):
+    """Put `iso`'s roster on the page, the way its own _auto_apply_today does
+    for today: attendance merged with the standing roster, inspectors, RQS 1
+    and 2, the Daily Service team -- and the attendance boxes re-keyed and the
+    RQS dropdowns pointed at the right people, or the page's widgets would
+    write today's values straight back over them."""
+    import db
+    import roster_import as ri
+    wk = ri.find_week_key(db.staff_week_keys(), iso)
+    week = db.load_staff_week(wk) if wk else None
+    if not week:
+        raise LookupError(f"No week in the staff schedule covers {iso}.")
+    hk = at.session_state["hk_roster"] if "hk_roster" in at.session_state else {}
+    update = ri.day_roster(week, db.load_staff_overrides(), wk, iso, hk)
+    if not update:
+        raise LookupError(f"The staff schedule has no entries for {iso}.")
+    roster = ri.merge_roster(update, hk, keep_missing=True)
+    insp = dict(update["insp_roster"])
+    for name in (at.session_state["insp_roster"] if "insp_roster" in at.session_state else {}):
+        insp.setdefault(name, False)
+    at.session_state["hk_roster"] = roster
+    at.session_state["insp_roster"] = insp
+    at.session_state["rqs1"] = update["rqs1"]
+    at.session_state["rqs2"] = update["rqs2"]
+    at.session_state["ds_team"] = [n for n in update["ds_team"]
+                                   if roster.get(n, {}).get("present")]
+    gen = at.session_state["_att_gen"] if "_att_gen" in at.session_state else 0
+    at.session_state["_att_gen"] = gen + 1
+    at.run()                 # the page draws the day's attendance boxes first ...
+    # ... and only then are the day's inspectors among the RQS dropdowns'
+    # options; picking one before that fails with "not in list".
+    none = "— none —"                       # the page's RQS_NONE
+    for sel, val in (("rqs1_sel", update["rqs1"]), ("rqs2_sel", update["rqs2"])):
+        opts = list(at.selectbox(key=sel).options)
+        at.selectbox(key=sel).set_value(val if val in opts else none)
+    at.run()
 
 
 def _raise(at, step):
@@ -338,7 +387,7 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
     excel_to_room_text, build_export_frame = borrow("excel_to_room_text",
                                                     "build_export_frame")
     room_text, n_rooms, _sheet = excel_to_room_text(io.BytesIO(ssrs_xlsx))
-    fg = generate(room_text, arrival_text, publish=publish)
+    fg = generate(room_text, arrival_text, publish=publish, day=day)
     frame = assign_dust_n_vac(build_export_frame(fg))
     outcome = write_tab(workbook_path, day, frame, state)
     staffed = sorted({g.get("housekeeper") for g in fg if g.get("housekeeper")})

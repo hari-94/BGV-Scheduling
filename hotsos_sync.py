@@ -31,6 +31,8 @@ FORECAST_KEY = "ssrs_forecast"          # {pulled_at, days: [...], warnings}
 FORECAST_REQUEST_KEY = "ssrs_forecast_request"   # {id, by, at}
 HEARTBEAT_KEY = "hotsos_agent_heartbeat"         # {at, host}
 ROSTER_STATUS_KEY = "roster_sync_status"         # last Schedule.xlsx import
+HEALTH_KEY = "agent_health"                      # the agent's own report, every minute
+EVENTS_KEY = "agent_events"                      # its last 80 log lines, newest last
 
 # What a row of the plan can say. The page colours by these.
 ASSIGN = "assign"            # will be (or was) assigned

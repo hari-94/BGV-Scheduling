@@ -66,8 +66,59 @@ POLL_SECONDS = 30
 REQUEST_MAX_AGE = 10 * 60   # a press older than this is not run -- see run_loop
 
 
+_EVENTS = []          # the last lines of the log, for the Health page
+_ERRORS_RE = ("fail", "error", "traceback", "expired", "not readable", "missing")
+
+
 def log(msg):
     print(f"[{clock.now():%Y-%m-%d %H:%M:%S}] {msg}", flush=True)
+    first = str(msg).strip().splitlines()[0][:300] if str(msg).strip() else ""
+    if first:
+        bad = any(w in first.lower() for w in _ERRORS_RE)
+        _EVENTS.append({"at": clock.stamp(), "msg": first, "level": "error" if bad else "info"})
+        del _EVENTS[:-80]
+
+
+def _file_info(path):
+    try:
+        p = Path(path)
+        if not p.exists():
+            return {"exists": False}
+        return {"exists": True, "modified": _dt.datetime.fromtimestamp(
+            p.stat().st_mtime, clock.MTN).isoformat(timespec="seconds")}
+    except Exception as ex:
+        return {"exists": False, "error": str(ex)}
+
+
+def report_health(cfg, started_at):
+    """What the Health page shows about this PC: what it can see, what it
+    last did, what it will do next. Written every minute with the heartbeat."""
+    import daily_build
+    wb_daily, arr = daily_paths(cfg) if cfg.get("workbook") else (None, None)
+    today = clock.today()
+    tomorrow = today + _dt.timedelta(days=1)
+    reports = {}
+    for d in (today, tomorrow):
+        p = daily_build.find_arrival_report(arr, d) if arr else None
+        reports[str(d)] = ({"name": p.name, **_file_info(p)} if p else None)
+    now = clock.now()
+    next_fc = next((now.replace(hour=h, minute=0, second=0, microsecond=0)
+                    for h in sorted(FORECAST_HOURS) if h > now.hour), None)
+    next_build = now.replace(hour=BUILD_HOUR, minute=0, second=0, microsecond=0)
+    if now.hour >= BUILD_HOUR:
+        next_build += _dt.timedelta(days=1)
+    db._upsert_key(hs.HEALTH_KEY, {
+        "at": clock.stamp(), "host": socket.gethostname(), "started_at": started_at,
+        "set_up": bool(cfg.get("workbook")), "hotsos_user": bool(cfg.get("hotsos_user")),
+        "files": {"GC8 Inspections 2026.xlsx": _file_info(cfg.get("workbook") or ""),
+                  "GC8 Daily Schedule.xlsx": _file_info(wb_daily or ""),
+                  "Schedule.xlsx": _file_info(cfg.get("staff_workbook") or ""),
+                  "Arrival Reports folder": _file_info(arr or "")},
+        "arrival_reports": reports,
+        "next": {"forecast": next_fc.isoformat(timespec="minutes") if next_fc else None,
+                 "build": next_build.isoformat(timespec="minutes")},
+    })
+    db._upsert_key(hs.EVENTS_KEY, {"events": _EVENTS[-80:]})
 
 
 # ── config ───────────────────────────────────────────────────────────────────
@@ -263,14 +314,17 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
     """Build the day's schedule and write its tab. Never pushes to HotSOS."""
     import daily_build
     day = day or clock.today()
-    status = {"date": str(day), "by": by, "started_at": clock.stamp(), "status": "running"}
-    db._upsert_key(daily_build.BUILD_KEY, status)
+    # A later day is a look-ahead: built from that day's rooms and roster,
+    # written as its tab, never saved to the app (which holds today only).
+    ahead = day > clock.today()
+    key = daily_build.BUILD_KEY + ("_ahead" if ahead else "")
+    publish = publish and not ahead
+    status = {"date": str(day), "by": by, "started_at": clock.stamp(), "status": "running",
+              "ahead": ahead}
+    db._upsert_key(key, status)
     try:
-        # The Schedule page builds with today's roster and saves as today's
-        # schedule; it has no notion of another day. Refuse rather than write
-        # tomorrow's rooms under today's crew.
-        if day != clock.today():
-            raise ValueError(f"Can only build today ({clock.today()}), not {day}.")
+        if day < clock.today():
+            raise ValueError(f"{day} has passed; only today or a later day can be built.")
         wb_path, arr_folder = daily_paths(cfg)
         if not wb_path:
             raise RuntimeError("Not set up: no GC8 Inspections workbook path (run setup).")
@@ -285,7 +339,7 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
         # there are none yet). A schedule somebody generated or adjusted in the
         # app today is theirs; the build then only writes the sheet.
         sched = db.load_full_schedule() or {}
-        mine = not sched.get("groups_data") or sched.get("generated_by") == "auto-5am"
+        mine = (not sched.get("groups_data") or sched.get("generated_by") == "auto-5am")             and not ahead
         status["app_saved"] = bool(publish and mine)
         if publish and not mine:
             log(f"build: app schedule by {sched.get('generated_by')} kept; writing the sheet only")
@@ -300,7 +354,7 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
         status.update(status="error", error=f"{type(ex).__name__}: {ex}")
         log(f"build failed: {traceback.format_exc()}")
     status["finished_at"] = clock.stamp()
-    db._upsert_key(daily_build.BUILD_KEY, status)
+    db._upsert_key(key, status)
     return status
 
 
@@ -404,6 +458,7 @@ def _print_plan(res):
 # ── the loop ─────────────────────────────────────────────────────────────────
 def run_loop():
     cfg = load_config(required=False)
+    started_at = clock.stamp()
     log(f"agent up on {socket.gethostname()}; workbook {cfg.get('workbook') or '(not set up)'}")
     done_req = (db._load_key(hs.RESULT_KEY) or {}).get("id")
     done_fc = None
@@ -415,6 +470,10 @@ def run_loop():
                 db._upsert_key(hs.HEARTBEAT_KEY, {"at": clock.stamp(),
                                                   "host": socket.gethostname()})
                 last_beat = time.time()
+                try:
+                    report_health(load_config(required=False), started_at)
+                except Exception as ex:
+                    print(f"health report failed: {ex}", flush=True)
 
             req = db._load_key(hs.REQUEST_KEY) or {}
             if req.get("id") and req["id"] != done_req:
