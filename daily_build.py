@@ -291,6 +291,27 @@ def write_tab(path, day: _dt.date, frame, state: dict):
     return outcome
 
 
+def assign_dust_n_vac(frame):
+    """Dust n Vac is RQS 2's round: in the sheet, RQS 2 is its housekeeper too.
+
+    The app leaves HSKP empty on those rows (no housekeeper wants the round),
+    which left HotSOS with nobody to give the rooms to; the team filled in RQS 2
+    by hand every morning. The RQS column of a Dust n Vac row already names
+    that day's RQS 2, so it's copied across where HSKP is empty."""
+    if frame is None or frame.empty or "Service" not in frame.columns:
+        return frame
+    frame = frame.copy()
+    hskp = frame["HSKP"].fillna("").astype(str).str.strip()
+    rqs = frame["RQS"].fillna("").astype(str).str.strip()
+    dv = frame["Service"].fillna("").astype(str).str.strip().str.lower().eq("dust n vac")
+    # The app writes the placeholder "RQS 2" when the staff schedule names
+    # nobody for the role that day; that isn't a person HotSOS knows.
+    placeholder = rqs.str.lower().str.replace(r"[^a-z0-9]", "", regex=True).isin(["rqs2", "rq2"])
+    fill = dv & hskp.eq("") & rqs.ne("") & ~placeholder
+    frame.loc[fill, "HSKP"] = frame.loc[fill, "RQS"]
+    return frame
+
+
 def tab_edited(path, day: _dt.date, state: dict) -> bool:
     """Has anyone changed the day's tab since it was written?"""
     import openpyxl
@@ -318,8 +339,10 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
                                                     "build_export_frame")
     room_text, n_rooms, _sheet = excel_to_room_text(io.BytesIO(ssrs_xlsx))
     fg = generate(room_text, arrival_text, publish=publish)
-    frame = build_export_frame(fg)
+    frame = assign_dust_n_vac(build_export_frame(fg))
     outcome = write_tab(workbook_path, day, frame, state)
     staffed = sorted({g.get("housekeeper") for g in fg if g.get("housekeeper")})
+    dv = frame[frame["Service"].fillna("").str.strip().str.lower().eq("dust n vac")]         if not frame.empty else frame
+    dv_blank = int((dv["HSKP"].fillna("").astype(str).str.strip() == "").sum()) if len(dv) else 0
     return {"rooms": int(n_rooms), "charts": len(fg), "housekeepers": len(staffed),
-            "tab": tab_name(day), "outcome": outcome}
+            "tab": tab_name(day), "outcome": outcome, "dv_unassigned": dv_blank}

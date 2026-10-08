@@ -109,6 +109,10 @@ if _b.get("date") == clock.today_iso() and _b.get("status") == "done":
         f"{_ago(_age(_b.get('finished_at')))} by {_b.get('by')} · {_b.get('rooms')} rooms, "
         f"{_b.get('charts')} charts · {_arr}"
         + (" · *kept: someone has edited it*" if "edited" in str(_b.get("outcome")) else ""))
+    if _b.get("dv_unassigned"):
+        st.warning(f"No RQS 2 on today's staff schedule, so {_b['dv_unassigned']} Dust n Vac "
+                   "rooms have no one in HSKP. Put today's RQS 2 on them in the sheet before "
+                   "pushing — or mark RQS 2 in Schedule.xlsx and the 5 AM draft fills them in.")
 elif _b.get("status") == "running":
     _bc1.info("⏳ Building today's sheet…")
 elif _b.get("status") == "error" and _b.get("date") == clock.today_iso():
