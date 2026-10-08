@@ -113,7 +113,7 @@ def find_arrival_report(folder, day: _dt.date):
     if not folder.exists():
         return None
     hits = []
-    for p in folder.glob("*.txt"):
+    for p in [*folder.glob("*.txt"), *folder.glob("*.htm*")]:
         m = re.search(r"(\d{1,2})[-._ ](\d{1,2})[-._ ](\d{2,4})", p.stem)
         if not m:
             continue
@@ -125,6 +125,24 @@ def find_arrival_report(folder, day: _dt.date):
         except ValueError:
             pass
     return max(hits, key=lambda p: p.stat().st_mtime) if hits else None
+
+
+def read_arrival_report(path) -> str:
+    """The report as plain text. The flow may save the e-mail body as HTML
+    (Outlook's own, with <p>/<br>/<div> for every line); the Schedule page's
+    parse_email_notes wants one line per line, so the tags are turned back
+    into line breaks here rather than needing a conversion step in the flow."""
+    import html as _html
+    raw = Path(path).read_text(encoding="utf-8", errors="replace")
+    if "<" not in raw or not re.search(r"<(html|body|div|p|br|span|table)\b", raw, re.I):
+        return raw
+    raw = re.sub(r"(?is)<(script|style|head)\b.*?</\1>", "", raw)
+    raw = re.sub(r"(?i)<br\s*/?>", "\n", raw)
+    raw = re.sub(r"(?i)</(p|div|li|tr|h\d)>", "\n", raw)
+    raw = re.sub(r"<[^>]+>", "", raw)
+    text = _html.unescape(raw).replace("\xa0", " ")
+    text = "\n".join(l.rstrip() for l in text.splitlines())
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 # ── Generate, as the page does it ────────────────────────────────────────────

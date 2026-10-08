@@ -278,7 +278,7 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
         ssrs = path.read_bytes()
         path.unlink(missing_ok=True)
         arr = daily_build.find_arrival_report(arr_folder, day) if arr_folder else None
-        arrival = arr.read_text(encoding="utf-8", errors="replace") if arr else ""
+        arrival = daily_build.read_arrival_report(arr) if arr else ""
         st = _state()
         tabs = st.setdefault("tabs", {})
         # The app's charts are replaced only if they're the 5 AM build's own (or
