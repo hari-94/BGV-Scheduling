@@ -58,6 +58,11 @@ def save(raw: bytes, file_name: str, by: str, incoming=None, n_sheets=None,
         incoming, n_sheets = parse(raw)
     if not incoming:
         raise ValueError("No dated sheets found -- is this the weekly schedule workbook?")
+    # The sheet keeps whatever spelling the team types; what's stored is the
+    # HotSOS full name (staff_names). Idempotent, so a caller that already
+    # renamed (Roster Import, for its diff) loses nothing.
+    import staff_names
+    incoming = staff_names.rename_weeks(incoming, staff_names.aliases())
     stored = db.load_staff_weeks() if stored is None else stored
     d = ri.diff_all(stored, incoming)
     touched = set(d["new_weeks"]) | set(d["changed_weeks"])

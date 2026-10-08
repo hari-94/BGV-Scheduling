@@ -346,6 +346,10 @@ with tab_sync:
         except Exception as ex:
             st.error(f"Could not read that workbook: {ex}")
             st.stop()
+        # Stored weeks use HotSOS full names (staff_names); rename the upload
+        # the same way, or the diff below shows every renamed person as gone.
+        import staff_names
+        incoming = staff_names.rename_weeks(incoming, staff_names.aliases())
         if not incoming:
             st.error("No dated sheets found — is this the weekly schedule workbook?")
             st.stop()

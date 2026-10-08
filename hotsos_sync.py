@@ -193,20 +193,24 @@ def match_name(sheet_name: str, attendants, saved=None):
     by_label = {_norm(a["label"]): a for a in attendants}
     if saved and sheet_name in saved:
         return by_label.get(_norm(saved[sheet_name]))
-    n = _norm(sheet_name)
+    # The staff sheet appends the section to a name: "Adrian – Houseperson PM".
+    n = _norm(re.split(r"\s+[–—-]\s+", _clean(sheet_name))[0])
     if not n:
         return None
     if n in by_label:
         return by_label[n]
     parts = n.split()
-    first = parts[0]
-    initial = parts[1][0] if len(parts) > 1 and len(parts[1]) == 1 else None
+    first, rest = parts[0], parts[1:]
     hits = []
     for a in attendants:
         ap = _norm(a["label"]).split()
         if not ap or ap[0] != first:
             continue
-        if initial and not (len(ap) > 1 and ap[-1].startswith(initial)):
+        # Whatever follows the first name has to agree with HotSOS's: an
+        # initial ("Danny R."), or the start of a last name ("Cecilia Ang").
+        # "Jennifer Cortez" is not "Jennifer Humphrey-Sledge" just because
+        # HotSOS has only one Jennifer.
+        if rest and not any(t.startswith(rest[0]) for t in ap[1:]):
             continue
         hits.append(a)
     return hits[0] if len(hits) == 1 else None

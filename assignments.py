@@ -37,6 +37,24 @@ def match_name(names, *candidates):
                     if norm(h).startswith(n) or n.startswith(norm(h))), None)
         if hit:
             return hit
+    # A work sign-in against a full name: "rmejia@..." is Rosibel Mejia,
+    # "jenifers@..." is Jenifer Santana. Only once the schedule carries full
+    # names (staff_names) is there a last name to match, and only a single
+    # hit counts.
+    for cand in candidates:
+        local = norm(str(cand or "").split("@")[0])
+        if len(local) < 4:
+            continue
+        hits = []
+        for h in names:
+            t = [norm(x) for x in str(h).split() if norm(x)]
+            if len(t) < 2:
+                continue
+            # Any surname: "lperez" is Lorena Perez Caballero.
+            if any(local in (t[0][0] + x, t[0] + x[0], t[0] + x) for x in t[1:]):
+                hits.append(h)
+        if len(hits) == 1:
+            return hits[0]
     return None
 
 

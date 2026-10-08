@@ -63,6 +63,7 @@ SITE_ID = 8                         # Grand Colorado on Peak 8
 FORECAST_DAYS = 21
 FORECAST_HOURS = set(range(8, 21, 2))           # 08, 10 ... 20, property time
 POLL_SECONDS = 30
+REQUEST_MAX_AGE = 10 * 60   # a press older than this is not run -- see run_loop
 
 
 def log(msg):
@@ -230,16 +231,32 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
     result dict that is stored for the page."""
     res = {"id": req_id or uuid.uuid4().hex, "date": str(day), "mode": mode, "by": by,
            "status": "running", "started_at": clock.stamp()}
-    db._upsert_key(hs.RESULT_KEY, res)
+    # Only a run the page asked for answers on the page. A console run used to
+    # write here too, and replaced the answer to a push someone was waiting on.
+    store = req_id is not None
+    if store:
+        db._upsert_key(hs.RESULT_KEY, res)
     h = None
     try:
-        tab, rows = hs.read_workbook(cfg["workbook"], day)
-        res["tab"] = tab
-        if only_room:
-            rows = [r for r in rows if r["room"] == only_room.upper()]
+        import staff_names
+        if mode != "staff":
+            tab, rows = hs.read_workbook(cfg["workbook"], day)
+            res["tab"] = tab
+            if only_room:
+                rows = [r for r in rows if r["room"] == only_room.upper()]
         h = _hotsos(cfg)
         attendants = h.attendants()
-        plan = hs.build_plan(rows, h.rooms(), attendants, db._load_key(hs.NAMES_KEY) or {})
+        # HotSOS's own list is the directory's source of full names; keep it
+        # fresh every time we're signed in anyway.
+        db._upsert_key(staff_names.ATTENDANTS_KEY, {"pulled_at": clock.stamp(),
+                                                   "attendants": attendants})
+        if mode == "staff":
+            res.update(status="done", attendants=[a["label"] for a in attendants])
+            return res
+        # The approved directory first; the older per-push name table still
+        # counts for anything it doesn't cover.
+        names = dict(db._load_key(hs.NAMES_KEY) or {}, **staff_names.aliases())
+        plan = hs.build_plan(rows, h.rooms(), attendants, names)
         res.update(plan=plan, attendants=[a["label"] for a in attendants],
                    **hs.summary(plan))
         if mode == "push":
@@ -267,7 +284,8 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
         if h:
             h.close()
         res["finished_at"] = clock.stamp()
-        db._upsert_key(hs.RESULT_KEY, res)
+        if store:
+            db._upsert_key(hs.RESULT_KEY, res)
     return res
 
 
@@ -302,6 +320,21 @@ def run_loop():
             req = db._load_key(hs.REQUEST_KEY) or {}
             if req.get("id") and req["id"] != done_req:
                 done_req = req["id"]
+                # A Push must happen when it was pressed or not at all: after
+                # an outage the agent once ran an hour-old Push against a sheet
+                # that had changed since.
+                try:
+                    age = (clock.now() - _dt.datetime.fromisoformat(req["at"])).total_seconds()
+                except Exception:
+                    age = 0
+                if age > REQUEST_MAX_AGE:
+                    log(f"{req.get('mode')} from {req.get('at')} expired ({int(age // 60)} min old)")
+                    db._upsert_key(hs.RESULT_KEY, {
+                        "id": req["id"], "date": req.get("date"), "mode": req.get("mode"),
+                        "by": req.get("by", ""), "status": "error", "finished_at": clock.stamp(),
+                        "error": f"Not run: the office PC got this {int(age // 60)} minutes after "
+                                 "it was pressed (offline?). Press it again."})
+                    continue
                 log(f"{req.get('mode')} for {req.get('date')} requested by {req.get('by')}")
                 cfg = load_config(required=False)    # pick up a re-run of setup
                 # The loop runs for days; re-read the sheet logic so a fix to it
@@ -343,7 +376,7 @@ def run_loop():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["setup", "forecast", "roster", "preview", "push", "run"])
+    ap.add_argument("cmd", choices=["setup", "forecast", "roster", "staff", "preview", "push", "run"])
     ap.add_argument("--date", default=None)
     ap.add_argument("--only-room", default=None)
     a = ap.parse_args()

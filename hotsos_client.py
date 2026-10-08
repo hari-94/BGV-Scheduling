@@ -26,7 +26,7 @@ START = HOST + "/service-optimization/operations/housekeeping/attendant-producti
 
 _ROOM_CODE = ("roomNumber", "room", "roomName", "roomCode", "locationName", "name")
 _ROOM_GID = ("roomGlobalId", "globalId", "roomId", "id")
-_ROOM_SVC = ("serviceName", "service", "cleanType", "serviceType", "reservationStatus")
+_ROOM_SVC = ("taskNameStr", "serviceName", "service", "cleanType", "serviceType")
 _PERSON_ID = ("id", "personId", "attendantId", "roomAttendantId")
 _PERSON_NAME = ("label", "name", "personName", "fullName", "attendantName")
 
@@ -151,9 +151,12 @@ class HotSOS:
                 "shift": self.shift, "includeCount": True, "filters": {},
                 "search": []}, {"takePerPage": 200}):
             code = str(_pick(r, _ROOM_CODE, "room number")).upper().strip()
+            # The board's own assignedTo is the truth; the timeline leaves
+            # rooms out (1422E, assigned and awaiting service, wasn't on it),
+            # and a room it missed looked unassigned on every preview.
             out[code] = {"gid": _pick(r, _ROOM_GID, "room id"),
                          "service": str(next((r[k] for k in _ROOM_SVC if r.get(k)), "")),
-                         "assigned_to": holder.get(code, "")}
+                         "assigned_to": str(r.get("assignedTo") or holder.get(code, ""))}
         return out
 
     # ── write ──────────────────────────────────────────────────────────────
