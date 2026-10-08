@@ -292,28 +292,54 @@ def daily_paths(cfg):
 
 def read_day(cfg, day):
     """The day's tab: the daily workbook the 5 AM build writes first, then
-    the big GC8 Inspections workbook for days built by hand."""
+    the big GC8 Inspections workbook for days built by hand.
+
+    Read live from SharePoint at the moment of the press (sharepoint.fetch),
+    so an edit made seconds ago in Excel Online is in -- the synced copy on
+    this PC trails it by up to a minute. If SharePoint can't be reached the
+    synced copy is used, and read_day.source says which it was and why.
+    The big workbook is only downloaded (13 s, 3 MB) if the daily one has no
+    tab for the day; whether it *also* has one is checked on the synced copy,
+    which is only for the warning."""
+    import io
+    import sharepoint
     daily, _ = daily_paths(cfg)
-    found, last = [], None
+    read_day.source, read_day.by, read_day.warning = "", "", ""
+    found, last, why = [], None, ""
     for path in (daily, cfg.get("workbook")):
-        if path and Path(path).exists():
-            try:
+        if not path:
+            continue
+        name = Path(path).name
+        if found:                                   # duplicate check only
+            if Path(path).exists():
+                try:
+                    found.append((name,) + hs.read_workbook(path, day) + (None, "", "synced"))
+                except LookupError:
+                    pass
+            continue
+        data, info = sharepoint.fetch(name)
+        try:
+            if data is not None:
+                t = _dt.datetime.fromisoformat(info["modified"].replace("Z", "+00:00"))
+                found.append((name,) + hs.read_workbook(io.BytesIO(data), day)
+                             + (t.astimezone(clock.MTN), info.get("by", ""), "live"))
+            elif Path(path).exists():
+                why = why or info.get("error", "")
                 saved = _dt.datetime.fromtimestamp(Path(path).stat().st_mtime, clock.MTN)
-                found.append((Path(path).name,) + hs.read_workbook(path, day) + (saved,))
-            except LookupError as ex:
-                last = ex
+                found.append((name,) + hs.read_workbook(path, day) + (saved, "", "synced"))
+        except LookupError as ex:
+            last = ex
     if not found:
         raise last or LookupError(f"No workbook with a tab for {day}")
-    name, tab, rows, saved = found[0]
-    # When this PC's copy was last written -- by OneDrive bringing down the
-    # RQS's edits. The page shows it, so an edit made seconds before the press
-    # (not synced down yet) is visible as missing rather than silently absent.
+    name, tab, rows, saved, by, source = found[0]
     read_day.saved_at = saved.isoformat(timespec="seconds")
+    read_day.by = by
+    read_day.source = ("live from SharePoint" if source == "live" else
+                       "the synced copy on the office PC" + (f" (SharePoint: {why})" if why else ""))
     read_day.warning = (f"{day:%b %d} has a tab in both {found[0][0]} ('{found[0][1]}') and "
                         f"{found[1][0]} ('{found[1][1]}'). Using {found[0][0]}; make the "
                         "changes there." if len(found) > 1 else "")
     return f"{tab} ({name})", rows
-
 
 def run_build(cfg, day=None, by="5 AM", publish=True):
     """Build the day's schedule and write its tab. Never pushes to HotSOS."""
@@ -385,6 +411,8 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
             tab, rows = read_day(cfg, day)
             res["tab"] = tab
             res["sheet_saved_at"] = getattr(read_day, "saved_at", None)
+            res["sheet_by"] = getattr(read_day, "by", "")
+            res["sheet_source"] = getattr(read_day, "source", "")
             if read_day.warning:
                 res["warning"] = read_day.warning
             if only_room:

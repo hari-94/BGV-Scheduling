@@ -162,8 +162,11 @@ def result_panel():
             f"{res.get('by', '')} · {_ago(_age(res.get('finished_at')))}")
     if res.get("sheet_saved_at"):
         _sv = _dt.datetime.fromisoformat(res["sheet_saved_at"]).astimezone(clock.MTN)
-        head += (f"  \n📄 Read the sheet as saved at **{_sv:%I:%M:%S %p}**".replace(" 0", " ")
-                 + " — if your last edit is newer, wait a few seconds and Preview again.")
+        _who = f" by {res['sheet_by']}" if res.get("sheet_by") else ""
+        _src = res.get("sheet_source") or "the synced copy on the office PC"
+        head += (f"  \n📄 Read {_src} — last saved **{_sv:%I:%M:%S %p}**{_who}".replace(" 0", " ")
+                 + ("" if _src.startswith("live") else
+                    ". If your last edit is newer, wait a few seconds and Preview again."))
     if res["mode"] == "push":
         (st.success if res["status"] == "done" else st.warning)(
             f"{head} — **{res.get('sent', 0)} rooms sent to HotSOS**"
