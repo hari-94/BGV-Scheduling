@@ -1960,6 +1960,10 @@ def _fc_feasible(units_list):
     n120 = sum(u["n120"] for u in units_list)
     if n140 > 1: return False
     if n140 >= 1 and n120 > 1: return False
+    # 120+70+70+70 is not a chart, unless it is one apartment (one unit)
+    if len(units_list) > 1:
+        n70 = sum(fcpack.n70_of(u.get("_members", [u])) for u in units_list)
+        if fcpack.is_easy(t, n140, n120, n70): return False
     return True
 
 def _fc_spread(units_list):
@@ -3221,21 +3225,28 @@ def _fc_fill_up(charts, seed=1, rounds=20000):
     ut = [sum(r.get("time", 0) for r in u) for u in units]
     u1 = [sum(1 for r in u if r.get("time") == 140) for u in units]
     u2 = [sum(1 for r in u if r.get("time") == 120) for u in units]
+    u7 = [fcpack.n70_of(u) for u in units]
     um = [{_loc(r).bld for r in u if _loc(r)} for u in units]
 
     def score(where):
         t = [0] * k
         a = [0] * k
         b = [0] * k
+        c = [0] * k
+        nu = [0] * k
         m = [set() for _ in range(k)]
         for i, g in enumerate(where):
             t[g] += ut[i]
             a[g] += u1[i]
             b[g] += u2[i]
+            c[g] += u7[i]
+            nu[g] += 1
             m[g] |= um[i]
         bad = 0
         for g in range(k):
-            if t[g] and not fcpack._legal(t[g], a[g], b[g], m[g], MAX_FC):
+            # one apartment alone is exempt from the 120+70+70+70 rule
+            if t[g] and not fcpack._legal(t[g], a[g], b[g], m[g], MAX_FC,
+                                          c[g] if nu[g] > 1 else None):
                 bad += 1
         live = [x for x in t if x]
         shorts = [x for x in live if x < LOW_MIN]
@@ -3311,11 +3322,7 @@ def _fc_tighten(charts, sweeps=40):
 
     def legal(chart):
         locs = [l for r in chart if (l := _loc(r)) is not None]
-        return fcpack._legal(
-            sum(r.get("time", 0) for r in chart),
-            sum(1 for r in chart if r.get("time") == 140),
-            sum(1 for r in chart if r.get("time") == 120),
-            {l.bld for l in locs}, MAX_FC)
+        return fcpack.legal_rooms(chart, {l.bld for l in locs}, MAX_FC)
 
     def blds(chart):
         return {l.bld for r in chart if (l := _loc(r)) is not None}
@@ -3405,7 +3412,7 @@ def _fc_exact(rooms, charts):
     # Measured against the heuristic, not against zero: an apartment over the
     # cap (140+120+70+70 is 400) is split by fcpack.bundles on purpose and the
     # audit counts it in both. Anything beyond that is the solver's fault.
-    if any(a[k] > b[k] for k in ("over_cap", "bad_mix", "split_bundles", "b2_b3")):
+    if any(a[k] > b[k] for k in ("over_cap", "bad_mix", "split_bundles", "b2_b3", "easy")):
         print("[fc] exact solve broke a rule %s; keeping the heuristic's" % a)
         return charts
     if (a["charts"], a["low"]) > (b["charts"], b["low"]):
@@ -3483,16 +3490,18 @@ def pack_fc_sequential(room_list):
             packed = fcpack.pack(here, MAX_FC, _where, LOW_MIN)
         except Exception as ex:
             print("[fc] building %s would not pack (%s); cutting it in order" % (b, ex))
-            packed, cur, t, n140, n120, blds = [], [], 0, 0, 0, set()
+            packed, cur, t, n140, n120, n70, blds = [], [], 0, 0, 0, 0, set()
             for u in by_bld[b]:
                 if cur and not fcpack._legal(t + u.time, n140 + u.n140,
-                                             n120 + u.n120, blds | u.blds, MAX_FC):
+                                             n120 + u.n120, blds | u.blds, MAX_FC,
+                                             n70 + u.n70):
                     packed.append(cur)
-                    cur, t, n140, n120, blds = [], 0, 0, 0, set()
+                    cur, t, n140, n120, n70, blds = [], 0, 0, 0, 0, set()
                 cur.extend(u.rooms)
                 t += u.time
                 n140 += u.n140
                 n120 += u.n120
+                n70 += u.n70
                 blds |= u.blds
             if cur:
                 packed.append(cur)
@@ -3693,6 +3702,147 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
         assignment[g["label"]] = matched
         if not is_unassigned_hk(matched): used.add(matched)
     return assignment, used
+
+
+def fill_from_unstaffed(groups, roster):
+    """Top up every short Full Clean chart from the charts nobody could take.
+
+    The packer runs before anybody is assigned and plans for one housekeeper
+    per chart, so it piles a building's slack onto one short chart. On a day
+    with fewer people than charts the last charts go to "No HK available" --
+    and the short chart still goes home at two o'clock while those rooms sit
+    there. On 8 October that was Josseling on 120 minutes and Nury on 210
+    beside 1,410 minutes nobody was on.
+
+    So once the names are on, each staffed chart under the cap is filled from
+    the unstaffed rooms, lightest housekeeper first: as close to MAX_FC as the
+    rules allow, then the nearest rooms. Apartments move whole, every result
+    goes through fcpack's rules, and a housekeeper is never sent between
+    buildings 2 and 3. What is left is re-packed, so the "No HK available"
+    charts say how many more people the day needs.
+
+    Groups need `label` and `housekeeper` set. Returns the new group list, Full
+    Clean labels redone in order; other services are untouched.
+    """
+    import itertools
+
+    def is_fc(g):
+        return (g.get("service_type") == SVC_FC and not g.get("verify_group")
+                and not g.get("dv_rqs2"))
+
+    fc = [g for g in groups if is_fc(g)]
+    spare = [g for g in fc if is_unassigned_hk(g.get("housekeeper"))]
+    staffed = [g for g in fc if not is_unassigned_hk(g.get("housekeeper"))]
+    if not spare or not staffed:
+        return groups
+
+    _loc = lambda r: pmap.parse(str(r.get("room", "")).strip().upper())
+
+    def blds(rooms):
+        out = set()
+        for r in rooms:
+            l = _loc(r)
+            out.add(l.bld if l else r.get("bld"))
+        return out
+
+    pool = []                                   # apartments, never split
+    for g in spare:
+        for b in fcpack.bundles(g["rooms"], MAX_FC, _loc):
+            pool.append(b.rooms)
+
+    def dist(unit, chart):
+        """How far a unit is from a chart: a new building, then levels, then
+        corridor."""
+        best = None
+        for a in unit:
+            la = _loc(a)
+            for c in chart:
+                lc = _loc(c)
+                if la is None or lc is None:
+                    d = 0 if a.get("bld") == c.get("bld") else 1000
+                elif la.bld != lc.bld:
+                    d = 1000
+                else:
+                    d = 60 * abs(la.level_ix - lc.level_ix) + 3 * abs(la.x - lc.x)
+                best = d if best is None else min(best, d)
+        return best or 0
+
+    MAX_UNITS = 5                               # 5 x 70 is the most a chart holds
+    NEAREST = 12                                # search the 12 closest units only
+    for g in sorted(staffed, key=lambda g: g["time"]):
+        room = MAX_FC - g["time"]
+        if room < 70 or not pool:
+            continue
+        home = roster.get(g["housekeeper"], {}).get("building", 0)
+        cands = []
+        for u in pool:
+            ut = sum(r["time"] for r in u)
+            if ut > room:
+                continue
+            ub = blds(u)
+            if (home == 2 and 3 in ub) or (home == 3 and 2 in ub):
+                continue
+            cands.append((dist(u, g["rooms"]), u))
+        cands.sort(key=lambda c: c[0])
+        cands = cands[:NEAREST]
+        best = None
+        for k in range(1, MAX_UNITS + 1):
+            for combo in itertools.combinations(cands, k):
+                add = [r for _, u in combo for r in u]
+                t = g["time"] + sum(r["time"] for r in add)
+                if t > MAX_FC:
+                    continue
+                rooms = g["rooms"] + add
+                if not fcpack.legal_rooms(rooms, blds(rooms), MAX_FC):
+                    continue
+                key = (-t, sum(d for d, _ in combo))
+                if best is None or key < best[0]:
+                    best = (key, combo)
+        if best is None:
+            continue
+        taken = [u for _, u in best[1]]
+        rooms = g["rooms"] + [r for u in taken for r in u]
+        g.update(mk(rooms, SVC_FC))
+        g["cross_bld"] = len(g["blds"]) > 1
+        pool = [u for u in pool if not any(u is t for t in taken)]
+
+    # A top-up comes from wherever the spare rooms were, which can be the far
+    # end of the building from the rest of the chart. Trade apartments between
+    # the staffed charts to put each back on fewer floors: _fc_tighten never
+    # gives a chart a building it did not have, so nobody's home-building rule
+    # changes, and it never makes anybody short.
+    tight = _fc_tighten([g["rooms"] for g in staffed])
+    if len(tight) == len(staffed):
+        for g, rooms in zip(staffed, tight):
+            g.update(mk(rooms, SVC_FC))
+            g["cross_bld"] = len(g["blds"]) > 1
+
+    left = [r for u in pool for r in u]
+    leftover = []
+    if left:
+        by_bld = {}
+        for r in left:
+            by_bld.setdefault(min(blds([r])), []).append(r)
+        for b in sorted(by_bld, key=lambda x: BLD_WALK_ORDER.get(x, 9)):
+            try:
+                leftover += fcpack.pack(by_bld[b], MAX_FC, _loc, LOW_MIN)
+            except Exception as ex:
+                print("[fc] could not re-pack the unstaffed rooms (%s)" % ex)
+                leftover += [by_bld[b]]
+    new_spare = []
+    for c in leftover:
+        ng = mk(c, SVC_FC)
+        ng["housekeeper"] = NO_HK_LABEL
+        ng["cross_bld"] = len(ng["blds"]) > 1
+        new_spare.append(ng)
+
+    out = [g for g in groups if not (is_fc(g) and is_unassigned_hk(g.get("housekeeper")))]
+    last_fc = max([i for i, g in enumerate(out) if is_fc(g)], default=len(out) - 1)
+    out[last_fc + 1:last_fc + 1] = new_spare
+    fcs = [g for g in out if g.get("service_type") == SVC_FC and not g.get("verify_group")]
+    for g, lbl in zip(fcs, make_labels("FC", len(fcs))):
+        g["label"] = lbl
+    return out
 
 #: West to east, the order somebody actually walks the property. Sorting charts
 #: by building *number* puts 3 next to 2 — the only two that do not touch — so
@@ -4752,6 +4902,9 @@ if run:
                     hk_asgn, used_hk_set = assign_hk_building_aware(
                         fg, present_hk, roster, ds_team=st.session_state.get("ds_team",[]))
                     for g in fg: g["housekeeper"] = hk_asgn.get(g["label"],"")
+                    # Short of people: fill the short charts from the ones
+                    # nobody could take, before inspectors are handed charts.
+                    fg = fill_from_unstaffed(fg, roster)
                     inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
 
                     # Store fresh result in session state

@@ -15,12 +15,13 @@ the answer, in three steps, each holding the one before it fixed:
      somebody sent home at two o'clock;
   3. at both, the nearest-together day: fewest levels spanned, fewest floors
      touched, the least corridor walked on a floor, and a short chart that is
-     left anyway topped up as far as nearby rooms allow. The 120+70+70+70
-     shape is avoided here too, at no cost to anything above it.
+     left anyway topped up as far as nearby rooms allow.
 
-The hard rules are fcpack's, unchanged: the cap, one 140, a 140 beside at most
-one 120, apartments never split (the solver places `fcpack.bundles`, never
-loose rooms). Buildings 2 and 3 cannot meet because the caller hands this one
+The hard rules are fcpack's: the cap, one 140, a 140 beside at most one 120,
+no 120+70+70+70 unless it is one apartment, apartments never split (the
+solver places `fcpack.bundles`, never loose rooms). The 120+70+70+70 rule was
+a soft price here, cheaper than one level of walking, and the solver paid it
+whenever that saved a staircase. Buildings 2 and 3 cannot meet because the caller hands this one
 building at a time.
 
 The heuristic's own answer goes in as the starting point, so the solver can
@@ -37,7 +38,6 @@ import fcpack
 W_SPAN = 60          # per level between a chart's top and bottom floor
 W_FLOOR = 20         # per extra floor touched
 W_DOOR = 3           # per door-width of corridor on one floor
-W_EASY = 40          # a 120+70+70+70 chart
 W_DEFICIT = 1        # per minute a short chart sits under LOW_MIN
 
 # Time limits. Deterministic time makes the same sheet give the same charts on
@@ -93,9 +93,9 @@ def pack(rooms, cap, loc_of, low_min, hint=None):
     X = [int(round(b.x)) for b in buns]
     levels = sorted(set(L))
     xmax = max(X) + 1
-    # Room counts by size, for the 120+70+70+70 shape. A bundle can hold more
+    # Room counts by size, for the 120+70+70+70 rule. A bundle can hold more
     # than one room, so count rooms, not bundles.
-    c70 = [sum(1 for r in b.rooms if r.get("time") == 70) for b in buns]
+    c70 = [b.n70 for b in buns]
     c120 = [b.n120 for b in buns]
     c140 = [b.n140 for b in buns]
     other = [len(b.rooms) - c70[i] - c120[i] - c140[i] for i, b in enumerate(buns)]
@@ -106,7 +106,7 @@ def pack(rooms, cap, loc_of, low_min, hint=None):
     for i in range(n):
         m.AddExactlyOne(x[i, j] for j in range(K))
 
-    t, short, deficit, near, easy = [], [], [], [], []
+    t, short, deficit, near = [], [], [], []
     for j in range(K):
         tj = sum(T[i] * x[i, j] for i in range(n))
         t.append(tj)
@@ -158,15 +158,16 @@ def pack(rooms, cap, loc_of, low_min, hint=None):
             cost += W_DOOR * w
         near.append(cost)
 
-        # 120+70+70+70: exactly one 120, three 70s, nothing else
-        e = m.NewBoolVar("e%d" % j)
+        # 120+70+70+70 -- one 120, three 70s, nothing else -- is forbidden
+        # unless the chart is a single apartment, which cannot be split.
         k70 = sum(c70[i] * x[i, j] for i in range(n))
         kot = sum((other[i] + c140[i]) * x[i, j] for i in range(n))
         is120 = _reify_eq(m, n120, 1)
         is70 = _reify_eq(m, k70, 3)
         none = _reify_eq(m, kot, 0)
-        m.AddBoolOr([is120.Not(), is70.Not(), none.Not(), e])
-        easy.append(e)
+        alone = m.NewBoolVar("")
+        m.Add(sum(x[i, j] for i in range(n)) <= 1).OnlyEnforceIf(alone)
+        m.AddBoolOr([is120.Not(), is70.Not(), none.Not(), alone])
 
     for j in range(K - 1):
         m.Add(y[j] >= y[j + 1])
@@ -202,7 +203,7 @@ def pack(rooms, cap, loc_of, low_min, hint=None):
     m.Add(sum(y) <= count)
     shorts = run(1, sum(short))
     m.Add(sum(short) <= shorts)
-    run(2, sum(near) + W_EASY * sum(easy) + W_DEFICIT * sum(deficit))
+    run(2, sum(near) + W_DEFICIT * sum(deficit))
 
     charts = [[r for i in range(n) if sv.Value(x[i, j]) for r in buns[i].rooms]
               for j in range(K)]

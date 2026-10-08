@@ -238,8 +238,8 @@ September commit said so in as many words, counting 138 forced short groups
 against 170 shipped. `fcsolve` states the same hard rules to OR-Tools CP-SAT and
 solves in three steps, each holding the one before fixed: **fewest groups**,
 then **fewest under `LOW_MIN`**, then **nearest together** -- level span,
-floors touched, corridor walked, a short group topped up from nearby rooms,
-and 120+70+70+70 avoided. Its weights are named at the top of the module.
+floors touched, corridor walked, a short group topped up from nearby rooms.
+Its weights are named at the top of the module.
 
 `_fc_exact` is the guard, in the same spirit as `_tidy_full_clean`: the
 heuristic's groups go in as the solver's starting point and come back
@@ -254,8 +254,22 @@ Measured on 30 sample days drawn from the room plan (no database on the
 machine it was written on -- re-run `bench.py` over the stored days): see the
 commit for the table. **Banning 120+70+70+70 outright is free at the optimum**
 -- the solver proved it on all 30 days. The ten housekeeper-days it cost in
-`381d35d` were the heuristic's, not the rule's; it is a soft price in step 3
-here only because a hard ban buys nothing a price does not.
+`381d35d` were the heuristic's, not the rule's. It was a soft price in step 3
+for a while, cheaper than one level of walking, and the solver paid it to save
+a staircase: seven 120+70+70+70 charts on 8 October. **It is a hard rule now,
+in `fcpack._legal`**, so every pass refuses it. The one exception is a single
+apartment of that shape, which cannot be split.
+
+**Short of people, the short charts are filled from the unstaffed ones.** The
+packer plans one housekeeper per chart, so on a short-staffed day the last
+charts go to "No HK available" while a short chart still goes home early -- 8
+October had Josseling on 120 and Nury on 210 beside 1,410 unstaffed minutes.
+`fill_from_unstaffed` runs after housekeepers are assigned: lightest person
+first, it tops each staffed chart as close to 380 as the rules allow from the
+nearest unstaffed apartments (never between buildings 2 and 3 for that
+person's home building), trades apartments with `_fc_tighten` to win the
+floors back, and re-packs what is left so the unstaffed charts count the
+people still needed.
 
 Inspectors are batched the same way: a building at a time, its trailing
 part-batch left alone until there are not enough inspectors, then merged

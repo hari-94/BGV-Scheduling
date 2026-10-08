@@ -21,6 +21,11 @@ The rules are hard. A chart may not:
     a minutes check is not enough.
   * hold rooms in buildings 2 and 3.  They do not touch; building 1 is the
     only way between them, so such a chart pays two bridge crossings.
+  * be exactly 120+70+70+70.  It reaches 330 with the lightest work there is,
+    and the floor does not accept it as a day. It used to be a soft price in
+    the solver, cheaper than one level of walking, so it kept coming back --
+    seven of them on 8 October. One apartment that happens to be that shape
+    is the exception: it cannot be split, so it may still be a chart alone.
 
 Within the rules it wants, in order: fewest housekeepers, least walking, and
 charts close to full. Count comes first because a housekeeper is a whole shift
@@ -47,8 +52,40 @@ def _hops(blds):
     return worst
 
 
-def _legal(time, n140, n120, blds, cap):
-    """The four hard rules, in one place, so no pass can route around them."""
+def is_easy(time, n140, n120, n70):
+    """120+70+70+70: one 120, three 70s and nothing else."""
+    return time == 330 and n140 == 0 and n120 == 1 and n70 == 3
+
+
+def n70_of(rooms):
+    return sum(1 for r in rooms if r.get("time") == 70)
+
+
+def rule_n70(rooms):
+    """The `n70` to hand `_legal` for a list of rooms: None when they are all
+    one apartment (exempt from the 120+70+70+70 rule), else their 70 count."""
+    keys = {_unit_key(r) for r in rooms}
+    if len(rooms) > 1 and len(keys) == 1 and None not in keys:
+        return None
+    return n70_of(rooms)
+
+
+def legal_rooms(rooms, blds, cap):
+    """`_legal` for a plain list of rooms."""
+    return _legal(sum(r.get("time", 0) for r in rooms),
+                  sum(1 for r in rooms if r.get("time") == 140),
+                  sum(1 for r in rooms if r.get("time") == 120),
+                  blds, cap, rule_n70(rooms))
+
+
+def _legal(time, n140, n120, blds, cap, n70=None):
+    """The hard rules, in one place, so no pass can route around them.
+
+    `n70` is left out only where the rooms are one apartment -- the one case
+    where the 120+70+70+70 shape has to be allowed, because it cannot be split.
+    """
+    if n70 is not None and is_easy(time, n140, n120, n70):
+        return False
     if time > cap:
         return False
     if n140 > 1:
@@ -81,13 +118,14 @@ def _unit_key(r):
 class _Bundle(object):
     """Rooms that go to one housekeeper or the day is wrong."""
 
-    __slots__ = ("rooms", "time", "n140", "n120", "blds", "levels", "x")
+    __slots__ = ("rooms", "time", "n140", "n120", "n70", "blds", "levels", "x")
 
     def __init__(self, rooms, loc_of):
         self.rooms = list(rooms)
         self.time = sum(r.get("time", 0) for r in rooms)
         self.n140 = sum(1 for r in rooms if r.get("time") == 140)
         self.n120 = sum(1 for r in rooms if r.get("time") == 120)
+        self.n70 = n70_of(rooms)
         locs = [loc_of(r) for r in rooms]
         locs = [l for l in locs if l]
         self.blds = {l.bld for l in locs}
@@ -159,25 +197,30 @@ def bundles(rooms, cap, loc_of):
 # ── a chart under construction ───────────────────────────────────────────────
 
 class _Chart(object):
-    __slots__ = ("buns", "time", "n140", "n120", "blds", "levels")
+    __slots__ = ("buns", "time", "n140", "n120", "n70", "blds", "levels")
 
     def __init__(self):
         self.buns = []
         self.time = 0
         self.n140 = 0
         self.n120 = 0
+        self.n70 = 0
         self.blds = set()
         self.levels = set()
 
     def accepts(self, b, cap):
+        # An empty chart takes any bundle: a lone apartment is exempt from
+        # the 120+70+70+70 rule because there is no other way to work it.
         return _legal(self.time + b.time, self.n140 + b.n140,
-                      self.n120 + b.n120, self.blds | b.blds, cap)
+                      self.n120 + b.n120, self.blds | b.blds, cap,
+                      self.n70 + b.n70 if self.buns else None)
 
     def add(self, b):
         self.buns.append(b)
         self.time += b.time
         self.n140 += b.n140
         self.n120 += b.n120
+        self.n70 += b.n70
         self.blds |= b.blds
         self.levels |= b.levels
 
@@ -186,6 +229,7 @@ class _Chart(object):
         self.time -= b.time
         self.n140 -= b.n140
         self.n120 -= b.n120
+        self.n70 -= b.n70
         self.blds = set()
         self.levels = set()
         for x in self.buns:
@@ -434,10 +478,7 @@ def shorten_walk(charts, cap, loc_of, rounds=300, low_min=330):
                 or len({l.level_ix for l in locs}) > 1)
 
     def ok(chart):
-        return _legal(sum(r.get("time", 0) for r in chart),
-                      sum(1 for r in chart if r.get("time") == 140),
-                      sum(1 for r in chart if r.get("time") == 120),
-                      {l.bld for l in (loc_of(r) for r in chart) if l}, cap)
+        return legal_rooms(chart, {l.bld for l in (loc_of(r) for r in chart) if l}, cap)
 
     def n_blds(chart):
         return len({l.bld for l in (loc_of(r) for r in chart) if l})
@@ -510,6 +551,7 @@ def audit(charts, cap, loc_of, low_min=330):
     b23 = 0
     over = 0
     low = 0
+    easy = 0
     for i, c in enumerate(charts):
         t = sum(r.get("time", 0) for r in c)
         n140 = sum(1 for r in c if r.get("time") == 140)
@@ -523,6 +565,9 @@ def audit(charts, cap, loc_of, low_min=330):
             bad_mix += 1
         if 2 in blds and 3 in blds:
             b23 += 1
+        n70 = rule_n70(c)
+        if n70 is not None and is_easy(t, n140, n120, n70):
+            easy += 1
         for r in c:
             k = _unit_key(r)
             if k:
@@ -530,4 +575,5 @@ def audit(charts, cap, loc_of, low_min=330):
                 split[(k, (loc.bld, loc.level_ix) if loc else None)].add(i)
     return {"charts": len(charts),
             "split_bundles": sum(1 for v in split.values() if len(v) > 1),
-            "bad_mix": bad_mix, "b2_b3": b23, "over_cap": over, "low": low}
+            "bad_mix": bad_mix, "b2_b3": b23, "over_cap": over, "low": low,
+            "easy": easy}
