@@ -44,6 +44,9 @@ _ROOM_RE = re.compile(r"^[1-9]\d{3}[A-Z]$")
 _MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
      "nov", "dec"], 1)}
+# The tabs are named by hand by a bilingual team: "Abril 23" sits beside
+# "April14", and August has been typed "Agu".
+_MONTHS.update({"ene": 1, "abr": 4, "ago": 8, "agu": 8, "dic": 12})
 
 # Names on the sheet that mean "nobody" rather than a person.
 _NOT_A_PERSON = {"", "none", "-", "—", "no hk", "no hk available", "manager",
@@ -66,7 +69,11 @@ def tab_date(name: str, year: int):
     "10-08", "10.8", "10-08-26", "2026-10-08", "Oct 8", "8 October",
     "Thu 10-08". Month comes first for numbers, as it does in the US.
     """
-    s = _clean(name).lower()
+    # "Oct_8" is a real tab name: an underscore is a word character, so the
+    # \b before the day never matches unless it reads as a space.
+    s = _clean(name.replace("_", " ")).lower()
+    # "Jan27", "April2nd": no word boundary between the month and the day.
+    s = re.sub(r"([a-z])(\d)", r"\1 \2", s)
     m = re.search(r"\b(20\d\d)[-._ ](\d{1,2})[-._ ](\d{1,2})\b", s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -77,7 +84,8 @@ def tab_date(name: str, year: int):
             y = int(m.group(3)) if m.group(3) else year
             y = y + 2000 if y < 100 else y
         else:
-            mname = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?", s)
+            mname = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+                              r"|ene|abr|ago|agu|dic)[a-z]*\.?", s)
             dnum = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)?\b", s)
             if not (mname and dnum):
                 return None
@@ -201,6 +209,13 @@ def match_name(sheet_name: str, attendants, saved=None):
     return hits[0] if len(hits) == 1 else None
 
 
+def team_members(hskp: str):
+    """The people in an HSKP cell: "Jenifer S/ Ana C" -> ["Jenifer S", "Ana C"].
+    Placeholders like "No HK" or "Manager" are not people."""
+    parts = re.split(r"\s*(?:/|,|&|\+|\band\b|\by\b)\s*", _clean(hskp))
+    return [p for p in parts if p and _norm(p) not in _NOT_A_PERSON]
+
+
 # ── the plan ─────────────────────────────────────────────────────────────────
 def build_plan(sheet_rows, hotsos_rooms, attendants, saved_names=None):
     """What the push will do, one line per sheet room.
@@ -213,23 +228,30 @@ def build_plan(sheet_rows, hotsos_rooms, attendants, saved_names=None):
     plan = []
     for r in sheet_rows:
         line = dict(r)
-        # Dust n Vac is RQS 2's own round and carries no housekeeper, so the
-        # RQS on the line is the person who does it.
+        # Only the housekeeper goes into HotSOS -- never the RQS, so a room with
+        # nobody in HSKP (Dust n Vac, an unstaffed chart) is left alone.
         who = r["hskp"]
-        if _norm(who) in _NOT_A_PERSON and _norm(r["service"]).startswith("dust"):
-            who = r.get("rqs", "")
         line["who"] = who
+        members = team_members(who)
+        line["unmatched"] = []
         hs = hotsos_rooms.get(r["room"])
         line["hotsos_service"] = (hs or {}).get("service", "")
         line["current"] = (hs or {}).get("assigned_to", "")
         person = None
-        if _norm(who) in _NOT_A_PERSON:
+        if not members:
             line["action"] = NO_HSKP
         elif hs is None:
             line["action"] = NO_ROOM
         else:
-            person = match_name(who, attendants, saved_names)
+            # A team ("Santos/Claudia/Oralia") is one HotSOS housekeeper and
+            # helpers who aren't attendants there: the room goes to the member
+            # HotSOS knows. The first such member if, unusually, it knows two.
+            for m in members:
+                person = match_name(m, attendants, saved_names)
+                if person:
+                    break
             if person is None:
+                line["unmatched"] = members
                 line["action"] = NO_PERSON
             elif _norm(line["current"]) == _norm(person["label"]):
                 line["action"] = ALREADY
@@ -258,5 +280,5 @@ def summary(plan):
     counts = {}
     for line in plan:
         counts[line["action"]] = counts.get(line["action"], 0) + 1
-    unmatched = sorted({l["who"] for l in plan if l["action"] == NO_PERSON})
+    unmatched = sorted({m for l in plan for m in l.get("unmatched", [])})
     return {"counts": counts, "unmatched_names": unmatched}

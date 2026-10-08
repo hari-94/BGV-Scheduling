@@ -70,8 +70,12 @@ def log(msg):
 
 
 # ── config ───────────────────────────────────────────────────────────────────
-def load_config():
+def load_config(required=True):
+    """The agent's settings. The loop runs without them -- the forecast needs
+    only SSRS and Supabase -- and picks them up once setup has been run."""
     if not CONFIG.exists():
+        if not required:
+            return {}
         sys.exit(f"Not set up yet. Run:  python {Path(__file__).name} setup")
     return json.loads(CONFIG.read_text())
 
@@ -282,8 +286,8 @@ def _print_plan(res):
 
 # ── the loop ─────────────────────────────────────────────────────────────────
 def run_loop():
-    cfg = load_config()
-    log(f"agent up on {socket.gethostname()}; workbook {cfg.get('workbook')}")
+    cfg = load_config(required=False)
+    log(f"agent up on {socket.gethostname()}; workbook {cfg.get('workbook') or '(not set up)'}")
     done_req = (db._load_key(hs.RESULT_KEY) or {}).get("id")
     done_fc = None
     last_slot = None
@@ -299,10 +303,19 @@ def run_loop():
             if req.get("id") and req["id"] != done_req:
                 done_req = req["id"]
                 log(f"{req.get('mode')} for {req.get('date')} requested by {req.get('by')}")
-                cfg = load_config()       # pick up a re-run of setup
+                cfg = load_config(required=False)    # pick up a re-run of setup
+                if not cfg.get("workbook"):
+                    db._upsert_key(hs.RESULT_KEY, {
+                        "id": req["id"], "date": req.get("date"), "mode": req.get("mode"),
+                        "by": req.get("by", ""), "status": "error",
+                        "finished_at": clock.stamp(),
+                        "error": "The office PC isn't set up for HotSOS yet -- run "
+                                 "'python hotsos_agent.py setup' on it."})
+                    continue
                 run_push(cfg, _dt.date.fromisoformat(req["date"]), req.get("mode", "preview"),
                          req_id=req["id"], by=req.get("by", ""))
 
+            cfg = load_config(required=False)
             if cfg.get("staff_workbook"):
                 try:
                     sync_roster(cfg["staff_workbook"])
@@ -340,6 +353,12 @@ def main():
         print(sync_roster(load_config()["staff_workbook"], force=True))
         return
     if a.cmd == "run":
+        # Under pythonw (how Task Scheduler starts it, so no window sits on the
+        # desk all day) there is no console; write the log to a file instead.
+        if sys.stdout is None or Path(sys.executable).stem.lower() == "pythonw":
+            CONFIG.parent.mkdir(parents=True, exist_ok=True)
+            sys.stdout = sys.stderr = open(CONFIG.parent / "agent.log", "a",
+                                           encoding="utf-8", buffering=1)
         return run_loop()
     day = _dt.date.fromisoformat(a.date) if a.date else clock.today()
     _print_plan(run_push(load_config(), day, a.cmd, only_room=a.only_room, by="console"))
