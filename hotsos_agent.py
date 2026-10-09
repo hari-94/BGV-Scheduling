@@ -869,7 +869,9 @@ def run_loop():
     log(f"agent up on {socket.gethostname()}; workbook {cfg.get('workbook') or '(not set up)'}")
     done_req = (db._load_key(hs.RESULT_KEY) or {}).get("id")
     done_day = (db._load_key(hs.DAYLOAD_RESULT_KEY) or {}).get("id")
-    done_fc = None
+    # The last Refresh request is still on record at start-up; treating it as
+    # new started another forecast on every restart (two at once, 9 Oct).
+    done_fc = (db._load_key(hs.FORECAST_REQUEST_KEY) or {}).get("id")
     last_slot = None
     last_beat = 0
     while True:
