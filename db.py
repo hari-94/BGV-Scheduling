@@ -903,12 +903,43 @@ def bulk_upsert_room_statuses(records: list, date_str: str = None):
         raise
 
 
+# ── one retry for a dropped connection ─────────────────────────────────────────
+# Supabase sometimes closes a kept-alive connection under us ("Server
+# disconnected", 9 Oct 14:29 -- it failed the agent's loop and the HotSOS
+# mirror's pass at the same instant). Asking again once on a fresh
+# connection is all it takes; anything else is a real error and is raised.
+_TRANSIENT = ("RemoteProtocolError", "ConnectError", "ReadError", "ReadTimeout",
+              "ConnectTimeout", "WriteError", "PoolTimeout")
+
+
+def _retrying(fn):
+    import functools
+
+    @functools.wraps(fn)
+    def run(*a, **k):
+        try:
+            return fn(*a, **k)
+        except Exception as ex:
+            if type(ex).__name__ not in _TRANSIENT and not any(
+                    t in str(ex) for t in ("Server disconnected", "Connection reset")):
+                raise
+            _time.sleep(1.0)
+            return fn(*a, **k)
+    return run
+
+
+for _name in ("_upsert_key", "_delete_key", "save_full_schedule", "bulk_upsert_room_statuses",
+              "upsert_room_status"):
+    globals()[_name] = _retrying(globals()[_name])
+
+
 # ── free-plan meter ───────────────────────────────────────────────────────────
 # Every function above that reads over the network reports what it got back
 # to freetier's meter (an estimate of the egress the free plan counts). Wrapped
 # here, at the bottom, so nothing above has to know.
 def _metered(fn):
     import functools
+    fn = _retrying(fn)
 
     @functools.wraps(fn)
     def run(*a, **k):

@@ -518,7 +518,9 @@ def start_forecast():
     if _FORECAST_PROC is not None and _FORECAST_PROC.poll() is None:
         log("forecast already running")
         return
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    # Below normal priority: three weeks of chart-solving uses every core it
+    # can, and a Preview pressed meanwhile took nine minutes (9 Oct 13:37).
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) |         getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
     _FORECAST_PROC = subprocess.Popen([sys.executable, str(Path(__file__).resolve()),
                                        "forecast"], cwd=str(Path(__file__).resolve().parent),
                                       creationflags=flags)
