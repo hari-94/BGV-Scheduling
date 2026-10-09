@@ -354,7 +354,8 @@ def live_stats():
             pts = [(t, v) for t, v in pts if t.date() == now.date()]
             fig = go.Figure()
             if pts:
-                fig.add_scatter(x=[t for t, _ in pts], y=[v for _, v in pts], mode="lines",
+                fig.add_scatter(x=[t for t, _ in pts], y=[v for _, v in pts],
+                                mode="lines+markers", marker=dict(size=5, color=C_APP),
                                 line=dict(color=C_APP, width=2, shape="spline"), fill="tozeroy",
                                 fillcolor="rgba(57,135,229,.18)", name="memory",
                                 hovertemplate="%{y:.0f} MB")
@@ -412,6 +413,7 @@ def live_stats():
                         'pass</div>', unsafe_allow_html=True)
             fig = go.Figure(go.Bar(
                 x=[_t(h.get("at")) for h in hist], y=[h.get("changed", 0) for h in hist],
+                width=[60_000] * len(hist),               # a minute wide: a pulse, not a block
                 marker=dict(color=[S_BAD if h.get("error") else C_APP for h in hist]),
                 hovertemplate="%{y} rooms changed<extra></extra>"))
             if not hist:

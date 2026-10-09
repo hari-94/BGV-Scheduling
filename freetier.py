@@ -31,6 +31,7 @@ Three things here:
 import datetime as _dt
 import gc
 import json
+import sys
 import threading
 import time
 from pathlib import Path
@@ -136,9 +137,18 @@ def memory_mb():
         return None
 
 
+#: The Cloud app runs on Linux; the office PC (and its 5 AM build, which runs
+#: the app's pages to generate) is Windows. Only the Cloud's own memory and
+#: reads count as "app" -- the PC's are the agent's. A diagnostic run here once
+#: reported 754 MB as the app's memory.
+ON_CLOUD = sys.platform.startswith("linux")
+
+
 def tick(source="app"):
     """Called on every page: track memory, free it if it's high, flush the
     meter now and then. Cheap -- one small file read, a write every 10 min."""
+    if not ON_CLOUD:
+        return
     m = memory_mb()
     today = clock.today_iso()
     if _mem["day"] != today:
