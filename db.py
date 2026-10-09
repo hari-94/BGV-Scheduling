@@ -107,6 +107,15 @@ def save_roster(hk_roster: dict, insp_roster: dict):
     staff STICK across sessions, reloads, and redeploys — instead of resetting to
     the hard-coded defaults. Stored in schedule_full under the fixed key 'roster'
     (reusing the existing table so no schema change is needed)."""
+    # One name per person, the full HotSOS form: a session that loaded the
+    # roster before a rename would otherwise save the old spellings back.
+    try:
+        import staff_names
+        table = staff_names.aliases()
+        hk_roster = staff_names.canon_roster(hk_roster, table)
+        insp_roster = staff_names.canon_roster(insp_roster, table)
+    except Exception as ex:
+        print(f"[db] save_roster: names not canonicalised: {ex}")
     try:
         _upsert_key("roster", {"hk_roster": hk_roster, "insp_roster": insp_roster})
     except Exception as ex:

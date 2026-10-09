@@ -202,3 +202,23 @@ def apply_rename(table: dict):
             except Exception as ex:
                 failed.append(f"today's schedule: {ex}")
     return {"done": done, "failed": failed, "at": clock.stamp()}
+
+
+def canon_roster(roster: dict, table=None) -> dict:
+    """The standing roster with every name in its full form and no person
+    listed twice.
+
+    The roster keeps anyone it has ever seen (marked absent), so after the
+    rename to full names the old spellings stayed beside them: "David S." and
+    "David Serrano", "Amalia" and "Amalia Hernandez" -- 42 such pairs. Where a
+    person appears under both, the entry already in the full form wins
+    (its building and today's attendance); an old spelling with no full-form
+    twin is simply renamed."""
+    table = aliases() if table is None else table
+    out = {}
+    for name, v in (roster or {}).items():
+        key = full(name, table)
+        if key in out and name != key:
+            continue                      # the full-form entry already won
+        out[key] = v
+    return out
