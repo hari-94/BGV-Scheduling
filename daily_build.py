@@ -289,7 +289,7 @@ def _fingerprint(ws) -> str:
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
-def _write_summary(ws, top, frame):
+def _write_summary(ws, top, frame, day=None):
     """Under the rooms: minutes per housekeeper, then suggestions for the
     light ones. Nothing in either table starts with a room code, so a push
     -- which reads only rows whose first cell is a room -- never sees them."""
@@ -346,6 +346,29 @@ def _write_summary(ws, top, frame):
                 f"≈ {charts} more chart{'s' if charts != 1 else ''} of {CAP_FC} min"]
         for ci, v in enumerate(vals, 1):
             ws.cell(row=r, column=ci, value=v).font = Font(name="Arial", size=10, italic=True)
+
+    fs = free_staff(frame, day) if day else None
+    if fs is not None:
+        r += 3
+        ws.cell(row=r, column=1, value="Free today — on the staff schedule, no rooms in this "
+                                       "sheet").font = bold
+        ws.cell(row=r + 1, column=1, value=(
+            f"RQS 1 ({fs['rqs1'] or 'not named'}) is never counted as free: projects. "
+            "People on other duties are listed apart.")).font = reg
+        r += 2
+        if fs["free"]:
+            header(r, ["Name", "Role", "Scheduled as"])
+            for name, role, as_ in fs["free"]:
+                r += 1
+                for ci, v in enumerate([name, role, as_], 1):
+                    c = ws.cell(row=r, column=ci, value=v)
+                    c.font, c.fill = reg, fills["Light"]
+        else:
+            ws.cell(row=r, column=1, value="Nobody is free — everyone scheduled has rooms.").font = reg
+        if fs["other"]:
+            r += 1
+            ws.cell(row=r, column=1, value="On other duties (not free): "
+                                           + "; ".join(fs["other"])).font = reg
 
     r += 3
     ws.cell(row=r, column=1, value="Suggestions to fill light charts — check, then edit the "
@@ -439,7 +462,7 @@ def write_tab(path, day: _dt.date, frame, state: dict):
             if v is None or (isinstance(v, float) and v != v) or v == "nan":
                 v = ""                         # NaN is pandas' blank; write it as one
             ws.cell(row=ri, column=ci, value=v).font = reg
-    _write_summary(ws, len(frame) + 3, frame)
+    _write_summary(ws, len(frame) + 3, frame, day)
     ws.freeze_panes = "A2"
     # Day tabs in date order, the newest last, and only the last month kept.
     from hotsos_sync import tab_date
@@ -595,6 +618,44 @@ def suggest_moves(frame):
         place(person, unstaffed, "unstaffed")
         place(person, over, "over")
     return moves, loads
+
+
+def free_staff(frame, day):
+    """Who the staff schedule has on for `day` with nothing in the sheet.
+
+    Housekeepers and RQS scheduled to work (Schedule.xlsx, read the way the
+    rest of the app reads it) whose name is in neither the HSKP nor the RQS
+    column. RQS 1 is never free -- the role carries projects even with no
+    rooms -- and people on other duties (deep clean, HSP, projects) aren't
+    free either; they're returned apart, as help a short day could ask for.
+    None when the staff schedule doesn't cover the day."""
+    try:
+        import db
+        import forecast
+        import roster_import as ri
+        iso = day.isoformat()
+        sched = forecast.scheduled(db.load_staff_weeks(), db.load_staff_overrides(), iso)
+        if sched is None:
+            return None
+        wk = ri.find_week_key(db.staff_week_keys(), iso)
+        upd = ri.day_roster(db.load_staff_week(wk), db.load_staff_overrides(), wk, iso,
+                            (db.load_roster() or {}).get("hk_roster", {})) or {}
+    except Exception as ex:
+        print(f"[daily_build] free staff not worked out: {ex}")
+        return None
+    used = {str(v).strip() for col in ("HSKP", "RQS") for v in frame[col].dropna()}
+    rqs1 = (upd.get("rqs1") or "").strip()
+    free = []
+    for name in sched["hk_fc"]:
+        if name not in used:
+            free.append((name, "Housekeeper", "Full Clean"))
+    for name in sched["hk_ds"]:
+        if name not in used:
+            free.append((name, "Housekeeper", "Daily Service"))
+    for name in sched["rqs"]:
+        if name not in used and name != rqs1:
+            free.append((name, "RQS", "RQS 2" if name == upd.get("rqs2") else "RQS"))
+    return {"free": free, "rqs1": rqs1, "other": sched["other"]}
 
 
 def tab_edited(path, day: _dt.date, state: dict) -> bool:
