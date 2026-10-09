@@ -62,7 +62,7 @@ SSRS = ("https://ssrsreports.grandtimber.com/ReportServer?/Operations/Housekeepi
 SITE_ID = 8                         # Grand Colorado on Peak 8
 FORECAST_DAYS = 21
 FORECAST_HOURS = set(range(8, 21, 2))           # 08, 10 ... 20, property time
-POLL_SECONDS = 30
+POLL_SECONDS = 5           # a Preview, Push or "Load this day" waits at most this
 REQUEST_MAX_AGE = 10 * 60   # a press older than this is not run -- see run_loop
 
 
@@ -238,6 +238,9 @@ def refresh_forecast():
     # Each day the way the 5 AM build will see it (forecast_sim): that day's
     # own export, the Schedule page's parsing and packing.
     import forecast_sim
+    import daily_build
+    cfg = load_config(required=False)
+    _, arr_folder = daily_paths(cfg) if cfg.get("workbook") else (None, None)
     done = 0
     for d in days:
         try:
@@ -245,7 +248,15 @@ def refresh_forecast():
             p = pull_ssrs(day, day, tag="_sim")
             raw = p.read_bytes()
             p.unlink(missing_ok=True)
-            d.update(forecast_sim.simulate(raw, day), method="simulated")
+            text, n = forecast_sim.room_text(raw)
+            # The same rooms "Load this day" on the Schedule page wants: kept
+            # so it can read them at once rather than ask this PC and wait.
+            arr = daily_build.find_arrival_report(arr_folder, day) if arr_folder else None
+            db._upsert_key(hs.ROOMS_CACHE_PREFIX + d["date"], {
+                "date": d["date"], "room_text": text, "rooms": n,
+                "pulled_at": clock.stamp(), "arrival": arr.name if arr else None,
+                "arrival_text": daily_build.read_arrival_report(arr) if arr else ""})
+            d.update(forecast_sim.simulate_text(text, n, day), method="simulated")
             done += 1
         except Exception as ex:
             log(f"forecast simulation {d['date']}: {type(ex).__name__}: {ex}")
@@ -253,6 +264,15 @@ def refresh_forecast():
             db._upsert_key(hs.FORECAST_KEY, rec)
     rec["simulated_at"] = clock.stamp()
     db._upsert_key(hs.FORECAST_KEY, rec)
+    # Past days' rooms are no use to anyone; keep a week for a look back.
+    try:
+        cutoff = (clock.today() - _dt.timedelta(days=7)).isoformat()
+        for k in db._like_keys(hs.ROOMS_CACHE_PREFIX):
+            key = k if isinstance(k, str) else k.get("key", "")
+            if key and key[len(hs.ROOMS_CACHE_PREFIX):] < cutoff:
+                db._delete_key(key)
+    except Exception as ex:
+        log(f"rooms cache cleanup: {ex}")
     log(f"forecast simulated: {done} of {len(days)} days")
     return days
 
@@ -278,7 +298,11 @@ def load_day_rooms(cfg, req):
         arr = daily_build.find_arrival_report(arr_folder, day) if arr_folder else None
         res.update(status="done", room_text=text, rooms=int(n),
                    arrival=arr.name if arr else None,
-                   arrival_text=daily_build.read_arrival_report(arr) if arr else "")
+                   arrival_text=daily_build.read_arrival_report(arr) if arr else "",
+                   pulled_at=clock.stamp())
+        db._upsert_key(hs.ROOMS_CACHE_PREFIX + req["date"], {
+            k: res[k] for k in ("room_text", "rooms", "arrival", "arrival_text", "pulled_at")}
+            | {"date": req["date"]})
         log(f"day load {day} for {req.get('by')}: {n} rooms, arrival report "
             f"{'found' if arr else 'none'}")
     except Exception as ex:
@@ -325,12 +349,19 @@ def sync_roster(path, force=False):
     p = Path(path)
     if not p.exists():
         return None
-    if not force and time.time() - p.stat().st_mtime < SETTLE_SECONDS:
+    stat = p.stat()
+    if not force and time.time() - stat.st_mtime < SETTLE_SECONDS:
         return None                     # still being written; next pass
+    # The loop passes every few seconds; reading and hashing the whole file
+    # each time is waste when it hasn't been touched.
+    seen = (stat.st_mtime, stat.st_size)
+    if not force and getattr(sync_roster, "seen", None) == seen:
+        return None
     raw = p.read_bytes()                # raises if Excel holds it locked; retried
     digest = hashlib.sha256(raw).hexdigest()
     st = _state()
     if not force and st.get("roster_sha") == digest:
+        sync_roster.seen = seen
         return None
     status = {"at": clock.stamp(), "file": p.name}
     try:
@@ -343,6 +374,7 @@ def sync_roster(path, force=False):
         if not out["failed"]:
             st["roster_sha"] = digest
             STATE.write_text(json.dumps(st))
+            sync_roster.seen = seen     # a failed import is retried next pass
         log(f"roster synced: {out['saved']} week(s), {d['n_changed_cells']} cell(s) "
             f"changed, today {'changed' if out['today_changed'] else 'unchanged'}")
     except Exception as ex:

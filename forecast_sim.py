@@ -37,11 +37,21 @@ def _funcs():
     return _FUNCS
 
 
+def room_text(ssrs_xlsx: bytes):
+    """(room text, room count): the export as the Schedule page's room box
+    takes it -- what "Load this day" puts there."""
+    text, n, _ = _funcs()["excel_to_room_text"](io.BytesIO(ssrs_xlsx))
+    return text, int(n)
+
+
 def simulate(ssrs_xlsx: bytes, day: _dt.date) -> dict:
     """{hskp, hskp_fc, hskp_ds, rqs, rqs_fc, fc_rooms, check_rooms, check_minutes}
     for one day's Housekeeping Dashboard export."""
+    return simulate_text(*room_text(ssrs_xlsx), day)
+
+
+def simulate_text(room_text: str, n_rooms: int, day: _dt.date) -> dict:
     f = _funcs()
-    room_text, n_rooms, _ = f["excel_to_room_text"](io.BytesIO(ssrs_xlsx))
     df = f["parse_rooms"](room_text)
     if df.empty:
         return {"hskp": 0, "hskp_fc": 0, "hskp_ds": 0, "rqs": 0, "rqs_fc": 0,

@@ -37,6 +37,9 @@ EVENTS_KEY = "agent_events"                      # its last 80 log lines, newest
 # machine that can reach SSRS) answers with that day's rooms and Arrival Report.
 DAYLOAD_REQUEST_KEY = "day_rooms_request"        # {id, date, by, at}
 DAYLOAD_RESULT_KEY = "day_rooms_result"          # {id, date, status, room_text, ...}
+# Each forecast day's rooms, kept by the forecast run (every two hours) so
+# "Load this day" reads them in a second instead of waiting on the office PC.
+ROOMS_CACHE_PREFIX = "ssrs_rooms_"               # + ISO date: {date, room_text, rooms, ...}
 
 # What a row of the plan can say. The page colours by these.
 ASSIGN = "assign"            # will be (or was) assigned

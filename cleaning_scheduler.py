@@ -1557,6 +1557,7 @@ def _back_to_today():
             st.session_state.pop(k, None)
     st.session_state.pop("sched_day", None)
     st.session_state.pop("_dayload_note", None)
+    st.session_state.pop("_dayload_src", None)
     st.session_state["_att_gen"] = st.session_state.get("_att_gen", 0) + 1
     for _k in [k for k in list(st.session_state) if k.startswith(("att_", "insp_att_"))]:
         st.session_state.pop(_k, None)
@@ -1569,6 +1570,7 @@ if _dl:
         st.session_state["_today_stash"] = {k: _copy.deepcopy(st.session_state[k])
                                             for k in _DAY_KEYS if k in st.session_state}
     st.session_state["sched_day"] = _dl["date"]
+    st.session_state["_dayload_src"] = {"date": _dl["date"], "source": _dl.get("source", "live")}
     st.session_state["room_input"] = _dl.get("room_text", "")
     st.session_state["email_input"] = _dl.get("arrival_text", "")
     for _k in ("groups_data", "inspectors_data", "total_rooms", "used_hk_set"):
@@ -1578,7 +1580,10 @@ if _dl:
     except Exception as _ex:
         _crew = f"couldn't read the staff schedule for that day ({_ex})"
     st.session_state["_dayload_note"] = (
-        f"{_dl.get('rooms', 0)} rooms from SSRS · "
+        f"{_dl.get('rooms', 0)} rooms from SSRS "
+        + (f"as of {_fmt_mtn(_dl['pulled_at'])}" + (" (saved copy)" if _dl.get("source") == "saved"
+                                                   else " (live)")
+           if _dl.get("pulled_at") else "") + " · "
         + (f"Arrival Report '{_dl['arrival']}'" if _dl.get("arrival")
            else "no Arrival Report for that day")
         + f" · {_crew}")
@@ -5052,6 +5057,16 @@ with _inp_exp:
         # getattr: a deploy doesn't reload an already-imported module (CLAUDE.md).
         _DL_REQUEST = getattr(_hs, "DAYLOAD_REQUEST_KEY", "day_rooms_request")
         _DL_RESULT = getattr(_hs, "DAYLOAD_RESULT_KEY", "day_rooms_result")
+        _DL_CACHE = getattr(_hs, "ROOMS_CACHE_PREFIX", "ssrs_rooms_")
+
+        def _ask_office_pc(iso):
+            """The live path: the office PC pulls the day from SSRS now."""
+            import time as _time
+            _rid = _uuid.uuid4().hex
+            db._upsert_key(_DL_REQUEST, {"id": _rid, "date": iso, "at": _now_iso(),
+                                         "by": st.session_state.get("display_name", "")})
+            st.session_state["_dayload_id"] = _rid
+            st.session_state["_dayload_at"] = _time.time()
 
         @st.fragment(run_every=3)
         def _dayload_wait():
@@ -5088,13 +5103,22 @@ with _inp_exp:
                  "today is a preview and is not saved.")
         if _dc2.button("Load this day", icon=":material/event:", use_container_width=True,
                        disabled=bool(st.session_state.get("_dayload_id"))):
-            import time as _time
-            _rid = _uuid.uuid4().hex
-            db._upsert_key(_DL_REQUEST, {
-                "id": _rid, "date": _pick.isoformat(), "at": _now_iso(),
-                "by": st.session_state.get("display_name", "")})
-            st.session_state["_dayload_id"] = _rid
-            st.session_state["_dayload_at"] = _time.time()
+            # The forecast keeps every coming day's rooms (refreshed every two
+            # hours), so this is normally instant; a day it doesn't hold --
+            # past, or beyond three weeks -- goes to the office PC.
+            _saved = db._load_key(_DL_CACHE + _pick.isoformat()) or {}
+            if _saved.get("room_text"):
+                st.session_state["_dayload_payload"] = dict(_saved, date=_pick.isoformat(),
+                                                            source="saved")
+                st.rerun()
+            _ask_office_pc(_pick.isoformat())
+        _loaded = st.session_state.get("_dayload_src")
+        if _loaded and _loaded.get("date") == _pick.isoformat() and                 _loaded.get("source") == "saved" and not st.session_state.get("_dayload_id"):
+            if _dc3.button("Get live from SSRS", icon=":material/sync:",
+                           help="Bookings changed since that copy? Pull this day from SSRS "
+                                "now (about 20 seconds)."):
+                _ask_office_pc(_pick.isoformat())
+                st.rerun()
         _err = st.session_state.pop("_dayload_err", None)
         if _err:
             _dc3.error(f"Couldn't load that day: {_err}")
