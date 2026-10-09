@@ -946,7 +946,10 @@ def _metered(fn):
         out = fn(*a, **k)
         try:
             import freetier
-            freetier.count(out)
+            # The key too, for settings reads: which record is read most.
+            name = fn.__name__ + (f":{str(a[0])[:24]}" if a and fn.__name__ in
+                                  ("_load_key", "_like_keys") else "")
+            freetier.count(out, name)
         except Exception:
             pass
         return out

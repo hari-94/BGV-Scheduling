@@ -57,17 +57,23 @@ RETENTION = {
 
 # ── 1. the meter ─────────────────────────────────────────────────────────────
 _lock = threading.Lock()
-_meter = {"bytes": 0, "calls": 0, "flushed": time.time()}
+_meter = {"bytes": 0, "calls": 0, "flushed": time.time(), "by_fn": {}}
 
 
-def count(result):
+def count(result, name="?"):
     try:
         n = len(json.dumps(result, default=str))
     except Exception:
         n = 0
+    b = int(n * GZIP_RATIO) + 300                      # + headers
+    import re
+    name = re.sub(r"[0-9a-f]{12,}|[\w.+-]+@[\w.-]+|\d{4}-\d\d-\d\d", "*", name)
     with _lock:
-        _meter["bytes"] += int(n * GZIP_RATIO) + 300      # + headers
+        _meter["bytes"] += b
         _meter["calls"] += 1
+        f = _meter["by_fn"].setdefault(name, [0, 0])  # who reads the most
+        f[0] += b
+        f[1] += 1
 
 
 def flush(source: str, every: int = 600, force=False):
@@ -75,8 +81,9 @@ def flush(source: str, every: int = 600, force=False):
     with _lock:
         if not force and time.time() - _meter["flushed"] < every:
             return
-        b, c = _meter["bytes"], _meter["calls"]
+        b, c, by = _meter["bytes"], _meter["calls"], _meter["by_fn"]
         _meter["bytes"] = _meter["calls"] = 0
+        _meter["by_fn"] = {}
         _meter["flushed"] = time.time()
     if not (b or c):
         return
@@ -86,8 +93,12 @@ def flush(source: str, every: int = 600, force=False):
         days = cur.get("days") or {}
         d = clock.today_iso()
         days[d] = int(days.get(d, 0)) + b              # for the Stats page's chart
+        fns = cur.get("by_fn") or {}
+        for name, (fb, fc) in by.items():
+            old = fns.get(name) or [0, 0]
+            fns[name] = [old[0] + fb, old[1] + fc]
         cur.update(bytes=int(cur.get("bytes", 0)) + b, calls=int(cur.get("calls", 0)) + c,
-                   days=days, updated=clock.stamp())
+                   days=days, by_fn=fns, updated=clock.stamp())
         db._upsert_key(key, cur)
     except Exception as ex:
         print(f"[freetier] usage not saved: {ex}")
@@ -107,6 +118,24 @@ def daily_usage(month=None) -> dict:
     return out
 
 
+def month_pace(month=None) -> float:
+    """MB the month is heading for: what's been sent, plus the average metered
+    day for each day left. (Not month-to-date over every day since the 1st --
+    metering began part-way through a month.)"""
+    import calendar
+    daily = daily_usage(month)
+    per_day = {}
+    for src in daily.values():
+        for d, mb in src.items():
+            per_day[d] = per_day.get(d, 0.0) + mb
+    if not per_day:
+        return 0.0
+    now = clock.now()
+    days_in = calendar.monthrange(now.year, now.month)[1]
+    avg = sum(per_day.values()) / len(per_day)
+    return round(sum(per_day.values()) + avg * (days_in - now.day), 1)
+
+
 def month_usage(month=None) -> dict:
     """{source: MB} and the total, for the month's egress so far."""
     month = month or f"{clock.today():%Y-%m}"
@@ -119,7 +148,19 @@ def month_usage(month=None) -> dict:
 
 
 # ── 2. memory (the Cloud app) ────────────────────────────────────────────────
-_mem = {"peak": 0.0, "day": None, "cleared": None, "saved": 0.0}
+_mem = {"peak": 0.0, "day": None, "cleared": None, "saved": 0.0, "last_clear": 0.0}
+
+
+def _trim():
+    """Hand freed memory back to the system. Python keeps what it freed for
+    reuse, so after a cache clear the process still looked as big as before;
+    glibc's malloc_trim returns it. Linux only, harmless elsewhere."""
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 
 def memory_mb():
@@ -155,17 +196,22 @@ def tick(source="app"):
         _mem.update(day=today, peak=0.0)
     if m:
         _mem["peak"] = max(_mem["peak"], m)
-        if m > MEMORY_LIMIT_MB * ACT:
+        # At most every 15 minutes: clearing on every page while memory stays
+        # high (it did, 9 Oct: 700-800 MB) only made every page slower and
+        # read more from the database.
+        if m > MEMORY_LIMIT_MB * ACT and time.time() - _mem["last_clear"] > 900:
+            _mem["last_clear"] = time.time()
             try:
                 import streamlit as st
                 st.cache_data.clear()
             except Exception:
                 pass
             db._weeks_forget()
-            gc.collect()
+            _trim()
             _mem["cleared"] = clock.stamp()
     if time.time() - _mem["saved"] > 600:
         _mem["saved"] = time.time()
+        _trim()                            # every 10 min, cheap
         flush(source, force=True)
         try:
             key = f"{USAGE_PREFIX}memory_{source}"

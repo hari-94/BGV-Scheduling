@@ -304,7 +304,7 @@ def live_stats():
                     + (f' — last {_when(ft.get("at"))}' if ft.get("at") else
                        " — first measurement tonight") + "</div>", unsafe_allow_html=True)
         used = month.get("total", 0.0)
-        pace = used / max(now.day - 1 + now.hour / 24, 0.25) * days_in
+        pace = freetier.month_pace()
         g2.plotly_chart(_gauge(used, freetier.EGRESS_LIMIT_MB, f"Data sent · {now:%B}", "MB"),
                         config=_CFG, use_container_width=True, key="g_eg")
         g2.markdown(f'<div class="pl-note">At this pace ≈ {pace:,.0f} MB by month end '
