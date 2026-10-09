@@ -2847,6 +2847,32 @@ def _ds_hops(blds):
             worst = max(worst, 1 if pmap.BRIDGES.get(frozenset((bs[i], bs[j]))) else 2)
     return worst
 
+def _sched_weekend():
+    """Is the day being scheduled a Saturday or Sunday? The 5 AM build's
+    look-ahead puts the day it is building in `sched_day`; on the page it is
+    the property's today."""
+    d = st.session_state.get("sched_day") or _datetime.now(_MTN_TZ).date().isoformat()
+    try:
+        return _datetime.fromisoformat(str(d)).weekday() >= 5
+    except ValueError:
+        return False
+
+
+def _ds_pooled(rooms, cap):
+    """Weekend Daily Service: no building limits at all (the manager's rule --
+    the 2-and-3 rule is Full Clean's only). One walk through the property,
+    building 3 then 1 then 2 so a cut lands between neighbours, filling each
+    housekeeper to the cap before starting the next."""
+    walk = sorted(rooms, key=lambda r: ({3: 0, 1: 1, 2: 2}.get(_bld(r), 1), _flr(r), _rnum(r)))
+    charts, cur, t = [], [], 0
+    for r in walk:
+        if cur and t + r["time"] > cap:
+            charts.append(cur); cur, t = [], 0
+        cur.append(r); t += r["time"]
+    if cur: charts.append(cur)
+    return charts
+
+
 def _ds_by_building(rooms, cap):
     """Fill each building's own charts; hand back its trailing part-chart."""
     by_bld = {}
@@ -2864,7 +2890,8 @@ def _ds_by_building(rooms, cap):
             leftovers.append([cur, {bld}, t])
     return full, leftovers
 
-def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP, one_building=None):
+def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP, one_building=None,
+                        pooled=False):
     """Split Daily Service rooms into charts, keeping each housekeeper inside
     one building wherever the headcount allows it.
 
@@ -2898,6 +2925,8 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP, one_building=Non
     import math
     rooms = list(ds_rooms) + list(extra_rooms or [])
     if not rooms: return []
+    if pooled:
+        return _ds_pooled(rooms, cap)
     n_min = max(1, math.ceil(sum(r["time"] for r in rooms) / cap))
     # The same question the Full Clean charts are asked. Daily Service rounds
     # are long and each building's own rarely fills a whole one, so pooling the
@@ -3715,7 +3744,9 @@ def build_all_groups(rooms):
 
     # ── Stage 3: Daily Service — HARD 460-min cap per chart, +leftover IH ──────
     if ds_rooms or ih_leftover:
-        ds_charts = split_daily_service(ds_rooms, extra_rooms=ih_leftover)
+        # Weekends: up to 460 minutes a housekeeper, buildings ignored.
+        ds_charts = split_daily_service(ds_rooms, extra_rooms=ih_leftover,
+                                        pooled=_sched_weekend())
         ds_groups = [mk(c, SVC_DS) for c in ds_charts]
         for g in ds_groups:
             g["ds_overflow"] = g["time"] > DS_CAP # shouldn't happen with hard cap
@@ -4318,8 +4349,19 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
         if not moved: break
         batches=_optimize_batches(batches)
     fc_inspectors_q = list(fc_inspectors)
+    # Out of inspectors: a batch of under 6 rooms goes to RQS 2 on top of the
+    # Daily Service / Dust n Vac round (the manager's rule), as long as RQS 2's
+    # Full Clean stays under 6 rooms and never spans buildings 2 and 3.
+    rqs2_small = []
     for batch in batches:
         if not batch: continue
+        if not fc_inspectors_q and rqs2:
+            n = sum(len(g["rooms"]) for g in batch)
+            held = sum(len(g["rooms"]) for g in rqs2_small)
+            if held + n < 6 and not rule23.mixes(
+                    {b for g in rqs2_small + batch for b in g["blds"]}):
+                rqs2_small.extend(batch)
+                continue
         name=fc_inspectors_q.pop(0) if fc_inspectors_q else f"Inspector {len(inspectors)+1}"
         blds=sorted(set(b for g in batch for b in g["blds"]))
         cx=_batch_complexity(batch)
@@ -4339,9 +4381,9 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
 
     # RQS 2 shares leftover FC only if there genuinely aren't enough inspectors,
     # but its primary load is DS + DV (+ IH already assigned above).
-    rqs2_fc_groups = []
+    rqs2_fc_groups = list(rqs2_small)
     if fc_shortage and rqs2:
-        budget = 6
+        budget = 6 - sum(len(g["rooms"]) for g in rqs2_fc_groups)
         for g in sorted(leftover_fc, key=lambda g:(len(g["rooms"]), _primary_bld(g))):
             if len(g["rooms"]) <= budget:
                 rqs2_fc_groups.append(g); budget -= len(g["rooms"])

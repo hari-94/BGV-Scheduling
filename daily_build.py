@@ -192,15 +192,39 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
             _apply_roster(at, day.isoformat())
         else:
             _day_roles(at)
-        at.text_area(key="room_input").set_value(room_text)
-        at.text_area(key="email_input").set_value(arrival_text or "")
-        next(b for b in at.button if b.label == "Generate").click()
-        at.run()
-        _raise(at, "Generate")
-        fg = at.session_state["groups_data"] if "groups_data" in at.session_state else None
-        if not fg:
-            warn = "; ".join(w.value for w in at.warning) or "no charts came back"
-            raise RuntimeError(f"Generate produced nothing: {warn}")
+        iso = (day or clock.today()).isoformat()
+        at.session_state["sched_day"] = iso          # weekend rules follow the day built
+        generate.borrowed = []
+
+        def run_generate():
+            at.text_area(key="room_input").set_value(room_text)
+            at.text_area(key="email_input").set_value(arrival_text or "")
+            next(b for b in at.button if b.label == "Generate").click()
+            at.run()
+            _raise(at, "Generate")
+            fg = at.session_state["groups_data"] if "groups_data" in at.session_state else None
+            if not fg:
+                warn = "; ".join(w.value for w in at.warning) or "no charts came back"
+                raise RuntimeError(f"Generate produced nothing: {warn}")
+            return fg
+
+        fg = run_generate()
+        need_hk, need_rqs = _shortfall(
+            fg, at.session_state["inspectors_data"] if "inspectors_data" in at.session_state
+            else [])
+        if need_hk or need_rqs:
+            rqs = {k: (at.session_state[k] if k in at.session_state else "")
+                   for k in ("rqs1", "rqs2")}
+            taken = _borrow(at, iso, need_hk, need_rqs)
+            if taken:
+                at.run()                         # redraw attendance with them in it
+                none = "— none —"
+                for sel, k in (("rqs1_sel", "rqs1"), ("rqs2_sel", "rqs2")):
+                    opts = list(at.selectbox(key=sel).options)
+                    at.selectbox(key=sel).set_value(rqs[k] if rqs[k] in opts else none)
+                at.run()
+                fg = run_generate()
+                generate.borrowed = taken
         return fg
 
 
@@ -268,6 +292,75 @@ def _apply_roster(at, iso):
     at.run()
 
 
+# ── short of people: borrow from other duties ─────────────────────────────────
+# The manager's rule. Only when charts would otherwise go out with nobody on
+# them, people on some other duties that day are counted as working -- Dust
+# and Vac first, then projects and anything else. Deep cleans of named units
+# and HSP (houseperson) are never borrowed: that work has to happen anyway.
+_DV_DUTY = re.compile(r"dust\s*(and|&|n|y)?\s*vac", re.I)
+_NEVER_BORROW = re.compile(r"\b\d{4}[a-i]\b|deep\s*clean|\bhsp\b|house\s*person|"
+                           r"\bsick\b|\bvto\b", re.I)
+
+
+def borrowable(iso):
+    """[(name, group, duty)] -- who could be pulled onto rooms on `iso`, in the
+    order they should be: Dust and Vac first, then other duties."""
+    import db
+    import roster_import as ri
+    wk = ri.find_week_key(db.staff_week_keys(), iso)
+    week = db.load_staff_week(wk) if wk else None
+    if not week:
+        return []
+    eff, _ = ri.apply_overrides(week, db.load_staff_overrides() or {}, wk)
+    out = []
+    for p in ri.week_to_people(eff, iso):
+        if p["kind"] != ri.KIND_OTHER or p["group"] not in ("hk", "rqs"):
+            continue
+        if _NEVER_BORROW.search(p["raw"]) or ri.is_room_cover(p["raw"]):
+            continue
+        out.append((0 if _DV_DUTY.search(p["raw"]) else 1, p["name"], p["group"], p["raw"]))
+    return [(n, g, raw) for _, n, g, raw in sorted(out, key=lambda x: x[0])]
+
+
+def _shortfall(fg, inspectors):
+    """(charts with no housekeeper, inspector slots with nobody named)."""
+    hk = sum(1 for g in fg if not g.get("verify_group") and not g.get("dv_rqs2")
+             and str(g.get("housekeeper") or "").startswith(("No HK available",
+                                                              "Need Housekeeper")))
+    rqs = sum(1 for e in inspectors or [] if str(e.get("name", "")).startswith("Inspector "))
+    return hk, rqs
+
+
+def _borrow(at, iso, need_hk, need_rqs):
+    """Mark the first `need_hk` housekeepers and `need_rqs` RQS from
+    borrowable() present on the page. Returns who was taken."""
+    import roster_import as ri
+    hk = dict(at.session_state["hk_roster"]) if "hk_roster" in at.session_state else {}
+    insp = dict(at.session_state["insp_roster"]) if "insp_roster" in at.session_state else {}
+    by_norm_hk = {ri.norm_name(n): n for n in hk}
+    by_norm_rq = {ri.norm_name(n): n for n in insp}
+    taken = []
+    for name, group, duty in borrowable(iso):
+        if group == "hk" and need_hk > 0:
+            key = by_norm_hk.get(ri.norm_name(name))
+            if key and not hk[key].get("present"):
+                hk[key] = dict(hk[key], present=True)
+                need_hk -= 1
+                taken.append((key, "Housekeeper", duty))
+        elif group == "rqs" and need_rqs > 0:
+            key = by_norm_rq.get(ri.norm_name(name), name)
+            if not insp.get(key):
+                insp[key] = True
+                need_rqs -= 1
+                taken.append((key, "RQS", duty))
+    if taken:
+        at.session_state["hk_roster"] = hk
+        at.session_state["insp_roster"] = insp
+        gen = at.session_state["_att_gen"] if "_att_gen" in at.session_state else 0
+        at.session_state["_att_gen"] = gen + 1
+    return taken
+
+
 def _raise(at, step):
     if at.exception:
         raise RuntimeError(f"Schedule page failed while {step}: "
@@ -302,7 +395,7 @@ def _fingerprint(ws) -> str:
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
-def _write_summary(ws, top, frame, day=None):
+def _write_summary(ws, top, frame, day=None, borrowed=()):
     """Under the rooms: minutes per housekeeper, then suggestions for the
     light ones. Nothing in either table starts with a room code, so a push
     -- which reads only rows whose first cell is a room -- never sees them."""
@@ -354,9 +447,13 @@ def _write_summary(ws, top, frame, day=None):
     if unst:
         r += 1
         mins = sum(_minutes(x.get("Time (min)")) for x in unst)
-        charts = -(-mins // CAP_FC)
+        # Counted per job, like the forecast: a Full Clean chart holds 380, a
+        # Daily Service round 460, and nobody works a fraction of either.
+        ds = sum(_minutes(x.get("Time (min)")) for x in unst
+                 if str(x.get("Service") or "").startswith("Daily"))
+        charts = -(-(mins - ds) // CAP_FC) + -(-ds // CAP_DS)
         vals = ["No housekeeper available", len(unst), mins, "", "", "",
-                f"≈ {charts} more chart{'s' if charts != 1 else ''} of {CAP_FC} min"]
+                f"≈ {charts} more housekeeper{'s' if charts != 1 else ''} needed"]
         for ci, v in enumerate(vals, 1):
             ws.cell(row=r, column=ci, value=v).font = Font(name="Arial", size=10, italic=True)
 
@@ -378,10 +475,20 @@ def _write_summary(ws, top, frame, day=None):
                     c.font, c.fill = reg, fills["Light"]
         else:
             ws.cell(row=r, column=1, value="Nobody is free — everyone scheduled has rooms.").font = reg
-        if fs["other"]:
+        names = {n for n, _, _ in borrowed}
+        other = [o for o in fs["other"] if not any(o.startswith(n) for n in names)]
+        if other:
             r += 1
             ws.cell(row=r, column=1, value="On other duties (not free): "
-                                           + "; ".join(fs["other"])).font = reg
+                                           + "; ".join(other)).font = reg
+    if borrowed:
+        r += 2
+        ws.cell(row=r, column=1, value="Short of people — moved onto rooms from other "
+                                       "duties").font = bold
+        for n, role, duty in borrowed:
+            r += 1
+            c = ws.cell(row=r, column=1, value=f"{n} ({role}) — was: {duty}")
+            c.font, c.fill = reg, fills["Light"]
 
     r += 3
     ws.cell(row=r, column=1, value="Suggestions to fill light charts — check, then edit the "
@@ -435,7 +542,7 @@ def _save_in_place(path, data: bytes, tries=30, wait=20):
             time.sleep(wait)
 
 
-def write_tab(path, day: _dt.date, frame, state: dict, note: str = ""):
+def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=()):
     """Write `frame` as the day's tab. Returns "written", "replaced" or
     "kept (edited)". `state` remembers the fingerprint of what was written,
     so an edited tab is never overwritten."""
@@ -476,7 +583,7 @@ def write_tab(path, day: _dt.date, frame, state: dict, note: str = ""):
             if v is None or (isinstance(v, float) and v != v) or v == "nan":
                 v = ""                         # NaN is pandas' blank; write it as one
             ws.cell(row=ri, column=ci, value=v).font = reg
-    _write_summary(ws, len(frame) + 3, frame, day)
+    _write_summary(ws, len(frame) + 3, frame, day, borrowed)
     import clock
     built = clock.now()
     c = ws.cell(row=1, column=STAMP_COL,
@@ -712,11 +819,22 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
     room_text, n_rooms, _sheet = excel_to_room_text(io.BytesIO(ssrs_xlsx))
     fg = generate(room_text, arrival_text, publish=publish, day=day)
     frame = assign_dust_n_vac(build_export_frame(fg))
+    # Whoever was pulled off another duty says so on their own rows, where the
+    # RQS reading the sheet will see it.
+    for name, role, duty in getattr(generate, "borrowed", []):
+        col = "HSKP" if role == "Housekeeper" else "RQS"
+        mask = frame[col].fillna("").astype(str).str.strip() == name
+        tag = f"{name.split()[0]} pulled from {duty} (short staffed)"
+        frame.loc[mask, "Notes"] = [
+            f"{n}; {tag}" if str(n or "").strip() not in ("", "nan") else tag
+            for n in frame.loc[mask, "Notes"]]
     outcome = write_tab(workbook_path, day, frame, state,
                         note="Arrival Report included" if (arrival_text or "").strip()
-                        else "no Arrival Report yet")
+                        else "no Arrival Report yet",
+                        borrowed=getattr(generate, "borrowed", []))
     staffed = sorted({g.get("housekeeper") for g in fg if g.get("housekeeper")})
     dv = frame[frame["Service"].fillna("").str.strip().str.lower().eq("dust n vac")]         if not frame.empty else frame
     dv_blank = int((dv["HSKP"].fillna("").astype(str).str.strip() == "").sum()) if len(dv) else 0
     return {"rooms": int(n_rooms), "charts": len(fg), "housekeepers": len(staffed),
-            "tab": tab_name(day), "outcome": outcome, "dv_unassigned": dv_blank}
+            "tab": tab_name(day), "outcome": outcome, "dv_unassigned": dv_blank,
+            "borrowed": [f"{n} ({duty})" for n, _, duty in getattr(generate, "borrowed", [])]}
