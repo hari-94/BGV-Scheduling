@@ -467,6 +467,42 @@ def reconcile_charts():
     return None
 
 
+# The mirror keeps one HotSOS browser signed in all day. Playwright allows one
+# of those per thread: on the loop's own thread, the next Preview, Push or
+# SharePoint read failed with "using Playwright Sync API inside the asyncio
+# loop" (9 Oct). So the mirror has a thread of its own, and only it ever
+# touches its session.
+_MIRROR = None
+
+
+def _mirror_loop():
+    while True:
+        try:
+            cfg = load_config(required=False)
+            if cfg.get("hotsos_user") and clock.now().hour in STATUS_HOURS:
+                try:
+                    rec = sync_room_status(cfg)
+                    rec["reconciled"] = reconcile_charts()
+                except Exception as ex:
+                    rec = {"at": clock.stamp(), "error": f"{type(ex).__name__}: {ex}"}
+                    log(f"room status sync failed: {rec['error']}")
+                    _close_status_session()
+                db._upsert_key(hs.STATUS_SYNC_KEY, rec)
+            else:
+                _close_status_session()    # no Chrome sitting signed in overnight
+        except Exception as ex:            # never let the thread die
+            log(f"mirror loop: {type(ex).__name__}: {ex}")
+        time.sleep(STATUS_SYNC_SECONDS)
+
+
+def start_mirror():
+    global _MIRROR
+    if _MIRROR is None or not _MIRROR.is_alive():
+        import threading
+        _MIRROR = threading.Thread(target=_mirror_loop, name="hotsos-mirror", daemon=True)
+        _MIRROR.start()
+
+
 _FORECAST_PROC = None
 
 
@@ -806,7 +842,6 @@ def run_loop():
     log(f"agent up on {socket.gethostname()}; workbook {cfg.get('workbook') or '(not set up)'}")
     done_req = (db._load_key(hs.RESULT_KEY) or {}).get("id")
     done_day = (db._load_key(hs.DAYLOAD_RESULT_KEY) or {}).get("id")
-    last_status = 0
     done_fc = None
     last_slot = None
     last_beat = 0
@@ -886,20 +921,8 @@ def run_loop():
                 STATE.write_text(json.dumps(st_))
                 run_build(cfg)
 
-            # The room-status mirror, every two minutes through the day.
-            if cfg.get("hotsos_user") and now.hour in STATUS_HOURS:
-                if time.time() - last_status > STATUS_SYNC_SECONDS:
-                    last_status = time.time()
-                    try:
-                        rec = sync_room_status(cfg)
-                        rec["reconciled"] = reconcile_charts()
-                    except Exception as ex:
-                        rec = {"at": clock.stamp(), "error": f"{type(ex).__name__}: {ex}"}
-                        log(f"room status sync failed: {rec['error']}")
-                        _close_status_session()
-                    db._upsert_key(hs.STATUS_SYNC_KEY, rec)
-            else:
-                _close_status_session()        # no Chrome sitting signed in overnight
+            # The room-status mirror runs on its own thread (start_mirror).
+            start_mirror()
 
             slot = (now.date(), now.hour)
             freq = db._load_key(hs.FORECAST_REQUEST_KEY) or {}
