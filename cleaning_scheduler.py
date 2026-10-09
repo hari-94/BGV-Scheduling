@@ -1422,9 +1422,9 @@ footer{visibility:hidden!important;}
 <div style="text-align:center;margin-bottom:28px">
   <div style="width:52px;height:52px;margin:0 auto 14px;border-radius:12px;
               background:#2563a8;display:flex;align-items:center;justify-content:center;
-              box-shadow:0 2px 8px rgba(37,99,168,.25);font-size:1.05rem;font-weight:700;font-family:'Syne',sans-serif;color:#ffffff;letter-spacing:.02em">GC8</div>
+              box-shadow:0 2px 8px rgba(37,99,168,.25);font-size:1.05rem;font-weight:700;font-family:'Syne',sans-serif;color:#ffffff;letter-spacing:.02em">BGV</div>
   <div style="font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:700;letter-spacing:-.02em;
-              color:#16202e;margin-bottom:5px">Grand Timber GC8</div>
+              color:#16202e;margin-bottom:5px">BGV Peak 8</div>
   <div style="font-family:'DM Sans',sans-serif;font-size:.76rem;color:#5b6675;letter-spacing:.06em;
               text-transform:uppercase;font-weight:500">Housekeeping · Scheduling · Live Tracking</div>
 </div>
@@ -1438,7 +1438,7 @@ footer{visibility:hidden!important;}
   <div style="font-family:'Syne',sans-serif;font-size:1.02rem;font-weight:700;color:#16202e;
               margin-bottom:4px">Welcome back</div>
   <div style="font-family:'DM Sans',sans-serif;font-size:.8rem;color:#5b6675;margin-bottom:24px">
-    Sign in with your Grand Timber email
+    Sign in with your work email
   </div>
 """, unsafe_allow_html=True)
     _db_ok = True; _db_msg = ""
@@ -1488,7 +1488,7 @@ footer{visibility:hidden!important;}
     st.markdown("""
 <div style="text-align:center;margin-top:20px;font-family:'DM Mono',monospace;
             font-size:.65rem;color:#1e293b;letter-spacing:.06em">
-  GRAND TIMBER GC8 · CONFIDENTIAL
+  BGV PEAK 8 · CONFIDENTIAL
 </div>""", unsafe_allow_html=True)
     st.stop()
 

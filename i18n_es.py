@@ -362,11 +362,11 @@ ES = {
 # ── text that lives inside the HTML cards and headings ───────────────────
 ES.update({
     # the schedule page
-    "Grand Timber GC8": "Grand Timber GC8",
+    "BGV Peak 8": "BGV Peak 8",
     "Housekeeping · Scheduling · Live Tracking":
         "Ama de llaves · Horarios · Seguimiento en vivo",
-    "Sign in with your Grand Timber email":
-        "Entra con tu correo de Grand Timber",
+    "Sign in with your work email":
+        "Entra con tu correo del trabajo",
     "Welcome back": "Bienvenido de nuevo",
     "Today": "Hoy",
     "Rooms today": "Cuartos de hoy",

@@ -64,9 +64,9 @@ WELCOME_MESSAGES = {
     ],
     "housekeeper": [
         "Your hard work makes every guest's day better! 🌟",
-        "You're the heart of Grand Timber — thank you! 💚",
+        "You're the heart of BGV Peak 8 — thank you! 💚",
         "Every room you touch is a gift to our guests! ✨",
-        "You make Grand Timber shine — have a great day! 🌞",
+        "You make BGV Peak 8 shine — have a great day! 🌞",
         "Your dedication makes the difference — we see you! 🙌",
     ],
 }
