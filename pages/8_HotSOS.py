@@ -167,7 +167,14 @@ def result_panel():
         head += (f"  \n📄 Read {_src} — last saved **{_sv:%I:%M:%S %p}**{_who}".replace(" 0", " ")
                  + ("" if _src.startswith("live") else
                     ". If your last edit is newer, wait a few seconds and Preview again."))
-    if res["mode"] == "push":
+    _plan = res.get("plan") or []
+    _all_right = _plan and all(l["action"] == hs.ALREADY for l in _plan)
+    if res["mode"] == "push" and not res.get("sent") and _all_right and res["status"] == "done":
+        # A push with nothing to send isn't a failure: HotSOS already has it
+        # (usually because the same sheet was pushed a minute ago).
+        st.success(f"{head} — **HotSOS already matches the sheet**: all {len(_plan)} rooms "
+                   "are with the right person, so nothing needed sending.")
+    elif res["mode"] == "push":
         (st.success if res["status"] == "done" else st.warning)(
             f"{head} — **{res.get('sent', 0)} rooms sent to HotSOS**"
             + (f" · app charts updated ({res['app']['renamed']} charts changed hands, "
