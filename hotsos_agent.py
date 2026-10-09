@@ -191,8 +191,16 @@ def pull_ssrs(start: _dt.date, end: _dt.date, tag: str = "") -> Path:
     url = f"{SSRS}&SiteID={SITE_ID}&StartDate={start:%m/%d/%Y}&EndDate={end:%m/%d/%Y}"
     ps = (f"$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '{url}' "
           f"-UseDefaultCredentials -OutFile '{out}' -TimeoutSec 600")
-    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                       capture_output=True, text=True, timeout=700)
+    # Hidden: the agent runs without a console (pythonw), so every PowerShell it
+    # started got a window of its own -- a black window flashing on the office
+    # PC for each of the forecast's 22 downloads (9 Oct).
+    si = subprocess.STARTUPINFO() if hasattr(subprocess, "STARTUPINFO") else None
+    if si is not None:
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0                     # SW_HIDE
+    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                        "-Command", ps], capture_output=True, text=True, timeout=700,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), startupinfo=si)
     if r.returncode != 0 or not out.exists():
         raise RuntimeError(f"SSRS export failed: {(r.stderr or r.stdout).strip()[:400]}")
     return out
