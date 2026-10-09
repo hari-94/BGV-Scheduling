@@ -98,6 +98,9 @@ LOW_FILL = 350
 # leftover rooms form new charts (blank housekeeper if none available, filled in
 # manually later based on how the day goes).
 DS_CAP = 460
+# Weekends relax it a little (the manager's rule): a Daily Service day just
+# over one round stays one person's rather than spilling a 45-minute stub.
+DS_CAP_WEEKEND = 510
 # IH charts below this total are treated as scraps and spill to Daily Service
 # (kept charts at/above this are inspected by RQS 2).
 IH_KEEP_MIN = 310
@@ -3744,12 +3747,14 @@ def build_all_groups(rooms):
 
     # ── Stage 3: Daily Service — HARD 460-min cap per chart, +leftover IH ──────
     if ds_rooms or ih_leftover:
-        # Weekends: up to 460 minutes a housekeeper, buildings ignored.
+        # Weekends: up to DS_CAP_WEEKEND a housekeeper, buildings ignored.
+        _wk = _sched_weekend()
+        _cap = DS_CAP_WEEKEND if _wk else DS_CAP
         ds_charts = split_daily_service(ds_rooms, extra_rooms=ih_leftover,
-                                        pooled=_sched_weekend())
+                                        cap=_cap, pooled=_wk)
         ds_groups = [mk(c, SVC_DS) for c in ds_charts]
         for g in ds_groups:
-            g["ds_overflow"] = g["time"] > DS_CAP # shouldn't happen with hard cap
+            g["ds_overflow"] = g["time"] > _cap # shouldn't happen with hard cap
     else:
         ds_groups = []
 
@@ -3903,6 +3908,35 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
         assignment[g["label"]] = matched
         if not is_unassigned_hk(matched): used.add(matched)
     return assignment, used
+
+
+def staff_biggest_first(groups):
+    """Short of people, the people there should be on the biggest work.
+
+    Charts are handed out before anyone knows who will be missing, so on a
+    short day somebody can end up holding a single 70-minute studio while a
+    full Daily Service round goes out with nobody on it. Swap them: the person
+    takes the bigger unstaffed chart and the small one is left vacant. Only
+    someone whose whole day is that one small chart is moved, and only to a
+    chart at least twice its size."""
+    def unstaffed(g):
+        return str(g.get("housekeeper") or "").startswith((NO_HK_LABEL, NEED_HK_PREFIX))
+    live = [g for g in groups if not g.get("verify_group") and not g.get("dv_rqs2")]
+    count = {}
+    for g in live:
+        if not unstaffed(g):
+            count[g["housekeeper"]] = count.get(g["housekeeper"], 0) + 1
+    open_ = sorted((g for g in live if unstaffed(g)), key=lambda g: -g["time"])
+    small = sorted((g for g in live if not unstaffed(g) and count[g["housekeeper"]] == 1
+                    and g["time"] < LOW_MIN), key=lambda g: g["time"])
+    for g in small:
+        if not open_ or open_[0]["time"] < 2 * g["time"]:
+            break
+        big = open_.pop(0)
+        big["housekeeper"], g["housekeeper"] = g["housekeeper"], big["housekeeper"]
+        open_.append(g)
+        open_.sort(key=lambda x: -x["time"])
+    return groups
 
 
 def fill_from_unstaffed(groups, roster):
@@ -5156,6 +5190,7 @@ if run:
                     # Short of people: fill the short charts from the ones
                     # nobody could take, before inspectors are handed charts.
                     fg = fill_from_unstaffed(fg, roster)
+                    fg = staff_biggest_first(fg)
                     inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
 
                     # Store fresh result in session state

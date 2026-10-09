@@ -410,8 +410,8 @@ def _write_summary(ws, top, frame, day=None, borrowed=()):
              "Over": PatternFill("solid", fgColor="FDECEC"),
              "Full": PatternFill("solid", fgColor="EAF7EE"),
              "RQS 2 · Dust n Vac": PatternFill("solid", fgColor="EEF0F3")}
-    summary = staff_summary(frame)
-    moves, after = suggest_moves(frame)
+    summary = staff_summary(frame, day)
+    moves, after = suggest_moves(frame, day)
 
     def header(row, cols):
         for ci, h in enumerate(cols, 1):
@@ -421,7 +421,8 @@ def _write_summary(ws, top, frame, day=None, borrowed=()):
     r = top
     ws.cell(row=r, column=1, value="Staff summary — minutes per housekeeper").font = bold
     ws.cell(row=r + 1, column=1, value=f"Light = under {LOW_MIN} min · Full Clean chart up to "
-                                       f"{CAP_FC} · Daily Service up to {CAP_DS}").font = reg
+                                       f"{CAP_FC} · Daily Service up to {_ds_cap(day)}"
+                                       + (" (weekend)" if _ds_cap(day) != CAP_DS else "")).font = reg
     r += 2
     header(r, ["Housekeeper", "Rooms", "Minutes", "Full Clean min", "Daily min",
                "Dust n Vac rooms", "Status", "After suggestions"])
@@ -451,7 +452,7 @@ def _write_summary(ws, top, frame, day=None, borrowed=()):
         # Daily Service round 460, and nobody works a fraction of either.
         ds = sum(_minutes(x.get("Time (min)")) for x in unst
                  if str(x.get("Service") or "").startswith("Daily"))
-        charts = -(-(mins - ds) // CAP_FC) + -(-ds // CAP_DS)
+        charts = -(-(mins - ds) // CAP_FC) + -(-ds // _ds_cap(day))
         vals = ["No housekeeper available", len(unst), mins, "", "", "",
                 f"≈ {charts} more housekeeper{'s' if charts != 1 else ''} needed"]
         for ci, v in enumerate(vals, 1):
@@ -634,6 +635,11 @@ def assign_dust_n_vac(frame):
 
 # ── who is light, and what would fill their chart ───────────────────────────
 LOW_MIN, CAP_FC, CAP_DS = 330, 380, 460      # the Schedule page's LOW_MIN, MAX_FC, DS_CAP
+CAP_DS_WEEKEND = 510                          # its DS_CAP_WEEKEND
+
+
+def _ds_cap(day) -> int:
+    return CAP_DS_WEEKEND if day is not None and day.weekday() >= 5 else CAP_DS
 
 
 def _unstaffed(name) -> bool:
@@ -655,7 +661,7 @@ def _minutes(v) -> int:
         return 0
 
 
-def staff_summary(frame):
+def staff_summary(frame, day=None):
     """One line per housekeeper: rooms, minutes by service, and whether the
     day is Light (under LOW_MIN), Full, or Over the chart's cap."""
     people = {}
@@ -675,7 +681,7 @@ def staff_summary(frame):
     out = []
     for p in people.values():
         p["main"] = "Daily Service" if p["Daily Service"] > p["Full Clean"] else "Full Clean"
-        p["cap"] = CAP_DS if p["main"] == "Daily Service" else CAP_FC
+        p["cap"] = _ds_cap(day) if p["main"] == "Daily Service" else CAP_FC
         # Dust n Vac carries no minutes on the sheet, and it is RQS 2's round:
         # someone whose day is only that is not a light housekeeper.
         if p["Dust n Vac"] and not (p["Full Clean"] or p["Daily Service"]):
@@ -702,13 +708,13 @@ def _bundles(rows):
              "from": str(g[0].get("HSKP") or "") or "nobody"} for g in groups.values()]
 
 
-def suggest_moves(frame):
+def suggest_moves(frame, day=None):
     """For each Light housekeeper, lightest first: rooms that would fill the
     chart toward a full day without passing its cap -- unstaffed rooms first,
     then rooms from anyone Over. Same service only, the same building first,
     then the nearest floor. Advice for the RQS, not a change."""
     rows = [r for r in frame.to_dict("records") if str(r.get("Room") or "").strip()]
-    summary = {p["name"]: p for p in staff_summary(frame)}
+    summary = {p["name"]: p for p in staff_summary(frame, day)}
     loads = {n: p["minutes"] for n, p in summary.items()}
     taken, moves = set(), []
 
