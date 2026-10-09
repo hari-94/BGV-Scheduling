@@ -283,9 +283,22 @@ def tab_name(day: _dt.date) -> str:
     return f"{day:%b} {day.day}"
 
 
+# The "Built ..." stamp sits in the header row, clear of the columns. It
+# changes on every build, so the fingerprint leaves it out -- otherwise a
+# rebuild would never be "unchanged" and every tab would look edited.
+STAMP_COL = len(COLUMNS) + 2
+
+
 def _fingerprint(ws) -> str:
-    rows = [[("" if c is None else str(c)) for c in r]
-            for r in ws.iter_rows(values_only=True)]
+    rows = []
+    for i, r in enumerate(ws.iter_rows(values_only=True)):
+        r = ["" if c is None else str(c) for c in r]
+        if i == 0 and len(r) >= STAMP_COL:
+            r[STAMP_COL - 1] = ""
+        while len(r) > len(COLUMNS) and r[-1] == "":
+            r.pop()                        # the stamp widens the sheet; tabs written
+        r += [""] * (len(COLUMNS) - len(r))  # before it must hash the same
+        rows.append(r)
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
@@ -422,7 +435,7 @@ def _save_in_place(path, data: bytes, tries=30, wait=20):
             time.sleep(wait)
 
 
-def write_tab(path, day: _dt.date, frame, state: dict):
+def write_tab(path, day: _dt.date, frame, state: dict, note: str = ""):
     """Write `frame` as the day's tab. Returns "written", "replaced" or
     "kept (edited)". `state` remembers the fingerprint of what was written,
     so an edited tab is never overwritten."""
@@ -440,6 +453,7 @@ def write_tab(path, day: _dt.date, frame, state: dict):
         old_fp = _fingerprint(wb[name])
         if state.get(name) != old_fp:
             return "kept (edited)"
+        had_stamp = bool(wb[name].cell(row=1, column=STAMP_COL).value)
         wb.remove(wb[name])
         outcome = "replaced"
     ws = wb.create_sheet(name)
@@ -463,6 +477,14 @@ def write_tab(path, day: _dt.date, frame, state: dict):
                 v = ""                         # NaN is pandas' blank; write it as one
             ws.cell(row=ri, column=ci, value=v).font = reg
     _write_summary(ws, len(frame) + 3, frame, day)
+    import clock
+    built = clock.now()
+    c = ws.cell(row=1, column=STAMP_COL,
+                value=f"Built {built:%a %b} {built.day}, {built:%I:%M %p}".replace(" 0", " ")
+                      + (f" · {note}" if note else ""))
+    c.font = Font(name="Arial", size=10, bold=True, color="16202E")
+    c.fill = PatternFill("solid", fgColor="FFF4CC")
+    ws.column_dimensions[get_column_letter(STAMP_COL)].width = 58
     ws.freeze_panes = "A2"
     # Day tabs in date order, the newest last, and only the last month kept.
     from hotsos_sync import tab_date
@@ -473,8 +495,8 @@ def write_tab(path, day: _dt.date, frame, state: dict):
     wb.active = len(wb.sheetnames) - 1
     # Nothing new: don't touch the file. Every save is an upload, and a
     # rebuild that changes nothing shouldn't put the file back in the queue.
-    if old_fp is not None and _fingerprint(ws) == old_fp:
-        return "unchanged"
+    if old_fp is not None and had_stamp and _fingerprint(ws) == old_fp:
+        return "unchanged"                 # the stamp keeps the build that made it
     buf = io.BytesIO()
     wb.save(buf)
     _save_in_place(path, buf.getvalue())
@@ -690,7 +712,9 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
     room_text, n_rooms, _sheet = excel_to_room_text(io.BytesIO(ssrs_xlsx))
     fg = generate(room_text, arrival_text, publish=publish, day=day)
     frame = assign_dust_n_vac(build_export_frame(fg))
-    outcome = write_tab(workbook_path, day, frame, state)
+    outcome = write_tab(workbook_path, day, frame, state,
+                        note="Arrival Report included" if (arrival_text or "").strip()
+                        else "no Arrival Report yet")
     staffed = sorted({g.get("housekeeper") for g in fg if g.get("housekeeper")})
     dv = frame[frame["Service"].fillna("").str.strip().str.lower().eq("dust n vac")]         if not frame.empty else frame
     dv_blank = int((dv["HSKP"].fillna("").astype(str).str.strip() == "").sum()) if len(dv) else 0
