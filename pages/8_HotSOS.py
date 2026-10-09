@@ -8,10 +8,13 @@ request in app_settings and shows what comes back. That is also why the page
 says, first of all, whether the PC is listening -- a button that silently
 does nothing is worse than no button.
 
-The result reads the way an RQS checks it: per housekeeper, changes first,
-problems on top. Names come from the staff directory (staff_names.py), whose
-full names are HotSOS's own; a name it doesn't know gets a small box to match
-it once, and the app is renamed to follow.
+Laid out as the three things an RQS does, in order -- 1 the day's sheet,
+2 Preview, 3 Push -- then one result card: what was read, four counts, and
+every problem in a single "needs attention" box, so warnings never stack up
+as separate banners. The housekeeper cards and the full table follow.
+
+Names come from the staff directory (staff_names.py), whose full names are
+HotSOS's own; a name it doesn't know gets a small box to match it once.
 
 Nothing reaches HotSOS until an RQS presses Push.
 """
@@ -26,6 +29,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, clock, db, ui          # noqa: E402
+import daily_build                  # noqa: E402
 import hotsos_sync as hs            # noqa: E402
 import staff_names as sn            # noqa: E402
 
@@ -33,6 +37,33 @@ st.set_page_config(page_title="HotSOS", page_icon="🛰️", layout="wide")
 st.markdown("""<style>
 .block-container{max-width:min(1200px,97%);}
 [data-testid='stSidebarNav']{display:none!important;}
+.hs-top{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:4px}
+.hs-title{font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:700;color:#16202e}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 11px;
+      font-size:.78rem;font-weight:600;border:1px solid #e6e9ee;background:#fff;color:#1f2733;margin-left:6px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.step{background:#fff;border:1px solid #e6e9ee;border-radius:14px;padding:12px 14px 4px;height:100%}
+.step-n{font-size:.72rem;font-weight:700;color:#2563a8;letter-spacing:.05em;text-transform:uppercase}
+.step-t{font-weight:700;color:#16202e;font-size:.98rem;margin:2px 0 4px}
+.step-s{font-size:.8rem;color:#5b6675;line-height:1.45;height:4.4em;overflow:hidden}
+.res{background:#fff;border:1px solid #e6e9ee;border-radius:14px;padding:14px 16px;margin-top:14px}
+.res-h{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;align-items:baseline}
+.res-t{font-weight:700;color:#16202e;font-size:1rem}
+.res-when{font-size:.78rem;color:#5b6675}
+.res-src{font-size:.8rem;color:#5b6675;margin-top:3px}
+.verdict{margin-top:10px;font-size:.9rem;font-weight:600;padding:9px 12px;border-radius:10px}
+.v-ok{background:#ecf7ee;color:#05603a}.v-info{background:#eef4fd;color:#184f95}
+.v-warn{background:#fff8eb;color:#7a4a00}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+.kpi{border:1px solid #eef0f3;border-radius:10px;padding:8px 12px}
+.kpi b{display:block;font-family:'Syne',sans-serif;font-size:1.5rem;color:#16202e;line-height:1.1}
+.kpi span{font-size:.74rem;color:#5b6675}
+.kpi.hot b{color:#2563a8}.kpi.bad b{color:#b42318}
+@media (max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.attn{background:#fff8eb;border:1px solid #f6d58e;border-radius:12px;padding:10px 14px;margin-top:12px;
+      font-size:.84rem;color:#5c3d00;line-height:1.6}
+.attn-h{font-weight:700;margin-bottom:2px}
+.live{font-size:.82rem;color:#184f95;background:#eef4fd;border-radius:10px;padding:8px 12px;margin-top:10px}
 .hk-card{background:#fff;border:1px solid #e6e9ee;border-radius:14px;padding:12px 14px;margin-bottom:12px}
 .hk-name{font-weight:700;color:#16202e;font-size:.95rem}
 .hk-meta{font-size:.75rem;color:#5b6675;margin:2px 0 8px}
@@ -44,8 +75,7 @@ st.markdown("""<style>
 .c-already{background:#f2f3f5;color:#5b6675}
 .c-sent{box-shadow:inset 0 0 0 1px #0ca30c}
 .c-fail{background:#fdecec;color:#9b1c1c;border-color:#f5b5b5}
-.attn{background:#fff8eb;border:1px solid #f6d58e;border-radius:12px;padding:10px 14px;margin:6px 0 12px;
-      font-size:.85rem;color:#5c3d00}
+.legend{font-size:.75rem;color:#5b6675;margin:-4px 0 6px}
 </style>""", unsafe_allow_html=True)
 auth.require_login()
 ui.topnav("HotSOS")
@@ -75,6 +105,14 @@ def _ago(sec):
     return f"{sec / 3600:.1f} h ago"
 
 
+def _clock(stamp):
+    try:
+        t = _dt.datetime.fromisoformat(stamp).astimezone(clock.MTN)
+        return f"{t:%I:%M %p}".lstrip("0")
+    except Exception:
+        return "—"
+
+
 def _request(mode, day=None):
     db._upsert_key(hs.REQUEST_KEY, {"id": uuid.uuid4().hex,
                                     "date": str(day or clock.today()),
@@ -88,134 +126,157 @@ def _svc(s):
     return SVC.get(str(s).strip().lower(), str(s)[:2].upper())
 
 
-st.markdown("## 🛰️ HotSOS")
+# ── header: what this is, and whether the office PC is listening ───────────
 beat = db._load_key(hs.HEARTBEAT_KEY) or {}
 beat_age = _age(beat.get("at"))
-if beat_age is not None and beat_age < ONLINE_SECONDS:
-    st.caption(f"🟢 Office PC **{beat.get('host', '')}** connected · last seen {_ago(beat_age)}")
-else:
-    st.warning(f"The office PC isn't connected (last seen {_ago(beat_age)}). "
-               "Requests will wait until it's back on.")
+online = beat_age is not None and beat_age < ONLINE_SECONDS
+pc = (f'<span class="pill"><span class="dot" style="background:#0ca30c"></span>'
+      f'Office PC online</span>' if online else
+      f'<span class="pill" style="border-color:#f5b5b5;color:#9b1c1c"><span class="dot" '
+      f'style="background:#d03b3b"></span>Office PC offline · {_ago(beat_age)}</span>')
+st.markdown(f'<div class="hs-top"><span class="hs-title">🛰️ HotSOS</span><span>{pc}</span></div>',
+            unsafe_allow_html=True)
+if not online:
+    st.caption("Nothing below can run until the office PC is back on; presses wait for it.")
 
-# ── today's sheet: built at 5 AM, edited by the team, pushed when final ───
-import daily_build  # noqa: E402
+# ── the three steps ─────────────────────────────────────────────────────────
 _b = db._load_key(daily_build.BUILD_KEY) or {}
-_bc1, _bc2 = st.columns([4, 1.3])
-if _b.get("date") == clock.today_iso() and _b.get("status") == "done":
-    _arr = "✓ Arrival Report" if _b.get("arrival") else "⚠️ no Arrival Report found"
-    _bc1.markdown(
-        f"📄 **Today's sheet** — tab **{_b.get('tab')}** in **{_b.get('workbook')}** "
-        f"(SharePoint › Office › GC8 Inspections) · built "
-        f"{_ago(_age(_b.get('finished_at')))} by {_b.get('by')} · {_b.get('rooms')} rooms, "
-        f"{_b.get('charts')} charts · {_arr}"
-        + (" · *kept: someone has edited it*" if "edited" in str(_b.get("outcome")) else ""))
-    if _b.get("dv_unassigned"):
-        st.warning(f"No RQS 2 on today's staff schedule, so {_b['dv_unassigned']} Dust n Vac "
-                   "rooms have no one in HSKP. Put today's RQS 2 on them in the sheet before "
-                   "pushing — or mark RQS 2 in Schedule.xlsx and the 5 AM draft fills them in.")
+today = clock.today_iso()
+if _b.get("date") == today and _b.get("status") == "done":
+    sheet_line = (f"Tab <b>{e(str(_b.get('tab')))}</b> · {_b.get('rooms')} rooms, "
+                  f"{_b.get('charts')} charts · built {_clock(_b.get('finished_at'))}"
+                  + (" · Arrival Report ✓" if _b.get("arrival") else " · no Arrival Report"))
 elif _b.get("status") == "running":
-    _bc1.info("⏳ Building today's sheet…")
-elif _b.get("status") == "error" and _b.get("date") == clock.today_iso():
-    _bc1.error(f"Today's sheet wasn't built: {_b.get('error')}")
+    sheet_line = "Building now…"
+elif _b.get("date") == today and _b.get("status") == "error":
+    sheet_line = f"<span style='color:#b42318'>Build failed: {e(str(_b.get('error'))[:90])}</span>"
 else:
-    _bc1.caption("📄 Today's sheet hasn't been built yet — it's built at 5 AM.")
-if _bc2.button("Build today's sheet", use_container_width=True,
-               help="Builds the schedule like pressing Generate, and writes today's tab. "
-                    "A tab someone has already edited is never overwritten."):
-    _request("build", clock.today())
-    st.toast("Asked the office PC to build today's sheet.")
+    sheet_line = "Not built yet today — it's built at 5 AM."
 
-st.caption("Edit the day's tab in SharePoint (call-offs, swaps), then **Preview** to see "
-           "what would change and **Push** when it's final — that updates HotSOS and the "
-           "app's charts.")
-c1, c2, c3, c4 = st.columns([1.3, 1, 1, 2.2])
-day = c1.date_input("Day", value=clock.today(), key="hs_day")
-final = c4.checkbox("The sheet is final", key="hs_final",
-                    help="Push is unlocked once you've confirmed the sheet is done.")
-if c2.button("Preview", use_container_width=True):
-    _request("preview", day)
-if c3.button("Push to HotSOS", type="primary", use_container_width=True,
-             disabled=not final):
-    _request("push", day)
+s1, s2, s3 = st.columns(3)
+with s1:
+    st.markdown(f'<div class="step"><div class="step-n">Step 1</div>'
+                f'<div class="step-t">Today\'s sheet</div><div class="step-s" title="GC8 Daily '
+                f'Schedule.xlsx · SharePoint › Office › GC8 Inspections">{sheet_line}</div></div>',
+                unsafe_allow_html=True)
+    if st.button("Build today's sheet", use_container_width=True,
+                 help="Builds the schedule like pressing Generate, and writes today's tab. "
+                      "A tab someone has already edited is never overwritten."):
+        _request("build", clock.today())
+        st.toast("Asked the office PC to build today's sheet.")
+with s2:
+    st.markdown('<div class="step"><div class="step-n">Step 2</div>'
+                '<div class="step-t">Preview</div><div class="step-s">Edit the tab for call-offs '
+                'and swaps, then check what would change. Reads the sheet live.</div></div>',
+                unsafe_allow_html=True)
+    day = st.date_input("Day", value=clock.today(), key="hs_day", label_visibility="collapsed")
+    if st.button("Preview", use_container_width=True):
+        _request("preview", day)
+with s3:
+    st.markdown('<div class="step"><div class="step-n">Step 3</div>'
+                '<div class="step-t">Push</div><div class="step-s">Sends the final sheet to '
+                'HotSOS and updates the app\'s charts.</div></div>', unsafe_allow_html=True)
+    final = st.checkbox("The sheet is final", key="hs_final")
+    if st.button("Push to HotSOS", type="primary", use_container_width=True, disabled=not final):
+        _request("push", day)
 
+
+# ── the result ──────────────────────────────────────────────────────────────
 @st.fragment(run_every=5)
 def result_panel():
     req = db._load_key(hs.REQUEST_KEY) or {}
     cur = db._load_key(hs.RESULT_KEY) or {}
-    # What's happening now goes in a banner; below it stays the last run that
-    # finished, until a newer one replaces it -- a press never blanks the page.
+    live = ""
     if req.get("id") and req["id"] != cur.get("id"):
-        st.info(f"⏳ {req.get('mode', '').title()} for {req.get('date')} asked by "
-                f"{req.get('by')} — waiting for the office PC… (last result below)")
+        live = (f"⏳ {e(req.get('mode', '').title())} for {e(str(req.get('date')))} asked by "
+                f"{e(str(req.get('by')))} — waiting for the office PC…")
     elif cur.get("status") == "running":
-        st.info(f"⏳ {cur['mode'].title()} for {cur['date']} is running — about a minute… "
-                "(last result below)")
-    elif cur.get("status") == "error":
-        st.error(f"{cur.get('mode', '').title()} for {cur.get('date')} · "
-                 f"{_ago(_age(cur.get('finished_at')))}: {cur.get('error')}")
+        live = f"⏳ {e(cur['mode'].title())} for {e(cur['date'])} is running — about a minute…"
+    if live:
+        st.markdown(f'<div class="live">{live} The last result stays below until it\'s done.</div>',
+                    unsafe_allow_html=True)
+    if cur.get("status") == "error":
+        st.error(f"{cur.get('mode', '').title()} for {cur.get('date')} "
+                 f"({_ago(_age(cur.get('finished_at')))}): {cur.get('error')}")
+
     res = db._load_key(hs.LAST_KEY) or (cur if cur.get("plan") is not None else {})
     if not res:
-        st.caption("No preview yet — press **Preview** to see what would change.")
+        st.markdown('<div class="res"><div class="res-t">No preview yet</div>'
+                    '<div class="res-src">Press Preview to see what would change.</div></div>',
+                    unsafe_allow_html=True)
         return
-
-    head = (f"**{res['mode'].title()}** for **{res['date']}** · tab “{res.get('tab', '?')}” · "
-            f"{res.get('by', '')} · {_ago(_age(res.get('finished_at')))}")
-    if res.get("sheet_saved_at"):
-        _sv = _dt.datetime.fromisoformat(res["sheet_saved_at"]).astimezone(clock.MTN)
-        _who = f" by {res['sheet_by']}" if res.get("sheet_by") else ""
-        _src = res.get("sheet_source") or "the synced copy on the office PC"
-        head += (f"  \n📄 Read {_src} — last saved **{_sv:%I:%M:%S %p}**{_who}".replace(" 0", " ")
-                 + ("" if _src.startswith("live") else
-                    ". If your last edit is newer, wait a few seconds and Preview again."))
-    _plan = res.get("plan") or []
-    _all_right = _plan and all(l["action"] == hs.ALREADY for l in _plan)
-    if res["mode"] == "push" and not res.get("sent") and _all_right and res["status"] == "done":
-        # A push with nothing to send isn't a failure: HotSOS already has it
-        # (usually because the same sheet was pushed a minute ago).
-        st.success(f"{head} — **HotSOS already matches the sheet**: all {len(_plan)} rooms "
-                   "are with the right person, so nothing needed sending.")
-    elif res["mode"] == "push":
-        (st.success if res["status"] == "done" else st.warning)(
-            f"{head} — **{res.get('sent', 0)} rooms sent to HotSOS**"
-            + (f" · app charts updated ({res['app']['renamed']} charts changed hands, "
-               f"{res['app']['moved']} rooms moved)" if (res.get("app") or {}).get("changed")
-               else ""))
-    else:
-        st.info(f"{head} — preview only, nothing was sent")
-    if res.get("warning"):
-        st.warning(res["warning"])
-    for err in res.get("errors", []):
-        st.error(err)
 
     plan = res.get("plan") or []
     n = {a: sum(1 for l in plan if l["action"] == a) for a in
          (hs.ASSIGN, hs.MOVE, hs.ALREADY, hs.NO_PERSON, hs.NO_ROOM, hs.NO_HSKP)}
-    m = st.columns(4)
-    m[0].metric("Will change", n[hs.ASSIGN] + n[hs.MOVE],
-                help=f"{n[hs.ASSIGN]} new, {n[hs.MOVE]} moved from someone else")
-    m[1].metric("Already right", n[hs.ALREADY])
-    m[2].metric("Need attention", n[hs.NO_PERSON] + n[hs.NO_ROOM])
-    m[3].metric("No housekeeper", n[hs.NO_HSKP], help="Left as they are in HotSOS")
+    change = n[hs.ASSIGN] + n[hs.MOVE]
 
-    # Problems first, in words someone can act on.
+    # One verdict line, in words.
+    if res["mode"] == "push":
+        if res["status"] != "done":
+            verdict = ("v-warn", f"Pushed with problems: {res.get('sent', 0)} rooms sent — "
+                                 "see below.")
+        elif not res.get("sent") and not change:
+            verdict = ("v-ok", f"✓ HotSOS matches the sheet — all {len(plan)} rooms are with "
+                               "the right person.")
+        else:
+            app = res.get("app") or {}
+            verdict = ("v-ok", f"✓ {res.get('sent', 0)} rooms sent to HotSOS"
+                       + (" · app charts updated" if app.get("changed") else ""))
+    else:
+        verdict = (("v-info", f"{change} room{'s' if change != 1 else ''} would change. "
+                              "Nothing has been sent.") if change else
+                   ("v-ok", "✓ Nothing to change — HotSOS already matches the sheet."))
+
+    src = ""
+    if res.get("sheet_saved_at"):
+        who = f" by {e(res['sheet_by'])}" if res.get("sheet_by") else ""
+        where = res.get("sheet_source") or "the synced copy on the office PC"
+        src = (f"Read {e(where)} · sheet last saved {_clock(res['sheet_saved_at'])}{who}"
+               + ("" if where.startswith("live") else
+                  " — if your last edit is newer, wait a few seconds and Preview again"))
+
+    # Every problem, in one place.
     attn = []
-    if res.get("unmatched_names"):
-        attn.append("Names not matched to anyone in HotSOS: <b>"
-                    + e(", ".join(res["unmatched_names"]))
-                    + "</b> — match them in the box below.")
-    for col, who in (("HSKP", "housekeeper"), ("RQS", "RQS")):
+    for col, who_ in (("HSKP", "housekeeper"), ("RQS", "RQS")):
         for person, blds in ((res.get("rule23") or {}).get(col) or {}).items():
-            attn.append(f"<b>Rule broken:</b> {e(person)} ({who}) has Full Clean in buildings "
-                        f"<b>{' and '.join(blds)}</b> — one person can't have building 2 and 3. "
-                        "Fix the sheet, then Preview again.")
+            attn.append(f"<b>Rule:</b> {e(person)} ({who_}) has Full Clean in buildings "
+                        f"{' and '.join(blds)} — give one side to someone else.")
+    if res.get("unmatched_names"):
+        attn.append("<b>Names HotSOS doesn't know:</b> " + e(", ".join(res["unmatched_names"]))
+                    + " — match them in the box at the bottom.")
     miss = [l["room"] for l in plan if l["action"] == hs.NO_ROOM]
     if miss:
-        attn.append(f"Rooms HotSOS doesn't have today: <b>{e(', '.join(miss))}</b>")
-    if attn:
-        st.markdown('<div class="attn">⚠️ ' + "<br>⚠️ ".join(attn) + "</div>",
-                    unsafe_allow_html=True)
+        attn.append(f"<b>Not on HotSOS today:</b> {e(', '.join(miss))}")
+    if _b.get("date") == res.get("date") and _b.get("dv_unassigned") and n[hs.NO_HSKP]:
+        attn.append(f"<b>Dust n Vac:</b> no RQS 2 on the staff schedule — put a name on those "
+                    "rows in the sheet.")
+    if res.get("warning"):
+        attn.append(f"<b>Two tabs:</b> {e(res['warning'])}")
+    for err in res.get("errors", []):
+        attn.append(f"<b>HotSOS:</b> {e(err)}")
 
-    only_changes = st.toggle("Show only rooms that will change", value=True,
+    kpis = [("hot" if change else "", change, "will change"),
+            ("", n[hs.ALREADY], "already right"),
+            ("bad" if n[hs.NO_PERSON] + n[hs.NO_ROOM] else "", n[hs.NO_PERSON] + n[hs.NO_ROOM],
+             "need attention"),
+            ("", n[hs.NO_HSKP], "no housekeeper on the sheet")]
+    st.markdown(
+        f'<div class="res"><div class="res-h"><span class="res-t">{e(res["mode"].title())} · '
+        f'{e(res["date"])} · {e(str(res.get("tab", "?")))}</span>'
+        f'<span class="res-when">{e(str(res.get("by", "")))} · {_ago(_age(res.get("finished_at")))}'
+        f'</span></div>'
+        + (f'<div class="res-src">{src}</div>' if src else "")
+        + f'<div class="verdict {verdict[0]}">{verdict[1]}</div>'
+        + '<div class="kpis">' + "".join(f'<div class="kpi {c}"><b>{v}</b><span>{t}</span></div>'
+                                         for c, v, t in kpis) + '</div>'
+        + (f'<div class="attn"><div class="attn-h">⚠️ Needs attention</div>'
+           + "<br>".join(attn) + '</div>' if attn else "")
+        + '</div>', unsafe_allow_html=True)
+
+    # Per housekeeper.
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    only_changes = st.toggle("Only rooms that will change", value=bool(change),
                              key="hs_only_changes")
     by_person = {}
     for l in plan:
@@ -225,8 +286,7 @@ def result_panel():
     for person, lines in sorted(by_person.items(),
                                 key=lambda kv: (-sum(l["action"] in (hs.ASSIGN, hs.MOVE)
                                                      for l in kv[1]), kv[0])):
-        shown = [l for l in lines if not only_changes
-                 or l["action"] in (hs.ASSIGN, hs.MOVE)]
+        shown = [l for l in lines if not only_changes or l["action"] in (hs.ASSIGN, hs.MOVE)]
         if not shown:
             continue
         chg = sum(l["action"] in (hs.ASSIGN, hs.MOVE) for l in lines)
@@ -247,16 +307,17 @@ def result_panel():
             chips.append(f'<span class="chip {cls}" title="{e(tip + team)}">{e(l["room"])} '
                          f'<small>{_svc(l["service"])}</small></span>')
         cards.append(f'<div class="hk-card"><div class="hk-name">{e(person)}</div>'
-                     f'<div class="hk-meta">{len(lines)} rooms ({e(svcs)}) · '
-                     f'{chg} to change</div>{"".join(chips)}</div>')
+                     f'<div class="hk-meta">{len(lines)} rooms · {e(svcs)}'
+                     + (f' · <b>{chg} to change</b>' if chg else "") + f'</div>{"".join(chips)}</div>')
     if cards:
+        st.markdown('<div class="legend">Blue: new · amber: moved from someone else (hover for '
+                    'who) · grey: already right · green outline: sent</div>',
+                    unsafe_allow_html=True)
         cols = st.columns(3)
         for i, c in enumerate(cards):
             cols[i % 3].markdown(c, unsafe_allow_html=True)
-        st.caption("🔵 new · 🟠 moved from someone else (hover for who) · ⚪ already "
-                   "right · green outline = sent")
     elif only_changes:
-        st.success("Nothing to change — HotSOS already matches the sheet.")
+        st.caption("No rooms to change. Switch the toggle off to see everyone's rooms.")
 
     with st.expander("Every room, as a table"):
         st.dataframe(pd.DataFrame([{
@@ -264,6 +325,7 @@ def result_panel():
             "HotSOS attendant": l["hotsos_name"], "Now in HotSOS": l["current"],
             "Action": l["action"], "Result": l.get("outcome", ""),
         } for l in plan]), hide_index=True, use_container_width=True)
+
 
 result_panel()
 
