@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, clock, db, ui          # noqa: E402
 import hotsos_sync as hs            # noqa: E402
 
-st.set_page_config(page_title="Health", page_icon="🩺", layout="wide")
+st.set_page_config(page_title="Stats", page_icon="📊", layout="wide")
 st.markdown("""<style>
 .block-container{max-width:min(1200px,97%);}
 [data-testid='stSidebarNav']{display:none!important;}
@@ -52,9 +52,9 @@ st.markdown("""<style>
 .hl-next{font-size:.82rem;color:#1f2733;line-height:1.8}
 </style>""", unsafe_allow_html=True)
 auth.require_login()
-ui.topnav("Health")
+ui.topnav("Stats")
 if not auth.can("can_view_dashboard"):
-    st.error("Health is for RQS and admins.")
+    st.error("Stats are for RQS and admins.")
     st.stop()
 
 e = html.escape
@@ -192,11 +192,260 @@ def flow_svg(state):
             f'step, with the health of each step" style="width:100%;height:auto;'
             f'border:1px solid #e6e9ee;border-radius:14px;background:#fff"/>')
 
-st.markdown("## 🩺 Health")
+st.markdown("## 📊 Stats")
+
+# ── live panel: the free plan's three limits, and the floor's pulse ──────────
+import calendar                      # noqa: E402
+import plotly.graph_objects as go    # noqa: E402
+import freetier                      # noqa: E402
+import roomstatus as _rs             # noqa: E402
+
+DARK_INK, DARK_INK2, DARK_GRID = "#e6edf7", "#9fb0c7", "#1e2a3d"
+# Categorical slots 1-3 of the reference palette, dark steps -- validated on
+# this panel's surface (#0b1220): lightness, chroma, CVD and contrast all pass.
+C_APP, C_PC, C_FC = "#3987e5", "#d95926", "#199e70"
+# Status, reserved for state: the same green / amber / red as the cards below.
+S_OK, S_WARN, S_BAD = "#0ca30c", "#fab219", "#d03b3b"
+
+st.markdown("""<style>
+.st-key-pulse{background:radial-gradient(1100px 420px at 8% 0%,#15274a 0%,#0b1220 62%);
+  border:1px solid #1e2a3d;border-radius:18px;padding:16px 18px 8px;margin:6px 0 18px}
+.st-key-pulse [data-testid="stMarkdownContainer"] p,
+.st-key-pulse [data-testid="stCaptionContainer"] p{color:#9fb0c7}
+.pl-head{display:flex;align-items:center;gap:10px;font-family:'Syne',sans-serif;
+  font-size:1.08rem;font-weight:700;color:#e6edf7}
+.pl-dot{width:10px;height:10px;border-radius:50%;background:#22c55e;
+  box-shadow:0 0 0 0 rgba(34,197,94,.7);animation:pl 1.6s infinite}
+@keyframes pl{0%{box-shadow:0 0 0 0 rgba(34,197,94,.7)}
+  70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+@media (prefers-reduced-motion:reduce){.pl-dot{animation:none}}
+.pl-sub{color:#9fb0c7;font-size:.78rem;margin:2px 0 10px}
+.pl-sec{color:#e6edf7;font-weight:700;font-size:.86rem;margin:10px 0 0}
+.pl-note{color:#9fb0c7;font-size:.74rem;margin:-4px 0 10px;line-height:1.5}
+</style>""", unsafe_allow_html=True)
+
+_CFG = {"displayModeBar": False, "responsive": True}
+
+
+def _dark(fig, height, legend=False):
+    fig.update_layout(
+        height=height, margin=dict(l=8, r=8, t=8, b=8), paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)", font=dict(family="DM Sans, sans-serif", size=11,
+                                                color=DARK_INK2),
+        showlegend=legend, bargap=0.3, barcornerradius=4, hovermode="x unified",
+        hoverlabel=dict(bgcolor="#111b2e", bordercolor=DARK_GRID, font=dict(color=DARK_INK)),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0, font=dict(color=DARK_INK)))
+    fig.update_xaxes(showgrid=False, linecolor=DARK_GRID, tickfont=dict(color=DARK_INK2),
+                     fixedrange=True, automargin=True)
+    fig.update_yaxes(gridcolor=DARK_GRID, zeroline=False, tickfont=dict(color=DARK_INK2),
+                     fixedrange=True, automargin=True)
+    return fig
+
+
+def _waiting(fig, text):
+    """An empty chart says why it's empty instead of showing bare axes."""
+    fig.add_annotation(text=text, x=0.5, y=0.5, xref="paper", yref="paper",
+                       showarrow=False, font=dict(color=DARK_INK2, size=12))
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
+    return fig
+
+
+def _gauge(value, limit, title, unit):
+    value = float(value or 0)
+    pct = value / limit
+    col = S_BAD if pct >= freetier.ACT else S_WARN if pct >= freetier.WARN else S_OK
+    state = "near the limit" if pct >= freetier.ACT else "worth watching" if pct >= freetier.WARN \
+        else "comfortable"
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number", value=value,
+        number={"suffix": f" {unit}", "valueformat": ",.0f" if value >= 10 else ",.1f",
+                "font": {"color": DARK_INK, "size": 26}},
+        title={"text": f"{title}<br><span style='font-size:11px;color:{DARK_INK2}'>"
+                       f"{pct:.1%} of the {limit:,.0f} {unit} free plan · {state}</span>",
+               "font": {"color": DARK_INK, "size": 13}},
+        gauge={"axis": {"range": [0, limit], "tickcolor": DARK_INK2,
+                        "tickfont": {"color": DARK_INK2, "size": 9}},
+               "bar": {"color": col, "thickness": 0.32}, "bgcolor": "#111b2e",
+               "borderwidth": 0,
+               "steps": [{"range": [0, limit * freetier.WARN], "color": "#13213a"},
+                         {"range": [limit * freetier.WARN, limit * freetier.ACT],
+                          "color": "#2a2416"},
+                         {"range": [limit * freetier.ACT, limit], "color": "#2d1618"}],
+               "threshold": {"line": {"color": S_BAD, "width": 2}, "thickness": 0.85,
+                             "value": limit * freetier.ACT}}))
+    fig.update_layout(height=200, margin=dict(l=22, r=22, t=56, b=4),
+                      paper_bgcolor="rgba(0,0,0,0)", font=dict(color=DARK_INK))
+    return fig
+
+
+@st.fragment(run_every=30)
+def live_stats():
+    ft = db._load_key(freetier.STATUS_KEY) or {}
+    month = freetier.month_usage()
+    daily = freetier.daily_usage()
+    mem = db._load_key(freetier.USAGE_PREFIX + "memory_app") or {}
+    sync = db._load_key(getattr(hs, "STATUS_SYNC_KEY", "hotsos_status_sync")) or {}
+    rooms = db.get_room_statuses() or {}
+    now = clock.now()
+    days_in = calendar.monthrange(now.year, now.month)[1]
+
+    with st.container(key="pulse"):
+        st.markdown(f'<div class="pl-head"><span class="pl-dot"></span>Live · free plan and '
+                    f'the floor</div><div class="pl-sub">Refreshes every 30 seconds · '
+                    f'{now:%I:%M:%S %p}'.replace(" 0", " ") + '</div>', unsafe_allow_html=True)
+
+        # 1. the three free-plan limits
+        g1, g2, g3 = st.columns(3)
+        dbm = ft.get("db_mb") or {}
+        g1.plotly_chart(_gauge(dbm.get("total", 0), freetier.DB_LIMIT_MB, "Database", "MB"),
+                        config=_CFG, use_container_width=True, key="g_db")
+        g1.markdown(f'<div class="pl-note">Measured nightly at 2 AM'
+                    + (f' — last {_when(ft.get("at"))}' if ft.get("at") else
+                       " — first measurement tonight") + "</div>", unsafe_allow_html=True)
+        used = month.get("total", 0.0)
+        pace = used / max(now.day - 1 + now.hour / 24, 0.25) * days_in
+        g2.plotly_chart(_gauge(used, freetier.EGRESS_LIMIT_MB, f"Data sent · {now:%B}", "MB"),
+                        config=_CFG, use_container_width=True, key="g_eg")
+        g2.markdown(f'<div class="pl-note">At this pace ≈ {pace:,.0f} MB by month end '
+                    f'({pace / freetier.EGRESS_LIMIT_MB:.0%}). Estimated from every read, '
+                    f'erring high.</div>', unsafe_allow_html=True)
+        g3.plotly_chart(_gauge(mem.get("now_mb", 0), freetier.MEMORY_LIMIT_MB, "App memory", "MB"),
+                        config=_CFG, use_container_width=True, key="g_mem")
+        g3.markdown(f'<div class="pl-note">Peak today {mem.get("peak_mb", 0):,.0f} MB'
+                    + (f' · caches cleared {_when(mem.get("caches_cleared"))}'
+                       if mem.get("caches_cleared") else "")
+                    + ' · drops caches by itself past 85%</div>', unsafe_allow_html=True)
+
+        # 2. data sent per day, by who sent for it; and memory through the day
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown('<div class="pl-sec">Data sent per day</div>', unsafe_allow_html=True)
+            dates = sorted({d for src in daily.values() for d in src})
+            fig = go.Figure()
+            for src, col, name in (("app", C_APP, "Cloud app"), ("agent", C_PC, "Office PC"),
+                                   ("forecast", C_FC, "Forecast")):
+                if src in daily:
+                    fig.add_bar(x=dates, y=[daily[src].get(d, 0) for d in dates], name=name,
+                                marker=dict(color=col, line=dict(color="#0b1220", width=2)),
+                                hovertemplate="%{y:.1f} MB")
+            budget = freetier.EGRESS_LIMIT_MB / days_in
+            top = max([sum(daily.get(s_, {}).get(d_, 0) for s_ in daily) for d_ in dates] or [0])
+            # The budget line only where it can be seen beside the bars; far
+            # above them it flattens real use to nothing, so it's said instead.
+            if top >= budget * 0.2:
+                fig.add_hline(y=budget, line=dict(color=DARK_INK2, dash="dot", width=1),
+                              annotation_text=f"daily budget {budget:.0f} MB",
+                              annotation_font_color=DARK_INK2, annotation_position="top left")
+            fig.update_layout(barmode="stack")
+            fig.update_xaxes(type="category")
+            fig.update_yaxes(title_text="MB", title_font=dict(color=DARK_INK2))
+            if not dates:
+                _waiting(fig, "Counting starts with the next reads")
+            st.plotly_chart(_dark(fig, 230, legend=bool(dates)), config=_CFG,
+                            use_container_width=True, key="c_eg")
+            st.markdown(f'<div class="pl-note">Daily budget on the free plan ≈ {budget:.0f} MB'
+                        + (f' · busiest day so far {top:.1f} MB' if dates else "")
+                        + '</div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown('<div class="pl-sec">App memory today</div>', unsafe_allow_html=True)
+            pts = [(_t(a), v) for a, v in (mem.get("samples") or []) if _t(a)]
+            pts = [(t.astimezone(clock.MTN), v) for t, v in pts]
+            pts = [(t, v) for t, v in pts if t.date() == now.date()]
+            fig = go.Figure()
+            if pts:
+                fig.add_scatter(x=[t for t, _ in pts], y=[v for _, v in pts], mode="lines",
+                                line=dict(color=C_APP, width=2, shape="spline"), fill="tozeroy",
+                                fillcolor="rgba(57,135,229,.18)", name="memory",
+                                hovertemplate="%{y:.0f} MB")
+            fig.add_hline(y=freetier.MEMORY_LIMIT_MB * freetier.ACT,
+                          line=dict(color=S_BAD, dash="dot", width=1),
+                          annotation_text="caches dropped above this",
+                          annotation_font_color=DARK_INK2, annotation_position="top left")
+            fig.update_yaxes(range=[0, freetier.MEMORY_LIMIT_MB], title_text="MB",
+                             title_font=dict(color=DARK_INK2))
+            if not pts:
+                _waiting(fig, "Samples appear every 10 minutes while the app is in use")
+            st.plotly_chart(_dark(fig, 230), config=_CFG, use_container_width=True, key="c_mem")
+
+        # 3. the floor: rooms by HotSOS status, and finished through the day
+        c3, c4 = st.columns(2)
+        counts = {}
+        for v in rooms.values():
+            k = _rs.normalise(v.get("status"))
+            counts[k] = counts.get(k, 0) + 1
+        with c3:
+            st.markdown(f'<div class="pl-sec">Rooms right now · {len(rooms)} from HotSOS</div>',
+                        unsafe_allow_html=True)
+            order = sorted(counts, key=lambda k: (_rs.rank(k), k))
+            fig = go.Figure(go.Bar(
+                y=[_rs.label(k) for k in order], x=[counts[k] for k in order], orientation="h",
+                marker=dict(color=[_rs.colours(k)[0] for k in order],
+                            line=dict(color="#0b1220", width=2)),
+                text=[counts[k] for k in order], textposition="outside",
+                textfont=dict(color=DARK_INK), hovertemplate="%{y}: %{x}<extra></extra>"))
+            fig.update_yaxes(autorange="reversed", gridcolor="rgba(0,0,0,0)")
+            fig.update_layout(hovermode="closest")
+            st.plotly_chart(_dark(fig, 250), config=_CFG, use_container_width=True, key="c_rooms")
+        with c4:
+            st.markdown('<div class="pl-sec">Finished through the day</div>',
+                        unsafe_allow_html=True)
+            fig = go.Figure()
+            for col_name, colr, name in (("cleaned_at", C_APP, "Cleaned"),
+                                         ("inspected_at", C_FC, "Inspected")):
+                ts = sorted(t for t in (_t(v.get(col_name)) for v in rooms.values()) if t)
+                ts = [t for t in (x.astimezone(clock.MTN) for x in ts) if t.date() == now.date()]
+                if ts:
+                    fig.add_scatter(x=ts, y=list(range(1, len(ts) + 1)), mode="lines",
+                                    line=dict(color=colr, width=2, shape="hv"), name=name,
+                                    hovertemplate=f"{name}: %{{y}}")
+            fig.update_yaxes(title_text="rooms", title_font=dict(color=DARK_INK2),
+                             range=[0, max(len(rooms), 1)])
+            st.plotly_chart(_dark(fig, 250, legend=True), config=_CFG,
+                            use_container_width=True, key="c_done")
+
+        # 4. the HotSOS mirror's pulse, and the nightly clean-up
+        c5, c6 = st.columns([3, 2])
+        with c5:
+            hist = sync.get("history") or []
+            st.markdown('<div class="pl-sec">HotSOS mirror · changes picked up per 2-minute '
+                        'pass</div>', unsafe_allow_html=True)
+            fig = go.Figure(go.Bar(
+                x=[_t(h.get("at")) for h in hist], y=[h.get("changed", 0) for h in hist],
+                marker=dict(color=[S_BAD if h.get("error") else C_APP for h in hist]),
+                hovertemplate="%{y} rooms changed<extra></extra>"))
+            if not hist:
+                _waiting(fig, "The pulse starts with the office PC's next passes")
+            st.plotly_chart(_dark(fig, 170), config=_CFG, use_container_width=True, key="c_sync")
+            st.markdown(f'<div class="pl-note">Last pass {_ago(sync.get("at"))}'
+                        + (" · <b style='color:#f87171'>error</b>" if sync.get("error") else "")
+                        + " · red bars are passes that failed</div>", unsafe_allow_html=True)
+        with c6:
+            st.markdown('<div class="pl-sec">Nightly clean-up</div>', unsafe_allow_html=True)
+            cl = ft.get("cleanup") or {}
+            if cl:
+                gone = ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in
+                                 (cl.get("deleted") or {}).items() if v) or "nothing was due"
+                st.markdown(
+                    f'<div class="pl-note" style="margin-top:6px">{_when(ft.get("at"))}: '
+                    f'{html.escape(gone)}. {len(cl.get("archived") or [])} file(s) copied to '
+                    f'SharePoint first, in <b>App Archive</b> beside the inspection workbooks.'
+                    + (" Retention was halved: the database is past 60%." if cl.get("pressure")
+                       else "")
+                    + (f"<br><b style='color:#f87171'>Problems:</b> "
+                       f"{html.escape('; '.join(cl.get('errors'))[:240])}" if cl.get("errors")
+                       else "") + "</div>", unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="pl-note" style="margin-top:6px">Runs at 2 AM on the '
+                            'office PC: old data is copied to SharePoint, checked, then '
+                            'removed.</div>', unsafe_allow_html=True)
+
+
+live_stats()
 st.caption("Every part of the morning, as it last reported. Refreshes every 15 seconds.")
 
 
-@st.fragment(run_every=15)
+@st.fragment(run_every=30)          # 30 s, not 15: every refresh is free-plan transfer
 def health():
     try:
         beat = db._load_key(hs.HEARTBEAT_KEY) or {}

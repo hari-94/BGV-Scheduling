@@ -245,10 +245,24 @@ def load_staff_meta() -> dict | None:
         print(f"[db] load_staff_meta error: {ex}")
         return None
 
+#: A tiny marker that changes whenever any week is written or deleted -- by
+#: this process or another (the office PC's roster sync writes weeks the Cloud
+#: app has cached). Not "staffweek_..." or it would be read as a week.
+WEEKS_VERSION_KEY = "weeks_version"
+
+
+def _weeks_bump() -> None:
+    try:
+        _upsert_key(WEEKS_VERSION_KEY, {"v": secrets.token_hex(8), "at": clock.stamp()})
+    except Exception as ex:
+        print(f"[db] weeks version not bumped: {ex}")
+
+
 def save_staff_week(week_key: str, week: dict) -> None:
     try:
         _upsert_key(STAFF_WEEK_PREFIX + week_key, week)
         _weeks_forget()          # the batch above is now a week out of date
+        _weeks_bump()
     except Exception as ex:
         print(f"[db] save_staff_week error: {ex}")
         raise
@@ -268,6 +282,17 @@ def _weeks_all(force: bool = False) -> dict:
     if (not force and _WEEKS["rows"] is not None
             and _time.time() - _WEEKS["at"] < _WEEKS_TTL):
         return _WEEKS["rows"]
+    # Past the few seconds: ask the version marker (a few bytes) whether any
+    # week changed, rather than downloading all of them (2.3 MB, 300 KB on the
+    # wire) again. The Forecast page asked every 10 seconds while open --
+    # ~70 MB an hour, enough to use up the free plan's monthly transfer.
+    try:
+        v = (_load_key(WEEKS_VERSION_KEY) or {}).get("v")
+    except Exception:
+        v = None
+    if not force and _WEEKS["rows"] is not None and v and v == _WEEKS.get("v"):
+        _WEEKS["at"] = _time.time()
+        return _WEEKS["rows"]
     out = {}
     try:
         for row in _like_keys(STAFF_WEEK_PREFIX, with_payload=True):
@@ -277,7 +302,7 @@ def _weeks_all(force: bool = False) -> dict:
     except Exception as ex:
         print(f"[db] could not read the weeks: {ex}")
         return _WEEKS["rows"] or {}
-    _WEEKS["rows"], _WEEKS["at"] = out, _time.time()
+    _WEEKS["rows"], _WEEKS["at"], _WEEKS["v"] = out, _time.time(), v
     return out
 
 
@@ -300,6 +325,7 @@ def delete_staff_week(week_key: str) -> None:
     try:
         _delete_key(STAFF_WEEK_PREFIX + week_key)
         _weeks_forget()
+        _weeks_bump()
     except Exception as ex:
         print(f"[db] delete_staff_week error: {ex}")
 
@@ -875,3 +901,29 @@ def bulk_upsert_room_statuses(records: list, date_str: str = None):
     except Exception as ex:
         print(f"[db] bulk_upsert_room_statuses error: {ex}")
         raise
+
+
+# ── free-plan meter ───────────────────────────────────────────────────────────
+# Every function above that reads over the network reports what it got back
+# to freetier's meter (an estimate of the egress the free plan counts). Wrapped
+# here, at the bottom, so nothing above has to know.
+def _metered(fn):
+    import functools
+
+    @functools.wraps(fn)
+    def run(*a, **k):
+        out = fn(*a, **k)
+        try:
+            import freetier
+            freetier.count(out)
+        except Exception:
+            pass
+        return out
+    return run
+
+
+for _name in ("_load_key", "_like_keys", "all_known_rooms", "get_room_statuses", "get_user",
+              "load_full_schedule", "load_log", "load_login_events", "load_schedule_history",
+              "load_users"):
+    globals()[_name] = _metered(globals()[_name])
+del _name

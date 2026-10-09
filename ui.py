@@ -29,7 +29,7 @@ NAV_ITEMS = [
     ("pages/3_Roster_Import.py", "Roster Import", ":material/upload_file:", "can_generate", "nav.roster_import"),
     ("pages/6_Property.py",      "Property",      ":material/apartment:", "can_view_insp_tab", "nav.property"),
     ("pages/9_Forecast.py",      "Forecast",      ":material/trending_up:", "can_view_dashboard", "nav.forecast"),
-    ("pages/10_Health.py",       "Health",        ":material/monitor_heart:", "can_view_dashboard", "nav.health"),
+    ("pages/10_Stats.py",        "Stats",         ":material/monitoring:",    "can_view_dashboard", "nav.health"),
     ("pages/8_HotSOS.py",        "HotSOS",        ":material/sync_alt:", "can_generate", "nav.hotsos"),
     ("pages/7_Profile.py",       "Profile",       ":material/account_circle:", None, "nav.profile"),
     ("pages/2_Admin.py",         "Admin",         ":material/admin_panel_settings:", "can_manage_users", "nav.admin"),
@@ -290,6 +290,13 @@ def topnav(active: str = "", hide_sidebar: bool = True):
     the attendance controls.
     """
     st.markdown(CHROME_CSS, unsafe_allow_html=True)
+    # Free plan watch: this process's memory (and caches dropped if it's high),
+    # and the read meter flushed every 10 minutes. Never lets a page fail.
+    try:
+        import freetier
+        freetier.tick("app")
+    except Exception as _ex:
+        print(f"[ui] free-plan tick: {_ex}")
     if hide_sidebar:
         st.markdown('<style>section[data-testid="stSidebar"]{display:none !important;}'
                     '[data-testid="stExpandSidebarButton"]{display:none !important;}</style>',

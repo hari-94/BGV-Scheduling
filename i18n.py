@@ -75,7 +75,7 @@ STRINGS = {
     "nav.property":       ("Property", "Propiedad"),
     "nav.hotsos":         ("HotSOS", "HotSOS"),
     "nav.forecast":       ("Forecast", "Pronóstico"),
-    "nav.health":         ("Health", "Estado"),
+    "nav.health":         ("Stats", "Estadísticas"),
     "nav.profile":        ("Profile", "Mi perfil"),
     "profile.hello":      ("Signed in as", "Sesión iniciada como"),
     "profile.change_pw":  ("Change your password", "Cambia tu contraseña"),

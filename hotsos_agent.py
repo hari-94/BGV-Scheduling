@@ -264,15 +264,13 @@ def refresh_forecast():
             db._upsert_key(hs.FORECAST_KEY, rec)
     rec["simulated_at"] = clock.stamp()
     db._upsert_key(hs.FORECAST_KEY, rec)
-    # Past days' rooms are no use to anyone; keep a week for a look back.
+    # Old day copies are archived to SharePoint and removed by the nightly
+    # free-plan clean-up (freetier), not deleted here without a copy.
     try:
-        cutoff = (clock.today() - _dt.timedelta(days=7)).isoformat()
-        for k in db._like_keys(hs.ROOMS_CACHE_PREFIX):
-            key = k if isinstance(k, str) else k.get("key", "")
-            if key and key[len(hs.ROOMS_CACHE_PREFIX):] < cutoff:
-                db._delete_key(key)
+        import freetier
+        freetier.flush("forecast", force=True)
     except Exception as ex:
-        log(f"rooms cache cleanup: {ex}")
+        log(f"forecast usage not recorded: {ex}")
     log(f"forecast simulated: {done} of {len(days)} days")
     return days
 
@@ -475,6 +473,9 @@ def reconcile_charts():
 _MIRROR = None
 
 
+_SYNC_HISTORY = []
+
+
 def _mirror_loop():
     while True:
         try:
@@ -487,6 +488,10 @@ def _mirror_loop():
                     rec = {"at": clock.stamp(), "error": f"{type(ex).__name__}: {ex}"}
                     log(f"room status sync failed: {rec['error']}")
                     _close_status_session()
+                _SYNC_HISTORY.append({"at": rec.get("at"), "changed": rec.get("changed", 0),
+                                      "error": bool(rec.get("error"))})
+                del _SYNC_HISTORY[:-90]
+                rec["history"] = list(_SYNC_HISTORY)
                 db._upsert_key(hs.STATUS_SYNC_KEY, rec)
             else:
                 _close_status_session()    # no Chrome sitting signed in overnight
@@ -935,6 +940,23 @@ def run_loop():
 
             # The room-status mirror runs on its own thread (start_mirror).
             start_mirror()
+
+            # Free plan: this process's reads, and at 2 AM the clean-up --
+            # old data copied to SharePoint ("App Archive"), checked, removed.
+            try:
+                import freetier
+                freetier.flush("agent")
+                if now.hour == 2 and st_.get("freetier_day") != str(now.date()) \
+                        and cfg.get("workbook"):
+                    st_["freetier_day"] = str(now.date())
+                    STATE.write_text(json.dumps(st_))
+                    rec = freetier.nightly(Path(cfg["workbook"]).parent / "App Archive")
+                    d = (rec.get("cleanup") or {}).get("deleted") or {}
+                    log(f"free plan: database {rec['db_mb']['total']} MB, this month "
+                        f"{rec['egress_mb'].get('total', 0)} MB sent; cleaned "
+                        f"{', '.join(f'{v} {k}' for k, v in d.items() if v) or 'nothing'}")
+            except Exception as ex:
+                log(f"free plan job: {type(ex).__name__}: {ex}")
 
             slot = (now.date(), now.hour)
             freq = db._load_key(hs.FORECAST_REQUEST_KEY) or {}
