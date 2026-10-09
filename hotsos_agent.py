@@ -637,11 +637,23 @@ def read_day(cfg, day):
     read_day.by = by
     read_day.source = ("live from SharePoint" if source == "live" else
                        "the synced copy on the office PC" + (f" (SharePoint: {why})" if why else ""))
-    # Both files carry the day now, by design; it only matters when someone
-    # changed the copy that isn't read.
-    read_day.warning = (f"{found[1][0]} ('{found[1][1]}') differs from {found[0][0]} "
-                        f"('{found[0][1]}'). Using {found[0][0]}; make the changes there."
-                        if len(found) > 1 and found[0][2] != found[1][2] else "")
+    # Both files carry the day now, by design, and once the RQS work in the
+    # big one the daily copy always differs. It only matters when somebody
+    # edited the copy that isn't read -- the daily tab changed since the build
+    # wrote it (its fingerprint, which the builder keeps): an edit in the
+    # wrong file. The file's own save time says nothing; any rebuild of
+    # another day's tab re-saves it.
+    read_day.warning = ""
+    if len(found) > 1 and found[0][2] != found[1][2] and daily and Path(daily).exists():
+        try:
+            import daily_build
+            edited = daily_build.tab_edited(daily, day, _state().get("tabs", {}))
+        except Exception:
+            edited = False
+        if edited:
+            read_day.warning = (f"Someone edited {found[1][0]} ('{found[1][1]}'), which "
+                                f"differs from {found[0][0]} ('{found[0][1]}'). Push uses "
+                                f"{found[0][0]} -- make the changes there.")
     return f"{tab} ({name})", rows
 
 BIG_QUIET_MINUTES = 10
