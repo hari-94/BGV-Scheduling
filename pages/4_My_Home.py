@@ -14,7 +14,7 @@ import ui
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
 # sys.modules, so reload it rather than dying on a helper it does not have yet.
-if getattr(ri, "__version__", 0) < 14:
+if getattr(ri, "__version__", 0) < 15:
     import importlib
     ri = importlib.reload(ri)
 
@@ -152,8 +152,15 @@ rows = _all_rows(f'{meta.get("uploaded_at","")}|{len(week_keys)}|{len(overrides)
 index = ri.people_index(rows)
 
 # Sign-in names rarely match the sheet exactly, so try the display name and the
-# username, which often carries digits or dots.
-mine = ri.match_person(index, me_display, me_user)
+# username, which often carries digits or dots. A login named by a nickname
+# ("DIANIS") is first turned into the full name the app's name directory has
+# for it -- the nickname alone can match an old spelling with no weeks left.
+try:
+    import staff_names
+    _full = staff_names.full(me_display) if me_display else ""
+except Exception:
+    _full = ""
+mine = ri.match_person(index, *[n for n in (_full, me_display) if n], me_user)
 # Only admins look up other people. RQS and housekeepers see themselves —
 # this page is personal, and the roster pages already cover the whole team.
 can_browse = auth.can("can_manage_users")

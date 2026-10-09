@@ -32,7 +32,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 14
+__version__ = 15
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -140,7 +140,11 @@ NAME_ALIASES = {
     # Short form and full form of one person.
     "danny":             "danny r",
     "avelino":           "avelino rafael",
-    "dianis chavez":     "dianis",
+    # Dianis Chavez Ramirez is written "Dianis" in older weeks and "Diana
+    # Chavez" now (HotSOS's name for her). Matching her login "DIANIS" to the
+    # old spelling showed her an empty schedule.
+    "dianis":            "diana chavez",
+    "dianis chavez":     "diana chavez",
     "escarleth j":       "escarleth",
     "francys m":         "francys",
     "mauricio rivas":    "mauricio",
@@ -168,6 +172,7 @@ CANONICAL_LABELS = {
     "jennyfer caicedo": "Jennyfer Caicedo",
     "avelino rafael": "Avelino Rafael",
     "jorge luis":     "Jorge Luis",
+    "diana chavez":   "Diana Chavez",
 }
 
 def norm_name(s) -> str:
