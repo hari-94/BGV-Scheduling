@@ -342,6 +342,29 @@ def health():
     else:
         cards.append(card("idle", "HotSOS", "No preview or push yet"))
 
+    # ── room statuses mirrored from HotSOS ──────────────────────────────────
+    sync = db._load_key(getattr(hs, "STATUS_SYNC_KEY", "hotsos_status_sync")) or {}
+    _hour = clock.now().hour
+    _sa = _age(sync.get("at"))
+    if sync.get("error"):
+        cards.append(card("bad", "Room status from HotSOS", "Last read failed",
+                          e(str(sync["error"])[:200]),
+                          "Usually a HotSOS sign-in hiccup; it retries every 2 minutes."))
+    elif not sync.get("at"):
+        cards.append(card("idle", "Room status from HotSOS", "Not read yet",
+                          "Every 2 minutes from 6 AM to 8 PM."))
+    elif 6 <= _hour < 20 and _sa and _sa > 10 * 60:
+        cards.append(card("warn", "Room status from HotSOS", f"Last read {_ago(sync.get('at'))}",
+                          "Should be every 2 minutes during the day."))
+    else:
+        _c = sync.get("counts") or {}
+        cards.append(card("ok", "Room status from HotSOS", f"Read {_ago(sync.get('at'))}",
+                          f"{sync.get('rooms', 0)} rooms · "
+                          + " · ".join(f"{v} {k.replace('_', ' ')}" for k, v in
+                                       sorted(_c.items(), key=lambda x: -x[1])[:4])
+                          + (f" · new HotSOS state: {e(', '.join(sync['unknown']))}"
+                             if sync.get("unknown") else "")))
+
     # ── synced files ────────────────────────────────────────────────────────
     files = hl.get("files") or {}
     missing = [n for n, v in files.items() if not (v or {}).get("exists")

@@ -177,7 +177,7 @@ try:
 except Exception:
     statuses = {}
 MARK = {k: _rst.normalise(v.get("status")) for k, v in statuses.items()}
-DONE = {_rst.DONE, _rst.INSPECTED, _rst.ALREADY_CLEAN}
+DONE = set(_rst.CLEANED)
 # An unmarked room is "" rather than None: a column of Nones comes back out of
 # pandas as NaN, and NaN is not None, so the lookup below went looking for a
 # status called nan.

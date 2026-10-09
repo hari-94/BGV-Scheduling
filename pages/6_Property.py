@@ -101,7 +101,7 @@ with c2:
 with c3:
     done = sum(1 for b in boxes
                if _rst.normalise((statuses.get(b["code"]) or {}).get("status"))
-               in (_rst.INSPECTED, _rst.DONE, _rst.ALREADY_CLEAN))
+               in _rst.CLEANED)
     st.markdown(
         f'<div style="padding-top:6px;color:#5b6b7e;font-size:.86rem">'
         f'<b>{len(boxes)}</b> rooms · <b>{len(today)}</b> on a chart today · '

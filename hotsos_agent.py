@@ -312,6 +312,140 @@ def load_day_rooms(cfg, req):
     db._upsert_key(hs.DAYLOAD_RESULT_KEY, res)
 
 
+# ── room status: HotSOS -> app (a read-only mirror) ──────────────────────────
+STATUS_SYNC_SECONDS = 120
+STATUS_HOURS = range(6, 20)            # property time; the floor's day and then some
+_STATUS_HS = None                      # one signed-in HotSOS, kept between passes
+
+
+def _status_session(cfg, fresh=False):
+    global _STATUS_HS
+    if fresh:
+        _close_status_session()
+    if _STATUS_HS is None:
+        _STATUS_HS = _hotsos(cfg)
+    return _STATUS_HS
+
+
+def _close_status_session():
+    global _STATUS_HS
+    if _STATUS_HS is not None:
+        try:
+            _STATUS_HS.close()
+        except Exception:
+            pass
+    _STATUS_HS = None
+
+
+def _hs_time(ts):
+    """A timeline time as stored ISO (property time), or None for a time
+    HotSOS only projects. Its projections are worked out from 'now' to seven
+    decimal places (13:04:56.4434337); what actually happened carries three
+    at most (11:36:44.77)."""
+    if not ts:
+        return None
+    s = str(ts)
+    frac = s.split(".", 1)[1] if "." in s else ""
+    if len(frac) >= 7:
+        return None
+    try:
+        t = _dt.datetime.fromisoformat(s.split(".", 1)[0])
+    except ValueError:
+        return None
+    return t.replace(tzinfo=clock.MTN).isoformat(timespec="seconds")
+
+
+def sync_room_status(cfg):
+    """Mirror HotSOS's room statuses onto today's charted rooms.
+
+    The floor marks rooms in HotSOS; the app's own buttons are switched off
+    (roomstatus.mirrored) so the two can't disagree. Each pass reads the room
+    board (status, who holds the room) and the attendants' timeline (when a
+    room was actually started and finished) and writes only the rooms whose
+    mirror changed. The app's notes are its own and never touched."""
+    import collections
+    import roomstatus as rs
+    import staff_names
+    from hotsos_client import HotSOSError, _pick, _ROOM_CODE
+    sched = db.load_full_schedule() or {}
+    chart = {}
+    for g in sched.get("groups_data") or []:
+        for r in g.get("rooms") or []:
+            chart[str(r.get("room", "")).upper()] = (str(r.get("room")), g.get("label", ""),
+                                                     g.get("housekeeper") or "",
+                                                     g.get("inspector") or "")
+    if not chart:
+        return {"at": clock.stamp(), "rooms": 0, "changed": 0, "why": "no schedule today"}
+
+    def read(h):
+        board = h._paged("/RoomAssignment", {"shift": h.shift, "includeCount": True,
+                                             "filters": {}, "search": []},
+                         {"takePerPage": 200})
+        return board, h.timeline()
+    try:
+        board, tl = read(_status_session(cfg))
+    except HotSOSError:                        # signed out overnight, say: once more
+        board, tl = read(_status_session(cfg, fresh=True))
+
+    when = {str(x["room"]).upper(): x for a in tl for x in (a.get("assignments") or [])
+            if x.get("room") and not x.get("isBreak")}
+    current = db.get_room_statuses() or {}
+    rows, counts, unknown = [], collections.Counter(), set()
+    for r in board:
+        code = str(_pick(r, _ROOM_CODE, "room number")).upper().strip()
+        if code not in chart:
+            continue
+        key, label, hk_chart, insp = chart[code]
+        enum = str(r.get("serviceStatusEnum") or "")
+        if enum and enum.upper() not in rs.HOTSOS:
+            unknown.add(f"{enum} ({r.get('serviceStatus')})")
+        st = rs.from_hotsos(enum, r.get("serviceStatus"))
+        counts[st] += 1
+        t = when.get(code) or {}
+        old = current.get(key) or {}
+        started, cleaned, inspected = (old.get("started_at"), old.get("cleaned_at"),
+                                       old.get("inspected_at"))
+        if st == rs.PENDING:
+            started = cleaned = inspected = None
+        else:
+            started = _hs_time(t.get("start")) or started
+            if st in rs.READY + (rs.INSPECTED,):
+                cleaned = _hs_time(t.get("end")) or cleaned
+            if st == rs.INSPECTED:
+                inspected = inspected or clock.stamp()    # HotSOS gives no time for it
+            elif st in rs.READY:
+                inspected = None
+        # HotSOS's labels carry stray spaces ("David  Serrano"); one spelling
+        # per person, the app's.
+        hk = staff_names.full(" ".join(str(r.get("assignedTo") or "").split())) or hk_chart
+        row = {"room": key, "status": st, "started_at": started, "cleaned_at": cleaned,
+               "inspected_at": inspected, "housekeeper": hk,
+               "swapped_from": hk_chart if hk != hk_chart else None,
+               "group_label": label, "inspector": insp, "updated_by": "HotSOS"}
+
+        def same(a, b):
+            # Times come back from the database in its own offset; compare
+            # the moments, not the text.
+            if a and b and "T" in str(a) and "T" in str(b):
+                try:
+                    return (_dt.datetime.fromisoformat(str(a).replace("Z", "+00:00"))
+                            == _dt.datetime.fromisoformat(str(b).replace("Z", "+00:00")))
+                except ValueError:
+                    pass
+            return str(a or "") == str(b or "")
+        if any(not same(row[k], old.get(k)) for k in row if k != "room"):
+            rows.append(row)
+    if rows:
+        db.bulk_upsert_room_statuses(rows)
+    rec = {"at": clock.stamp(), "rooms": sum(counts.values()), "changed": len(rows),
+           "counts": dict(counts), "unknown": sorted(unknown)}
+    if rows or unknown:
+        log(f"room status: {len(rows)} changed of {rec['rooms']} "
+            f"({', '.join(f'{k} {v}' for k, v in counts.most_common())})"
+            + (f"; new HotSOS states {sorted(unknown)}" if unknown else ""))
+    return rec
+
+
 _FORECAST_PROC = None
 
 
@@ -648,6 +782,7 @@ def run_loop():
     log(f"agent up on {socket.gethostname()}; workbook {cfg.get('workbook') or '(not set up)'}")
     done_req = (db._load_key(hs.RESULT_KEY) or {}).get("id")
     done_day = (db._load_key(hs.DAYLOAD_RESULT_KEY) or {}).get("id")
+    last_status = 0
     done_fc = None
     last_slot = None
     last_beat = 0
@@ -726,6 +861,20 @@ def run_loop():
                 st_["built"] = str(now.date())
                 STATE.write_text(json.dumps(st_))
                 run_build(cfg)
+
+            # The room-status mirror, every two minutes through the day.
+            if cfg.get("hotsos_user") and now.hour in STATUS_HOURS:
+                if time.time() - last_status > STATUS_SYNC_SECONDS:
+                    last_status = time.time()
+                    try:
+                        rec = sync_room_status(cfg)
+                    except Exception as ex:
+                        rec = {"at": clock.stamp(), "error": f"{type(ex).__name__}: {ex}"}
+                        log(f"room status sync failed: {rec['error']}")
+                        _close_status_session()
+                    db._upsert_key(hs.STATUS_SYNC_KEY, rec)
+            else:
+                _close_status_session()        # no Chrome sitting signed in overnight
 
             slot = (now.date(), now.hour)
             freq = db._load_key(hs.FORECAST_REQUEST_KEY) or {}

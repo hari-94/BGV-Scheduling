@@ -46,10 +46,22 @@ STATUS_STYLE = {k: (v[3], v[4], v[2]) for k, v in _rst.META.items()}
 STATUS_KEY = {NOT_STARTED: "st.not_started", IN_PROGRESS: "st.in_progress",
               ALREADY: "st.already_clean",
               CLEANED: "st.cleaned", INSPECTED: "st.inspected",
-              DND: "st.dnd", HELP: "st.help"}
+              DND: "st.dnd", HELP: "st.help",
+              _rst.OCCUPIED_CLEANED: "st.occupied_cleaned",
+              _rst.RETURN_LATER: "st.return_later",
+              _rst.SERVICE_REFUSED: "st.service_refused",
+              _rst.TO_BE_INSPECTED: "st.to_be_inspected"}
 STATUS_ICON = {NOT_STARTED: "○", IN_PROGRESS: "◐", CLEANED: "✓",
                ALREADY: "✓",
-               INSPECTED: "★", DND: "⏸", HELP: "!"}
+               INSPECTED: "★", DND: "⏸", HELP: "!",
+               _rst.OCCUPIED_CLEANED: "✓", _rst.RETURN_LATER: "↻",
+               _rst.SERVICE_REFUSED: "✕", _rst.TO_BE_INSPECTED: "🔍"}
+
+
+def _status_words(cur):
+    """The status as HotSOS words it, in the reader's language."""
+    k = STATUS_KEY.get(cur)
+    return T(k) if k else _rst.label(cur)
 
 st.markdown("""<style>
 /* Same width family as the rest of the app. Without a cap this page took
@@ -559,7 +571,8 @@ _SVC_ICON = {"Full Clean": "🧳", "Full Clean (IH)": "🧳",
 
 #: The glyph is where the room is now; tapping moves it one step on.
 _GLYPH = {NOT_STARTED: "○", IN_PROGRESS: "◐", CLEANED: "✓", INSPECTED: "★",
-          ALREADY: "✓", DND: "⏸", HELP: "!"}
+          ALREADY: "✓", DND: "⏸", HELP: "!", _rst.OCCUPIED_CLEANED: "✓",
+          _rst.RETURN_LATER: "↻", _rst.SERVICE_REFUSED: "✕", _rst.TO_BE_INSPECTED: "🔍"}
 
 #: Who may close a room. A housekeeper hands it over; the RQS signs it off.
 can_inspect = auth.can("can_view_insp_tab")
@@ -601,7 +614,12 @@ def _menu(code, g, owner, key_prefix, cur):
     # beside the circle that opened it, the way the handheld does it.
     with st.popover(_GLYPH.get(cur, "○"), use_container_width=True,
                     width=248, key=f"pop_{key_prefix}_{code}_{gen}"):
-        for target, icon in _OPTIONS:
+        # HotSOS is where rooms are marked for now; the app only mirrors it,
+        # so two places can't disagree. The note stays: it's the app's own.
+        if _rst.mirrored():
+            st.markdown(f"**{e(_status_words(cur))}**")
+            st.caption(T("rooms.from_hotsos"))
+        for target, icon in ([] if _rst.mirrored() else _OPTIONS):
             if target in _rst.RQS_ONLY and not can_inspect:
                 continue
             here = target == cur
@@ -727,7 +745,7 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False, when=Non
         st.markdown(
             f'<div class="tk{" just" if code == flash else ""}'
             f'{" working" if cur == IN_PROGRESS else ""}'
-            f'{" gone" if cur in (CLEANED, INSPECTED, ALREADY) else ""}" '
+            f'{" gone" if _rst.is_clean(cur) else ""}" '
             f'style="border-left-color:{accent};--acc:{accent};--tint:{bg};'
             f'--ink:{ink}">'
             f'<div class="tkico">{icon}</div>'
@@ -739,7 +757,8 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False, when=Non
             f'<div class="tkguest">{e(guest) or "—"}</div>'
             + (f'<div class="tkarr">→ {e(arriving)}</div>' if arriving else "")
             + (f'<div class="tkmsg">📝 {e(note)}</div>' if note else "")
-            + f'<div class="tkfoot">{chips}'
+            + f'<div class="tkfoot"><span class="tkchip" style="background:{bg};color:{ink};'
+              f'font-weight:700">{e(_status_words(cur))}</span>{chips}'
             f'<span class="tkrqs">{"🧹 " + e(owner) if show_owner else "👤 " + (e(insp) or "—")}</span></div>'
             f'</div>'
             f'<div class="tkdot" style="background:{accent}"></div>'

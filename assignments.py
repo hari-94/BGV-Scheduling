@@ -65,7 +65,51 @@ def todays_charts():
     supervisor changed a moment ago.
     """
     sched = db.load_full_schedule() or {}
-    return sched.get("groups_data") or [], db.get_room_statuses()
+    charts, statuses = sched.get("groups_data") or [], db.get_room_statuses()
+    try:
+        import roomstatus
+        if roomstatus.mirrored():
+            charts = _rehome(charts, statuses)
+    except Exception as ex:
+        print(f"[assignments] HotSOS owners not applied: {ex}")
+    return charts, statuses
+
+
+def _rehome(charts, statuses):
+    """Charts with each room under whoever holds it now.
+
+    While HotSOS is where rooms are marked, it is also where they get handed
+    round: 9 October's Daily Service went from Darling to Melissa there, and
+    Melissa's phone still listed Darling's chart. The status mirror records
+    HotSOS's holder on each room; a room held by someone else moves to a
+    chart of theirs (the same service if they have one), and a chart left
+    empty goes. The stored schedule is not touched."""
+    import copy
+    out = copy.deepcopy(charts)
+    moves = []
+    for g in out:
+        keep = []
+        for r in g.get("rooms") or []:
+            who = str((statuses.get(str(r.get("room", ""))) or {}).get("housekeeper") or "")
+            if who and who != g.get("housekeeper"):
+                moves.append((g, r, who))
+            else:
+                keep.append(r)
+        g["rooms"] = keep
+    for src, r, who in moves:
+        dest = next((x for x in out if x.get("housekeeper") == who
+                     and x.get("service_type") == src.get("service_type")), None) \
+            or next((x for x in out if x.get("housekeeper") == who), None)
+        if dest is None:
+            dest = {k: v for k, v in src.items() if k != "rooms"}
+            dest.update(label=f"{src.get('label', '')}·{who.split()[0]}",
+                        housekeeper=who, rooms=[])
+            out.append(dest)
+        dest.setdefault("rooms", []).append(r)
+    out = [g for g in out if g.get("rooms")]
+    for g in out:
+        g["time"] = sum(int(float(x.get("time") or 0)) for x in g["rooms"])
+    return out
 
 
 def housekeepers(charts) -> list:

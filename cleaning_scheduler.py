@@ -5669,6 +5669,13 @@ if _is_hk:
         "cleaning_done": {"icon":"","label":"Done","color":"#60a5fa","bg":"rgba(96,165,250,.12)","border":"rgba(96,165,250,.35)"},
         "inspected": {"icon":"","label":"Inspected ","color":"#a78bfa","bg":"rgba(167,139,250,.15)","border":"rgba(167,139,250,.4)"},
     }
+    # HotSOS's words for every state, and HotSOS's extra states, from the one
+    # vocabulary (roomstatus) -- the floor marks rooms there now.
+    import roomstatus as _rst
+    for _k in _rst.META:
+        _dot, _bgc, _ink = _rst.colours(_k)
+        STATUS_META_HK.setdefault(_k, {"icon": "", "color": _ink, "bg": _bgc, "border": _dot})
+        STATUS_META_HK[_k]["label"] = _rst.label(_k)
 
     # Init room statuses
     if "room_statuses" not in st.session_state:
@@ -5696,7 +5703,7 @@ if _is_hk:
     # Stats
     my_rooms_all = [r for g in my_groups for r in g["rooms"]]
     n_total = len(my_rooms_all)
-    n_done = sum(1 for r in my_rooms_all if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
+    n_done = sum(1 for r in my_rooms_all if _rst.is_clean(rs.get(r["room"],{}).get("status")))
     n_active = sum(1 for r in my_rooms_all if rs.get(r["room"],{}).get("status") == "cleaning_started")
     n_insp = sum(1 for r in my_rooms_all if rs.get(r["room"],{}).get("status") == "inspected")
     pct = int(n_done / max(n_total,1) * 100)
@@ -5753,7 +5760,7 @@ if _is_hk:
             g_label = g.get("label","")
             insp_name = g.get("inspector","—")
             g_rooms = g["rooms"]
-            g_done = sum(1 for r in g_rooms if rs.get(r["room"],{}).get("status") in ("already_clean","cleaning_done","inspected"))
+            g_done = sum(1 for r in g_rooms if _rst.is_clean(rs.get(r["room"],{}).get("status")))
             g_pct = int(g_done / max(len(g_rooms),1) * 100)
             g_color = "#6366f1" if g.get("service_type")==SVC_FC else ("#14b8a6" if g.get("service_type")==SVC_DS else "#f59e0b")
 
@@ -5804,7 +5811,9 @@ if _is_hk:
                               "group_label":g_label,"inspector":insp_name}
                 r_state = rs.get(rm, {"status":"pending"})
                 cur = r_state.get("status","pending")
-                sm = STATUS_META_HK.get(cur, STATUS_META_HK["pending"])
+                sm = STATUS_META_HK.get(cur) or {"icon": "", "label": _rst.label(cur),
+                                                 "color": "#374151", "bg": "#eceef1",
+                                                 "border": "#9ca3af"}
 
                 _fmt = _fmt_mtn
 
@@ -5842,34 +5851,40 @@ if _is_hk:
                     f'{_hk_dot}{sm["icon"]} {sm["label"]}</div>'
                     f'</div>', unsafe_allow_html=True)
 
-                # ── Action buttons row — compact, equal width, stays horizontal ──
-                b1,b2,b3 = st.columns(3)
-                with b1:
-                    if cur == "pending":
-                        if st.button("Clean", key=f"hk_ac_{_hrk}", use_container_width=True):
-                            _save_status_hk(rm, {"status":"already_clean","marked_clean_at":_NOW()})
-                            st.session_state["_live_toast"] = f" {rm} marked Already Clean"
-                            st.rerun()
-                    elif cur == "already_clean":
-                        if st.button("Undo", key=f"hk_uac_{_hrk}", use_container_width=True):
-                            _save_status_hk(rm, {"status":"pending"})
-                            st.rerun()
-                with b2:
-                    if cur == "pending":
-                        if st.button("Start", key=f"hk_s_{_hrk}", use_container_width=True):
-                            _save_status_hk(rm, {"status":"cleaning_started","started_at":_NOW()})
-                            st.session_state["_live_toast"] = f" {rm} — cleaning started"
-                            st.rerun()
-                    elif cur == "cleaning_started":
-                        if st.button("Done", key=f"hk_d_{_hrk}", use_container_width=True):
-                            _save_status_hk(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
-                            st.session_state["_live_toast"] = f" {rm} — done, awaiting inspection"
-                            st.rerun()
-                with b3:
-                    if cur not in ("pending",):
-                        if st.button("Reset", key=f"hk_r_{_hrk}", use_container_width=True):
-                            _save_status_hk(rm, {"status":"pending","started_at":None,"cleaned_at":None,"inspected_at":None,"marked_clean_at":None})
-                            st.rerun()
+                import roomstatus as _rst
+                if _rst.mirrored():
+                    # HotSOS is where rooms are marked for now; the app mirrors it
+                    # (hotsos_agent.sync_room_status), so its own buttons are off.
+                    st.caption('Status comes from HotSOS — mark the room there.')
+                else:
+                    # ── Action buttons row — compact, equal width, stays horizontal ──
+                    b1,b2,b3 = st.columns(3)
+                    with b1:
+                        if cur == "pending":
+                            if st.button("Clean", key=f"hk_ac_{_hrk}", use_container_width=True):
+                                _save_status_hk(rm, {"status":"already_clean","marked_clean_at":_NOW()})
+                                st.session_state["_live_toast"] = f" {rm} marked Already Clean"
+                                st.rerun()
+                        elif cur == "already_clean":
+                            if st.button("Undo", key=f"hk_uac_{_hrk}", use_container_width=True):
+                                _save_status_hk(rm, {"status":"pending"})
+                                st.rerun()
+                    with b2:
+                        if cur == "pending":
+                            if st.button("Start", key=f"hk_s_{_hrk}", use_container_width=True):
+                                _save_status_hk(rm, {"status":"cleaning_started","started_at":_NOW()})
+                                st.session_state["_live_toast"] = f" {rm} — cleaning started"
+                                st.rerun()
+                        elif cur == "cleaning_started":
+                            if st.button("Done", key=f"hk_d_{_hrk}", use_container_width=True):
+                                _save_status_hk(rm, {"status":"cleaning_done","cleaned_at":_NOW()})
+                                st.session_state["_live_toast"] = f" {rm} — done, awaiting inspection"
+                                st.rerun()
+                    with b3:
+                        if cur not in ("pending",):
+                            if st.button("Reset", key=f"hk_r_{_hrk}", use_container_width=True):
+                                _save_status_hk(rm, {"status":"pending","started_at":None,"cleaned_at":None,"inspected_at":None,"marked_clean_at":None})
+                                st.rerun()
 
                 # Timestamp trail
                 ts_parts = []
@@ -7216,80 +7231,88 @@ td{{transition:background .15s ease}}
                     f'<div class="lvgrid">{"".join(_tile(r) for r in part)}</div>',
                     unsafe_allow_html=True)
 
-            # ── acting on rooms ───────────────────────────────────────────
-            st.markdown('<p class="sec">Mark rooms</p>', unsafe_allow_html=True)
-            st.caption("Pick one room or several, then say what happened. "
-                       "Housekeepers marking their own rooms show up here too.")
-            by_room = {r["room"]: r for r in rows}
-            a1, a2 = st.columns([3, 2])
-            with a1:
-                picked = st.multiselect(
-                    "Rooms", sorted(by_room), key="live_pick",
-                    placeholder="Start typing a room number",
-                    format_func=lambda c: f'{c} · {by_room[c]["hk"]} · '
-                                          f'{_rst.label(by_room[c]["status"])}')
-            with a2:
-                move_to = st.selectbox(
-                    "Move to housekeeper", ["— leave as is —"]
-                    + sorted({r["hk"] for r in rows if r["hk"] != "—"}),
-                    key="live_moveto")
+            import roomstatus as _rst
+            if _rst.mirrored():
+                # HotSOS is where rooms are marked for now; the app mirrors it
+                # (hotsos_agent.sync_room_status), so its own buttons are off.
+                st.caption('Room statuses come from HotSOS, read every 2 minutes (last at '
+                           + (_fmt_mtn((db._load_key('hotsos_status_sync') or {}).get('at')) or '—')
+                           + ') — mark rooms there.')
+            else:
+                # ── acting on rooms ───────────────────────────────────────────
+                st.markdown('<p class="sec">Mark rooms</p>', unsafe_allow_html=True)
+                st.caption("Pick one room or several, then say what happened. "
+                           "Housekeepers marking their own rooms show up here too.")
+                by_room = {r["room"]: r for r in rows}
+                a1, a2 = st.columns([3, 2])
+                with a1:
+                    picked = st.multiselect(
+                        "Rooms", sorted(by_room), key="live_pick",
+                        placeholder="Start typing a room number",
+                        format_func=lambda c: f'{c} · {by_room[c]["hk"]} · '
+                                              f'{_rst.label(by_room[c]["status"])}')
+                with a2:
+                    move_to = st.selectbox(
+                        "Move to housekeeper", ["— leave as is —"]
+                        + sorted({r["hk"] for r in rows if r["hk"] != "—"}),
+                        key="live_moveto")
 
-            def _mark(codes, status):
-                stamp = _now_iso()
-                field = {_rst.STARTED: "started_at", _rst.DONE: "cleaned_at",
-                         _rst.INSPECTED: "inspected_at",
-                         _rst.ALREADY_CLEAN: "marked_clean_at"}.get(status)
-                n = 0
-                for c in codes:
-                    r = by_room.get(c) or {}
-                    fields = {"status": status, "housekeeper": r.get("hk", ""),
-                              "inspector": r.get("insp", ""),
-                              "group_label": r.get("label", ""),
-                              "updated_by": st.session_state.get("username", "?")}
-                    if field:
-                        fields[field] = stamp
-                    if status == _rst.PENDING:
-                        fields.update({"started_at": None, "cleaned_at": None,
-                                       "inspected_at": None,
-                                       "marked_clean_at": None})
-                    try:
-                        db.upsert_room_status(c, fields)
-                        n += 1
-                    except Exception as ex:
-                        print(f"[live] {c}: {ex}")
-                st.session_state["_live_toast"] = (
-                    f"{n} room{'s' if n != 1 else ''} → {_rst.label(status)}")
-                st.rerun()
-
-            b = st.columns(6)
-            for col, (lbl, target) in zip(b, [
-                    ("Start", _rst.STARTED), ("Done", _rst.DONE),
-                    ("Inspected", _rst.INSPECTED),
-                    ("Already clean", _rst.ALREADY_CLEAN),
-                    ("Needs help", _rst.HELP), ("Reset", _rst.PENDING)]):
-                with col:
-                    if st.button(lbl, key=f"live_btn_{target}_{lbl}",
-                                 use_container_width=True,
-                                 disabled=not picked,
-                                 type="primary" if target == _rst.DONE
-                                 else "secondary"):
-                        _mark(picked, target)
-
-            if picked and move_to != "— leave as is —":
-                if st.button(f"Move {len(picked)} room(s) to {move_to}",
-                             key="live_do_move", use_container_width=True):
-                    moved = 0
-                    for c in picked:
+                def _mark(codes, status):
+                    stamp = _now_iso()
+                    field = {_rst.STARTED: "started_at", _rst.DONE: "cleaned_at",
+                             _rst.INSPECTED: "inspected_at",
+                             _rst.ALREADY_CLEAN: "marked_clean_at"}.get(status)
+                    n = 0
+                    for c in codes:
+                        r = by_room.get(c) or {}
+                        fields = {"status": status, "housekeeper": r.get("hk", ""),
+                                  "inspector": r.get("insp", ""),
+                                  "group_label": r.get("label", ""),
+                                  "updated_by": st.session_state.get("username", "?")}
+                        if field:
+                            fields[field] = stamp
+                        if status == _rst.PENDING:
+                            fields.update({"started_at": None, "cleaned_at": None,
+                                           "inspected_at": None,
+                                           "marked_clean_at": None})
                         try:
-                            db.upsert_room_status(c, {
-                                "housekeeper": move_to,
-                                "swapped_from": (by_room.get(c) or {}).get("hk", ""),
-                                "updated_by": st.session_state.get("username", "?")})
-                            moved += 1
+                            db.upsert_room_status(c, fields)
+                            n += 1
                         except Exception as ex:
-                            print(f"[live] move {c}: {ex}")
-                    st.session_state["_live_toast"] = f"{moved} room(s) → {move_to}"
+                            print(f"[live] {c}: {ex}")
+                    st.session_state["_live_toast"] = (
+                        f"{n} room{'s' if n != 1 else ''} → {_rst.label(status)}")
                     st.rerun()
+
+                b = st.columns(6)
+                for col, (lbl, target) in zip(b, [
+                        ("Start", _rst.STARTED), ("Done", _rst.DONE),
+                        ("Inspected", _rst.INSPECTED),
+                        ("Already clean", _rst.ALREADY_CLEAN),
+                        ("Needs help", _rst.HELP), ("Reset", _rst.PENDING)]):
+                    with col:
+                        if st.button(lbl, key=f"live_btn_{target}_{lbl}",
+                                     use_container_width=True,
+                                     disabled=not picked,
+                                     type="primary" if target == _rst.DONE
+                                     else "secondary"):
+                            _mark(picked, target)
+
+                if picked and move_to != "— leave as is —":
+                    if st.button(f"Move {len(picked)} room(s) to {move_to}",
+                                 key="live_do_move", use_container_width=True):
+                        moved = 0
+                        for c in picked:
+                            try:
+                                db.upsert_room_status(c, {
+                                    "housekeeper": move_to,
+                                    "swapped_from": (by_room.get(c) or {}).get("hk", ""),
+                                    "updated_by": st.session_state.get("username", "?")})
+                                moved += 1
+                            except Exception as ex:
+                                print(f"[live] move {c}: {ex}")
+                        st.session_state["_live_toast"] = f"{moved} room(s) → {move_to}"
+                        st.rerun()
 
             # ── the last thing that happened, newest first ────────────────
             recent = sorted((r for r in rows if r["at"]),

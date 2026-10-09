@@ -40,6 +40,8 @@ DAYLOAD_RESULT_KEY = "day_rooms_result"          # {id, date, status, room_text,
 # Each forecast day's rooms, kept by the forecast run (every two hours) so
 # "Load this day" reads them in a second instead of waiting on the office PC.
 ROOMS_CACHE_PREFIX = "ssrs_rooms_"               # + ISO date: {date, room_text, rooms, ...}
+# The room-status mirror (HotSOS -> app), every two minutes through the day.
+STATUS_SYNC_KEY = "hotsos_status_sync"           # {at, rooms, changed, counts, unknown, error}
 
 # What a row of the plan can say. The page colours by these.
 ASSIGN = "assign"            # will be (or was) assigned

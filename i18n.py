@@ -166,13 +166,20 @@ STRINGS = {
                            "ya no queda nada por hacer aquí"),
 
     # ── statuses ─────────────────────────────────────────────────────────
-    "st.not_started":     ("Waiting to clean", "Esperando limpieza"),
-    "st.in_progress":     ("Cleaning", "Limpiando"),
-    "st.cleaned":         ("Ready for RQS", "Listo para RQS"),
-    "st.inspected":       ("Inspected", "Inspeccionado"),
+    # HotSOS's own words: the floor marks rooms there and the app mirrors it.
+    "st.not_started":     ("Awaiting Service", "Esperando servicio"),
+    "st.in_progress":     ("Cleaning Started", "Limpieza iniciada"),
+    "st.cleaned":         ("Vacant Cleaned", "Limpia (vacía)"),
+    "st.occupied_cleaned": ("Occupied Cleaned", "Limpia (ocupada)"),
+    "st.to_be_inspected": ("To Be Inspected", "Por inspeccionar"),
+    "st.inspected":       ("Inspected", "Inspeccionada"),
     "st.already_clean":   ("Already clean", "Ya está limpio"),
-    "st.dnd":             ("Do not disturb", "No molestar"),
+    "st.dnd":             ("DND (Do Not Disturb)", "No molestar (DND)"),
+    "st.return_later":    ("Return Later", "Volver más tarde"),
+    "st.service_refused": ("Service Refused", "Servicio rechazado"),
     "st.help":            ("Need help", "Necesito ayuda"),
+    "rooms.from_hotsos":  ("Status comes from HotSOS — mark the room there.",
+                           "El estado viene de HotSOS — marca la habitación allí."),
 
     # ── actions ──────────────────────────────────────────────────────────
     "act.start":          ("Start", "Empezar"),
