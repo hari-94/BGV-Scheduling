@@ -24,6 +24,37 @@ import hotsos_sync as hs
 import staff_names
 
 
+def from_hotsos(save=True):
+    """Today's charts brought in line with who holds each room in HotSOS now.
+
+    People change assignments in HotSOS directly -- a call-off, a swap -- and
+    the app kept the people it was given, so the Schedule page, the dashboard
+    and the inspectors' lists named the wrong housekeeper (9 Oct: Darling and
+    Melissa swapped charts in HotSOS, Jennyfer's went to Alejandro). The
+    status mirror records HotSOS's holder on each room; this turns that into
+    the same plan a Push produces and applies it the same way.
+
+    Every room HotSOS has a holder for is in the plan, the unchanged ones too:
+    `apply` renames a chart only when all of its rooms went to one person, and
+    a plan listing just the moved rooms would read as the whole chart moving.
+    The Dust n Vac round is RQS 2's and left alone."""
+    sched = db.load_full_schedule() or {}
+    statuses = db.get_room_statuses() or {}
+    plan = []
+    for g in sched.get("groups_data") or []:
+        if g.get("dv_rqs2"):
+            continue
+        for r in g.get("rooms") or []:
+            who = str((statuses.get(str(r.get("room", ""))) or {}).get("housekeeper") or "")
+            if not who:
+                continue
+            plan.append({"room": r.get("room"), "hotsos_name": who,
+                         "action": hs.ALREADY if who == g.get("housekeeper") else hs.MOVE})
+    if not any(l["action"] == hs.MOVE for l in plan):
+        return {"changed": False, "renamed": [], "moved": [], "inspectors": []}
+    return apply(plan, save=save)
+
+
 def _recount(g):
     rooms = g.get("rooms") or []
     g["time"] = sum(int(float(r.get("time") or 0)) for r in rooms)

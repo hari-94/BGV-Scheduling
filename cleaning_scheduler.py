@@ -5528,6 +5528,9 @@ if run:
                             "hk_roster": dict(st.session_state.get("hk_roster",{})),
                             "insp_roster": dict(st.session_state.get("insp_roster",{})),
                             "generated_by": st.session_state.get("username","unknown"),
+                            # The HotSOS reconcile follows HotSOS only for a
+                            # schedule that's older than the last push.
+                            "generated_at": _now_iso(),
                         })
                     except Exception:
                         pass

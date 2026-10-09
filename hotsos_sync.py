@@ -42,6 +42,10 @@ DAYLOAD_RESULT_KEY = "day_rooms_result"          # {id, date, status, room_text,
 ROOMS_CACHE_PREFIX = "ssrs_rooms_"               # + ISO date: {date, room_text, rooms, ...}
 # The room-status mirror (HotSOS -> app), every two minutes through the day.
 STATUS_SYNC_KEY = "hotsos_status_sync"           # {at, rooms, changed, counts, unknown, error}
+# From when HotSOS's assignments are the truth for a day: set by a Push (the
+# day's plan is in HotSOS) or a hand reconcile. Until then -- a 5 AM build that
+# hasn't been pushed -- the app's charts are not touched by what HotSOS holds.
+TRUTH_KEY = "hotsos_truth_since"                 # {date, at, by}
 
 # What a row of the plan can say. The page colours by these.
 ASSIGN = "assign"            # will be (or was) assigned

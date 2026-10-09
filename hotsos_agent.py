@@ -446,6 +446,27 @@ def sync_room_status(cfg):
     return rec
 
 
+def reconcile_charts():
+    """After the mirror: if HotSOS is the truth for today (pushed, or
+    reconciled by hand) and nobody has generated a new schedule since, bring
+    today's charts in line with who holds each room in HotSOS. A schedule
+    generated after the push is newer than HotSOS -- left alone until it is
+    pushed too."""
+    import app_sync
+    truth = db._load_key(hs.TRUTH_KEY) or {}
+    if truth.get("date") != clock.today_iso():
+        return None
+    gen = (db.load_full_schedule() or {}).get("generated_at")
+    if gen and _dt.datetime.fromisoformat(gen) > _dt.datetime.fromisoformat(truth["at"]):
+        return "generated after the push; waiting for the next push"
+    out = app_sync.from_hotsos(save=True)
+    if out.get("changed"):
+        log(f"charts reconciled to HotSOS: {len(out['renamed'])} chart(s) changed hands, "
+            f"{len(out['moved'])} room(s) moved")
+        return {"renamed": out["renamed"], "moved": out["moved"]}
+    return None
+
+
 _FORECAST_PROC = None
 
 
@@ -734,6 +755,9 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
             # the phones show) say the same. Only for today -- the app holds
             # one day's schedule.
             if day == clock.today():
+                if sent:
+                    db._upsert_key(hs.TRUTH_KEY, {"date": str(day), "at": clock.stamp(),
+                                                  "by": f"push by {by}"})
                 try:
                     import app_sync
                     app = app_sync.apply(plan)
@@ -868,6 +892,7 @@ def run_loop():
                     last_status = time.time()
                     try:
                         rec = sync_room_status(cfg)
+                        rec["reconciled"] = reconcile_charts()
                     except Exception as ex:
                         rec = {"at": clock.stamp(), "error": f"{type(ex).__name__}: {ex}"}
                         log(f"room status sync failed: {rec['error']}")
