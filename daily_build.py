@@ -597,6 +597,10 @@ def suggest_moves(frame):
                 continue
             if not b["service"].startswith(p["main"]):
                 continue
+            import rule23
+            if rule23._is_fc(b["service"]) and rule23.mixes(
+                    {str(r["Room"])[0] for r in mine if rule23._is_fc(r.get("Service"))} | {b["bld"]}):
+                continue                       # hard rule: never buildings 2 and 3
             if loads[person] + b["minutes"] > p["cap"]:
                 continue
             if source == "over" and loads[b["from"]] - b["minutes"] < LOW_MIN:

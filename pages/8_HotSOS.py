@@ -203,6 +203,11 @@ def result_panel():
         attn.append("Names not matched to anyone in HotSOS: <b>"
                     + e(", ".join(res["unmatched_names"]))
                     + "</b> — match them in the box below.")
+    for col, who in (("HSKP", "housekeeper"), ("RQS", "RQS")):
+        for person, blds in ((res.get("rule23") or {}).get(col) or {}).items():
+            attn.append(f"<b>Rule broken:</b> {e(person)} ({who}) has Full Clean in buildings "
+                        f"<b>{' and '.join(blds)}</b> — one person can't have building 2 and 3. "
+                        "Fix the sheet, then Preview again.")
     miss = [l["room"] for l in plan if l["action"] == hs.NO_ROOM]
     if miss:
         attn.append(f"Rooms HotSOS doesn't have today: <b>{e(', '.join(miss))}</b>")

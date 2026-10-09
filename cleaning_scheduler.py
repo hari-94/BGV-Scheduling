@@ -20,6 +20,7 @@ st.set_page_config(
 # Import local modules after set_page_config
 import auth, db
 import fcpack
+import rule23
 import fcsolve
 import property_map as pmap
 import ui
@@ -4252,6 +4253,10 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
             for j in range(i + 1, len(batches)):
                 if _brms(batches[i]) + _brms(batches[j]) > INSP_ROOM_MAX:
                     continue
+                # Hard rule (rule23): no inspector holds Full Clean in both
+                # building 2 and building 3. Not a cost -- never.
+                if rule23.mixes({b for g in batches[i] + batches[j] for b in g["blds"]}):
+                    continue
                 merged = _bset(batches[i]) | _bset(batches[j])
                 key = (_hops(merged), len(merged),
                        -(_brms(batches[i]) + _brms(batches[j])))
@@ -4268,7 +4273,11 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     # inspector), so we don't settle for a solution where one RQS roams. Swaps are
     # rejected if they would push an inspector over the room ceiling.
     def _brooms(b): return sum(len(g["rooms"]) for g in b)
-    def _within_cap(b): return _brooms(b) <= INSP_ROOM_MAX
+    def _within_cap(b):
+        # A swap that would put buildings 2 and 3 on one inspector is refused
+        # outright, like one that runs past the room ceiling.
+        return (_brooms(b) <= INSP_ROOM_MAX
+                and not rule23.mixes({x for g in b for x in g["blds"]}))
     def _optimize_batches(batches):
         improved=True; max_iter=(len(batches)*per*4 if batches else 0); iters=0
         while improved and iters<max_iter:
@@ -4365,6 +4374,32 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
     # to RQS 2's label so it's never silently dropped.
     for g in dv_groups:
         if not g.get("inspector"): g["inspector"] = rqs2 or IH_RQS
+
+    # Hard rule, last word: RQS 2's leftover Full Clean and the "Inspector N"
+    # overflow slots are picked by size, not place, and could still hand one
+    # person buildings 2 and 3. Move the smaller side to someone on that side
+    # (or a free inspector), then rebuild the inspector list from the charts.
+    _moves = rule23.repair_inspectors(
+        fc_groups + ih_groups,
+        free_inspectors=[n for n in fc_inspectors if n not in assigned_names],
+        room_max=INSP_ROOM_MAX)
+    if _moves:
+        _roles = {e["name"]: e.get("role", "FC") for e in inspectors}
+        _order = [e["name"] for e in inspectors]
+        for _, _, to in _moves:
+            if to not in _order:
+                _order.append(to)
+        rebuilt = []
+        for name in _order:
+            gs = [g for g in groups if g.get("inspector") == name]
+            if not gs:
+                continue
+            blds = sorted(set(b for g in gs for b in g["blds"]))
+            rebuilt.append({"id": len(rebuilt) + 1, "name": name,
+                            "role": _roles.get(name, "FC"),
+                            "groups": [g["label"] for g in gs], "buildings": blds,
+                            "travel_warning": len(blds) > 2})
+        inspectors = rebuilt
     return inspectors
 
 # ══════════════════════════════════════════════════════════════════════════════

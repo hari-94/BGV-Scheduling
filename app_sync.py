@@ -77,9 +77,19 @@ def apply(plan, save=True):
     for g in fg:
         _recount(g)
 
-    if not renamed and not moved:
-        return {"changed": False, "renamed": [], "moved": []}
-    summary = {"changed": True, "renamed": renamed, "moved": moved}
+    # 3. Inspectors: a chart whose rooms all name one RQS in the sheet takes it.
+    reinsp = []
+    for g in fg:
+        names = {rqs_for.get(r.get("room")) for r in g.get("rooms") or []} - {None, ""}
+        if len(names) == 1:
+            n = names.pop()
+            if n != g.get("inspector") and not n.lower().startswith(("rqs 2", "inspector ")):
+                reinsp.append((g["label"], g.get("inspector", ""), n))
+                g["inspector"] = n
+
+    if not renamed and not moved and not reinsp:
+        return {"changed": False, "renamed": [], "moved": [], "inspectors": []}
+    summary = {"changed": True, "renamed": renamed, "moved": moved, "inspectors": reinsp}
     if not save:
         return summary
 

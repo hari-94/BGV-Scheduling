@@ -411,6 +411,11 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
             tab, rows = read_day(cfg, day)
             res["tab"] = tab
             res["sheet_saved_at"] = getattr(read_day, "saved_at", None)
+            import rule23
+            _sheet = [{"Room": r["room"], "Service": r["service"], "HSKP": r["hskp"],
+                       "RQS": r.get("rqs", "")} for r in rows]
+            res["rule23"] = {"HSKP": rule23.violations(_sheet, "HSKP"),
+                             "RQS": rule23.violations(_sheet, "RQS")}
             res["sheet_by"] = getattr(read_day, "by", "")
             res["sheet_source"] = getattr(read_day, "source", "")
             if read_day.warning:
@@ -458,6 +463,7 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
                     app = app_sync.apply(plan)
                     res["app"] = {"renamed": len(app.get("renamed", [])),
                                   "moved": len(app.get("moved", [])),
+                                  "inspectors": len(app.get("inspectors", [])),
                                   "changed": app.get("changed", False),
                                   "why": app.get("why", "")}
                     log(f"  app charts: {res['app']}")
