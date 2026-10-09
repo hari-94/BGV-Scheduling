@@ -32,7 +32,7 @@ from collections import OrderedDict
 #: stale copy from a previous deploy — otherwise the first call to a new
 #: function dies as an AttributeError inside a widget callback, which Streamlit
 #: reports with the message redacted.
-__version__ = 15
+__version__ = 16
 
 # ── Section headers (verified identical across sheets spanning a full year) ────
 HK_SECTIONS = OrderedDict([
@@ -123,7 +123,8 @@ NAME_ALIASES = {
     "liz":               "liz salazar",
     "rigoberto":         "rigo garcia",
     "rigo g":            "rigo garcia",
-    "josseling":         "josselin",
+    "josseling":         "josselin hernandez",
+    "josselin":          "josselin hernandez",
     "jenny caicedo":     "jenni caicedo",
     "jennifer c":        "jenni caicedo",
     "cecilia":           "cecilia angeles",
@@ -138,7 +139,8 @@ NAME_ALIASES = {
     "junior d":          "junior torres",
     "junior t":          "junior torres",
     # Short form and full form of one person.
-    "danny":             "danny r",
+    "danny":             "danny roberson",
+    "danny r":           "danny roberson",
     "avelino":           "avelino rafael",
     # Dianis Chavez Ramirez is written "Dianis" in older weeks and "Diana
     # Chavez" now (HotSOS's name for her). Matching her login "DIANIS" to the
@@ -157,6 +159,15 @@ NAME_ALIASES = {
     # Jorge Luis, however written. "JORGE" and "Jorge Lead" are other people.
     "jorge luis vides":  "jorge luis",
     "jorge l":           "jorge luis",
+    # The sheet switched to full names; each short form below stops the day
+    # its full name starts and the two never share a date (checked 9 Oct
+    # 2026), and the app's name directory maps them. Split, a login named
+    # "ARACELI" matched the old spelling and saw no weeks at all.
+    "adrian":            "adrian lopez",
+    "araceli":           "araceli duarte",
+    "david s":           "david serrano",
+    "hari":              "hari vardan",
+    "norma e":           "norma escarraga",
 }
 
 #: Preferred display name once variants are merged, where the fullest form is
@@ -173,6 +184,13 @@ CANONICAL_LABELS = {
     "avelino rafael": "Avelino Rafael",
     "jorge luis":     "Jorge Luis",
     "diana chavez":   "Diana Chavez",
+    "josselin hernandez": "Josselin Hernandez",
+    "danny roberson": "Danny Roberson",
+    "adrian lopez":   "Adrian Lopez",
+    "araceli duarte": "Araceli Duarte",
+    "david serrano":  "David Serrano",
+    "hari vardan":    "Hari Vardan",
+    "norma escarraga":"Norma Escarraga",
 }
 
 def norm_name(s) -> str:

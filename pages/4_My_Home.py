@@ -14,7 +14,7 @@ import ui
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
 # sys.modules, so reload it rather than dying on a helper it does not have yet.
-if getattr(ri, "__version__", 0) < 15:
+if getattr(ri, "__version__", 0) < 16:
     import importlib
     ri = importlib.reload(ri)
 
@@ -157,7 +157,8 @@ index = ri.people_index(rows)
 # for it -- the nickname alone can match an old spelling with no weeks left.
 try:
     import staff_names
-    _full = staff_names.full(me_display) if me_display else ""
+    _dir = {k.lower(): v for k, v in staff_names.aliases().items()}
+    _full = _dir.get(me_display.strip().lower(), "") if me_display else ""   # "ARACELI" too
 except Exception:
     _full = ""
 mine = ri.match_person(index, *[n for n in (_full, me_display) if n], me_user)

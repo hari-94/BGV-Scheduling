@@ -19,7 +19,7 @@ import ui
 # sys.modules while serving the new page file. The first call to a helper added
 # in this release then raises AttributeError from inside a widget callback, and
 # Streamlit redacts the message. Reload from disk instead of failing.
-if getattr(ri, "__version__", 0) < 14:
+if getattr(ri, "__version__", 0) < 16:
     import importlib
     ri = importlib.reload(ri)
 
