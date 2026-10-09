@@ -195,6 +195,7 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         iso = (day or clock.today()).isoformat()
         at.session_state["sched_day"] = iso          # weekend rules follow the day built
         generate.borrowed = []
+        generate.roles = {}
 
         def run_generate():
             at.text_area(key="room_input").set_value(room_text)
@@ -225,6 +226,8 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
                 at.run()
                 fg = run_generate()
                 generate.borrowed = taken
+        generate.roles = {k: (at.session_state[k] if k in at.session_state else "")
+                          for k in ("rqs1", "rqs2")}
         return fg
 
 
@@ -395,7 +398,7 @@ def _fingerprint(ws) -> str:
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
-def _write_summary(ws, top, frame, day=None, borrowed=()):
+def _write_summary(ws, top, frame, day=None, borrowed=(), rqs_fc=()):
     """Under the rooms: minutes per housekeeper, then suggestions for the
     light ones. Nothing in either table starts with a room code, so a push
     -- which reads only rows whose first cell is a room -- never sees them."""
@@ -482,14 +485,22 @@ def _write_summary(ws, top, frame, day=None, borrowed=()):
             r += 1
             ws.cell(row=r, column=1, value="On other duties (not free): "
                                            + "; ".join(other)).font = reg
-    if borrowed:
+    if borrowed or rqs_fc:
         r += 2
-        ws.cell(row=r, column=1, value="Short of people — moved onto rooms from other "
-                                       "duties").font = bold
+        ws.cell(row=r, column=1, value="Short of people — what it took to cover the "
+                                       "day").font = bold
         for n, role, duty in borrowed:
             r += 1
-            c = ws.cell(row=r, column=1, value=f"{n} ({role}) — was: {duty}")
+            c = ws.cell(row=r, column=1, value=f"{n} ({role}) — moved onto rooms, was: {duty}")
             c.font, c.fill = reg, fills["Light"]
+        # Ideally RQS 1 and 2 inspect no Full Clean; when they do, say so loudly.
+        for label, name, rooms in rqs_fc:
+            r += 1
+            c = ws.cell(row=r, column=1, value=(
+                f"⚠ {label} ({name}) is inspecting {len(rooms)} Full Clean room"
+                f"{'s' if len(rooms) != 1 else ''} to cover the shortage: {', '.join(rooms)}"))
+            c.font = Font(name="Arial", size=10, bold=True, color="B42318")
+            c.fill = fills["Over"]
 
     r += 3
     ws.cell(row=r, column=1, value="Suggestions to fill light charts — check, then edit the "
@@ -543,7 +554,8 @@ def _save_in_place(path, data: bytes, tries=30, wait=20):
             time.sleep(wait)
 
 
-def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=()):
+def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=(),
+              rqs_fc=()):
     """Write `frame` as the day's tab. Returns "written", "replaced" or
     "kept (edited)". `state` remembers the fingerprint of what was written,
     so an edited tab is never overwritten."""
@@ -565,6 +577,29 @@ def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=
         wb.remove(wb[name])
         outcome = "replaced"
     ws = wb.create_sheet(name)
+    _fill_sheet(ws, day, frame, note, borrowed, rqs_fc)
+    # Day tabs in date order, the newest last, and only the last month kept.
+    from hotsos_sync import tab_date
+    dated = sorted((tab_date(s, day.year) or _dt.date.min, s) for s in wb.sheetnames)
+    for _, s in dated[:-KEEP_TABS]:
+        wb.remove(wb[s])
+    wb._sheets.sort(key=lambda ws_: tab_date(ws_.title, day.year) or _dt.date.min)
+    wb.active = len(wb.sheetnames) - 1
+    # Nothing new: don't touch the file. Every save is an upload, and a
+    # rebuild that changes nothing shouldn't put the file back in the queue.
+    if old_fp is not None and had_stamp and _fingerprint(ws) == old_fp:
+        return "unchanged"                 # the stamp keeps the build that made it
+    buf = io.BytesIO()
+    wb.save(buf)
+    _save_in_place(path, buf.getvalue())
+    state[name] = _fingerprint(openpyxl.load_workbook(path)[name])
+    return outcome
+
+
+def _fill_sheet(ws, day, frame, note="", borrowed=(), rqs_fc=()):
+    """The day's rooms, the summary under them and the "Built ..." stamp."""
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
     reg = Font(name="Arial", size=10)
     hdr = Font(name="Arial", size=10, bold=True, color="FFFFFF")
     fill = PatternFill("solid", fgColor="2563A8")
@@ -584,7 +619,7 @@ def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=
             if v is None or (isinstance(v, float) and v != v) or v == "nan":
                 v = ""                         # NaN is pandas' blank; write it as one
             ws.cell(row=ri, column=ci, value=v).font = reg
-    _write_summary(ws, len(frame) + 3, frame, day, borrowed)
+    _write_summary(ws, len(frame) + 3, frame, day, borrowed, rqs_fc)
     import clock
     built = clock.now()
     c = ws.cell(row=1, column=STAMP_COL,
@@ -594,21 +629,63 @@ def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=
     c.fill = PatternFill("solid", fgColor="FFF4CC")
     ws.column_dimensions[get_column_letter(STAMP_COL)].width = 58
     ws.freeze_panes = "A2"
-    # Day tabs in date order, the newest last, and only the last month kept.
+
+
+def write_big_tab(path, day: _dt.date, frame, state: dict, note="", borrowed=(),
+                  guard=None, rqs_fc=()):
+    """The same tab, added to the team's big GC8 Inspections workbook -- the
+    file the RQS have the link to, and the one Push reads first.
+
+    That workbook is the team's own: 300 tabs, pivot tables, comments. So
+    this only ever adds or replaces the one day's tab, in date order among
+    the others; nothing is pruned or reordered. A tab for the day that the
+    build didn't write (someone made it by hand, or edited ours) is left
+    alone. Opening the file takes minutes, and somebody may be typing in it
+    in Excel for the web meanwhile: `guard()` (SharePoint quiet, the synced
+    copy current) is asked before opening and again before saving, and the
+    save is skipped if the synced copy changed underneath."""
+    import openpyxl
     from hotsos_sync import tab_date
-    dated = sorted((tab_date(s, day.year) or _dt.date.min, s) for s in wb.sheetnames)
-    for _, s in dated[:-KEEP_TABS]:
-        wb.remove(wb[s])
-    wb._sheets.sort(key=lambda ws_: tab_date(ws_.title, day.year) or _dt.date.min)
-    wb.active = len(wb.sheetnames) - 1
-    # Nothing new: don't touch the file. Every save is an upload, and a
-    # rebuild that changes nothing shouldn't put the file back in the queue.
+    path = Path(path)
+    if not path.exists():
+        return "no file"
+    if guard:
+        ok, why = guard()
+        if not ok:
+            return f"skipped ({why})"
+    mtime = path.stat().st_mtime
+    wb = openpyxl.load_workbook(path)
+    name = tab_name(day)
+    same = [t for t in wb.sheetnames if tab_date(t, day.year) == day]
+    old_fp, had_stamp, outcome = None, False, "written"
+    if same:
+        t = same[0]
+        old_fp = _fingerprint(wb[t])
+        if t != name or state.get(name) != old_fp:
+            return f"kept ('{t}' was made or edited by hand)"
+        had_stamp = bool(wb[t].cell(row=1, column=STAMP_COL).value)
+        pos = wb.sheetnames.index(t)
+        wb.remove(wb[t])
+        outcome = "replaced"
+    else:
+        before = [i for i, t in enumerate(wb.sheetnames)
+                  if (tab_date(t, day.year) or _dt.date.max) < day]
+        pos = max(before) + 1 if before else len(wb.sheetnames)
+    ws = wb.create_sheet(name, pos)
+    _fill_sheet(ws, day, frame, note, borrowed, rqs_fc)
     if old_fp is not None and had_stamp and _fingerprint(ws) == old_fp:
-        return "unchanged"                 # the stamp keeps the build that made it
+        return "unchanged"
+    if path.stat().st_mtime != mtime:
+        return "skipped (the file changed while the tab was being made; next build)"
+    if guard:
+        ok, why = guard()
+        if not ok:
+            return f"skipped ({why})"
     buf = io.BytesIO()
     wb.save(buf)
-    _save_in_place(path, buf.getvalue())
-    state[name] = _fingerprint(openpyxl.load_workbook(path)[name])
+    data = buf.getvalue()
+    _save_in_place(path, data)
+    state[name] = _fingerprint(openpyxl.load_workbook(io.BytesIO(data), read_only=True)[name])
     return outcome
 
 
@@ -812,7 +889,7 @@ def tab_edited(path, day: _dt.date, state: dict) -> bool:
 
 
 def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
-          state: dict, publish=True):
+          state: dict, publish=True, big_path=None, guard=None):
     """The whole morning: rooms + e-mail -> Generate -> the day's tab.
 
     Once the team has edited the day's tab, the day is theirs: nothing is
@@ -834,13 +911,50 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
         frame.loc[mask, "Notes"] = [
             f"{n}; {tag}" if str(n or "").strip() not in ("", "nan") else tag
             for n in frame.loc[mask, "Notes"]]
-    outcome = write_tab(workbook_path, day, frame, state,
-                        note="Arrival Report included" if (arrival_text or "").strip()
-                        else "no Arrival Report yet",
-                        borrowed=getattr(generate, "borrowed", []))
+    # RQS 1 and RQS 2 ideally inspect no Full Clean (their rounds are projects,
+    # and Daily Service / Dust n Vac). The page only hands them some when it
+    # runs out of inspectors; flag every such row. IH charts are RQS 2's by
+    # design and are a different service, so they don't count.
+    roles = getattr(generate, "roles", {}) or {}
+    rqs_fc = []
+    svc = frame["Service"].fillna("").astype(str).str.strip()
+    who = frame["RQS"].fillna("").astype(str).str.strip()
+    for key, label in (("rqs1", "RQS 1"), ("rqs2", "RQS 2")):
+        names = {roles.get(key)} - {"", None} | {label}
+        mask = svc.eq("Full Clean") & who.isin(names)
+        if mask.any():
+            name = roles.get(key) or label
+            rqs_fc.append((label, name, [str(x) for x in frame.loc[mask, "Room"]]))
+            tag = f"{label} covering this inspection (short staffed)"
+            frame.loc[mask, "Notes"] = [
+                f"{n}; {tag}" if str(n or "").strip() not in ("", "nan") else tag
+                for n in frame.loc[mask, "Notes"]]
+    note = ("Arrival Report included" if (arrival_text or "").strip()
+            else "no Arrival Report yet")
+    borrowed = getattr(generate, "borrowed", [])
+    outcome = write_tab(workbook_path, day, frame, state, note=note, borrowed=borrowed,
+                        rqs_fc=rqs_fc)
+    big = None
+    if big_path:
+        try:
+            big = write_big_tab(big_path, day, frame, state.setdefault("big", {}),
+                                note, borrowed, guard, rqs_fc)
+        except Exception as ex:                # the daily file is written either way
+            big = f"error: {type(ex).__name__}: {ex}"
+    # What it took to staff the day, for the Forecast page: who was pulled
+    # off other duties, who carries more than a normal round, what's empty.
+    stretched = [f"{p['name']} {p['minutes']} min Daily Service"
+                 for p in staff_summary(frame) if p["Daily Service"] > CAP_DS]
+    vacant = frame.loc[frame["HSKP"].map(_needs_person), "HSKP"].nunique()
+    no_rqs = frame["RQS"].fillna("").astype(str).str.match(r"Inspector \d").sum()
     staffed = sorted({g.get("housekeeper") for g in fg if g.get("housekeeper")})
     dv = frame[frame["Service"].fillna("").str.strip().str.lower().eq("dust n vac")]         if not frame.empty else frame
     dv_blank = int((dv["HSKP"].fillna("").astype(str).str.strip() == "").sum()) if len(dv) else 0
     return {"rooms": int(n_rooms), "charts": len(fg), "housekeepers": len(staffed),
             "tab": tab_name(day), "outcome": outcome, "dv_unassigned": dv_blank,
-            "borrowed": [f"{n} ({duty})" for n, _, duty in getattr(generate, "borrowed", [])]}
+            "borrowed": [f"{n} ({duty})" for n, _, duty in borrowed],
+            "borrowed_roles": [r for _, r, _ in borrowed],
+            "stretched": stretched, "vacant_charts": int(vacant),
+            "rooms_without_rqs": int(no_rqs), "big_tab": big,
+            "rqs_on_fc": [f"{label} ({name}) {len(rooms)} Full Clean rooms"
+                          for label, name, rooms in rqs_fc]}

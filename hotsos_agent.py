@@ -183,11 +183,11 @@ def _hotsos(cfg):
 
 
 # ── SSRS forecast ────────────────────────────────────────────────────────────
-def pull_ssrs(start: _dt.date, end: _dt.date) -> Path:
+def pull_ssrs(start: _dt.date, end: _dt.date, tag: str = "") -> Path:
     """Export the Housekeeping Dashboard as .xlsx, signed in as this PC's user.
     PowerShell does the Windows sign-in, which Python's requests cannot do
     without an extra package."""
-    out = Path(tempfile.gettempdir()) / f"hskp_dashboard_{start}_{end}.xlsx"
+    out = Path(tempfile.gettempdir()) / f"hskp_dashboard{tag}_{start}_{end}.xlsx"
     url = f"{SSRS}&SiteID={SITE_ID}&StartDate={start:%m/%d/%Y}&EndDate={end:%m/%d/%Y}"
     ps = (f"$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '{url}' "
           f"-UseDefaultCredentials -OutFile '{out}' -TimeoutSec 600")
@@ -216,16 +216,92 @@ def refresh_forecast():
         est = r.get("estimate", r)
         days.append({k: r.get(k) for k in ("date", "rooms", "minutes", "checkouts",
                                             "dailies", "dustnvac", "pu_models")}
-                    | {k: est.get(k) for k in ("hskp", "hskp_fc", "hskp_ds", "rqs")})
+                    | {k: est.get(k) for k in ("hskp", "hskp_fc", "hskp_ds", "rqs")}
+                    | {"method": "estimate"})
     # Keep the pull before this one, so the page can say what new bookings
     # changed since -- the number alone doesn't tell anyone it moved.
     prev = db._load_key(hs.FORECAST_KEY) or {}
-    db._upsert_key(hs.FORECAST_KEY, {
-        "pulled_at": clock.stamp(), "start": str(start), "end": str(end),
-        "days": days, "warnings": parsed.get("warnings", []),
-        "previous": {"pulled_at": prev.get("pulled_at"), "days": prev.get("days", [])}})
-    log(f"forecast stored: {len(days)} days {start}..{end}")
+    # Until this pull's simulation reaches a day, show that day's last
+    # simulated numbers rather than the rough arithmetic.
+    SIM = ("hskp", "hskp_fc", "hskp_ds", "rqs", "rqs_fc", "fc_rooms",
+           "check_rooms", "check_minutes")
+    old = {d["date"]: d for d in prev.get("days", []) if d.get("method") == "simulated"}
+    for d in days:
+        if d["date"] in old:
+            d.update({k: old[d["date"]].get(k) for k in SIM}, method="simulated")
+    rec = {"pulled_at": clock.stamp(), "start": str(start), "end": str(end),
+           "days": days, "warnings": parsed.get("warnings", []),
+           "previous": {"pulled_at": prev.get("pulled_at"), "days": prev.get("days", [])}}
+    db._upsert_key(hs.FORECAST_KEY, rec)
+    log(f"forecast stored: {len(days)} days {start}..{end}; simulating each day")
+
+    # Each day the way the 5 AM build will see it (forecast_sim): that day's
+    # own export, the Schedule page's parsing and packing.
+    import forecast_sim
+    done = 0
+    for d in days:
+        try:
+            day = _dt.date.fromisoformat(d["date"])
+            p = pull_ssrs(day, day, tag="_sim")
+            raw = p.read_bytes()
+            p.unlink(missing_ok=True)
+            d.update(forecast_sim.simulate(raw, day), method="simulated")
+            done += 1
+        except Exception as ex:
+            log(f"forecast simulation {d['date']}: {type(ex).__name__}: {ex}")
+        if done and done % 3 == 0:
+            db._upsert_key(hs.FORECAST_KEY, rec)
+    rec["simulated_at"] = clock.stamp()
+    db._upsert_key(hs.FORECAST_KEY, rec)
+    log(f"forecast simulated: {done} of {len(days)} days")
     return days
+
+
+def load_day_rooms(cfg, req):
+    """A day's rooms (SSRS) and Arrival Report, for the Schedule page to run
+    that day by hand. Read-only: nothing is built, written or pushed."""
+    import importlib
+    import io
+    import daily_build
+    res = {"id": req["id"], "date": req["date"], "by": req.get("by", ""),
+           "status": "running", "started_at": clock.stamp()}
+    db._upsert_key(hs.DAYLOAD_RESULT_KEY, res)
+    try:
+        daily_build = importlib.reload(daily_build)
+        day = _dt.date.fromisoformat(req["date"])
+        p = pull_ssrs(day, day, tag="_load")
+        raw = p.read_bytes()
+        p.unlink(missing_ok=True)
+        (to_text,) = daily_build.borrow("excel_to_room_text")
+        text, n, _ = to_text(io.BytesIO(raw))
+        _, arr_folder = daily_paths(cfg)
+        arr = daily_build.find_arrival_report(arr_folder, day) if arr_folder else None
+        res.update(status="done", room_text=text, rooms=int(n),
+                   arrival=arr.name if arr else None,
+                   arrival_text=daily_build.read_arrival_report(arr) if arr else "")
+        log(f"day load {day} for {req.get('by')}: {n} rooms, arrival report "
+            f"{'found' if arr else 'none'}")
+    except Exception as ex:
+        res.update(status="error", error=f"{type(ex).__name__}: {ex}")
+        log(f"day load failed: {res['error']}")
+    res["finished_at"] = clock.stamp()
+    db._upsert_key(hs.DAYLOAD_RESULT_KEY, res)
+
+
+_FORECAST_PROC = None
+
+
+def start_forecast():
+    """Run the forecast in its own process: simulating three weeks takes a
+    few minutes, and a Push pressed meanwhile must not wait for it."""
+    global _FORECAST_PROC
+    if _FORECAST_PROC is not None and _FORECAST_PROC.poll() is None:
+        log("forecast already running")
+        return
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    _FORECAST_PROC = subprocess.Popen([sys.executable, str(Path(__file__).resolve()),
+                                       "forecast"], cwd=str(Path(__file__).resolve().parent),
+                                      creationflags=flags)
 
 
 # ── staff schedule (Schedule.xlsx) ───────────────────────────────────────────
@@ -291,8 +367,10 @@ def daily_paths(cfg):
 
 
 def read_day(cfg, day):
-    """The day's tab: the daily workbook the 5 AM build writes first, then
-    the big GC8 Inspections workbook for days built by hand.
+    """The day's tab: the big GC8 Inspections workbook first -- the RQS have
+    its link and make their changes there, and the build now writes each
+    day's tab into it -- then the daily workbook, the build's own copy, for a
+    day the big one has no tab for (its save was skipped, say).
 
     Read live from SharePoint at the moment of the press (sharepoint.fetch),
     so an edit made seconds ago in Excel Online is in -- the synced copy on
@@ -306,7 +384,7 @@ def read_day(cfg, day):
     daily, _ = daily_paths(cfg)
     read_day.source, read_day.by, read_day.warning = "", "", ""
     found, last, why = [], None, ""
-    for path in (daily, cfg.get("workbook")):
+    for path in (cfg.get("workbook"), daily):
         if not path:
             continue
         name = Path(path).name
@@ -336,10 +414,39 @@ def read_day(cfg, day):
     read_day.by = by
     read_day.source = ("live from SharePoint" if source == "live" else
                        "the synced copy on the office PC" + (f" (SharePoint: {why})" if why else ""))
-    read_day.warning = (f"{day:%b %d} has a tab in both {found[0][0]} ('{found[0][1]}') and "
-                        f"{found[1][0]} ('{found[1][1]}'). Using {found[0][0]}; make the "
-                        "changes there." if len(found) > 1 else "")
+    # Both files carry the day now, by design; it only matters when someone
+    # changed the copy that isn't read.
+    read_day.warning = (f"{found[1][0]} ('{found[1][1]}') differs from {found[0][0]} "
+                        f"('{found[0][1]}'). Using {found[0][0]}; make the changes there."
+                        if len(found) > 1 and found[0][2] != found[1][2] else "")
     return f"{tab} ({name})", rows
+
+BIG_QUIET_MINUTES = 10
+
+
+def _big_guard(path):
+    """May the build save the big workbook right now? Only if SharePoint
+    answers, nobody has saved it in the last few minutes (someone may still
+    be typing), and the synced copy here is not behind SharePoint -- saving
+    an old copy would throw away whatever was typed online since."""
+    if not path:
+        return None
+
+    def guard():
+        import sharepoint
+        data, info = sharepoint.fetch(Path(path).name)
+        if data is None:
+            return False, f"SharePoint not reachable: {info.get('error', '')}"
+        sp = _dt.datetime.fromisoformat(info["modified"].replace("Z", "+00:00"))
+        mins = (clock.now() - sp).total_seconds() / 60
+        if mins < BIG_QUIET_MINUTES:
+            return False, f"{info.get('by') or 'someone'} saved it {mins:.0f} min ago"
+        local = _dt.datetime.fromtimestamp(Path(path).stat().st_mtime, _dt.timezone.utc)
+        if (sp - local).total_seconds() > 120:
+            return False, "the synced copy on the office PC is behind SharePoint"
+        return True, ""
+    return guard
+
 
 def run_build(cfg, day=None, by="5 AM", publish=True):
     """Build the day's schedule and write its tab. Never pushes to HotSOS."""
@@ -379,12 +486,15 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
         if publish and not mine:
             log(f"build: app schedule by {sched.get('generated_by')} kept; writing the sheet only")
         out = daily_build.build(day, ssrs, arrival, wb_path, tabs,
-                                publish=publish and mine)
+                                publish=publish and mine,
+                                big_path=cfg.get("workbook"),
+                                guard=_big_guard(cfg.get("workbook")))
         STATE.write_text(json.dumps(st))
         status.update(out, status="done", arrival=arr.name if arr else None,
                       workbook=Path(wb_path).name)
         log(f"built {day}: {out['rooms']} rooms, {out['charts']} charts, tab {out['tab']} "
-            f"{out['outcome']}; arrival report {'found' if arr else 'MISSING'}")
+            f"{out['outcome']}; GC8 Inspections 2026: {out.get('big_tab')}; "
+            f"arrival report {'found' if arr else 'MISSING'}")
     except Exception as ex:
         status.update(status="error", error=f"{type(ex).__name__}: {ex}")
         log(f"build failed: {traceback.format_exc()}")
@@ -505,6 +615,7 @@ def run_loop():
     started_at = clock.stamp()
     log(f"agent up on {socket.gethostname()}; workbook {cfg.get('workbook') or '(not set up)'}")
     done_req = (db._load_key(hs.RESULT_KEY) or {}).get("id")
+    done_day = (db._load_key(hs.DAYLOAD_RESULT_KEY) or {}).get("id")
     done_fc = None
     last_slot = None
     last_beat = 0
@@ -560,6 +671,16 @@ def run_loop():
                 run_push(cfg, _dt.date.fromisoformat(req["date"]), req.get("mode", "preview"),
                          req_id=req["id"], by=req.get("by", ""))
 
+            dreq = db._load_key(hs.DAYLOAD_REQUEST_KEY) or {}
+            if dreq.get("id") and dreq["id"] != done_day:
+                done_day = dreq["id"]
+                try:
+                    age = (clock.now() - _dt.datetime.fromisoformat(dreq["at"])).total_seconds()
+                except Exception:
+                    age = 0
+                if age <= REQUEST_MAX_AGE:
+                    load_day_rooms(load_config(required=False), dreq)
+
             cfg = load_config(required=False)
             if cfg.get("staff_workbook"):
                 try:
@@ -580,9 +701,9 @@ def run_loop():
             if asked or (now.hour in FORECAST_HOURS and slot != last_slot):
                 done_fc, last_slot = freq.get("id"), slot
                 try:
-                    refresh_forecast()
+                    start_forecast()
                 except Exception as ex:
-                    log(f"forecast failed: {ex}")
+                    log(f"forecast failed to start: {ex}")
         except Exception as ex:          # never let one bad pass end the loop
             log(f"loop error: {ex}")
         time.sleep(POLL_SECONDS)
@@ -598,8 +719,15 @@ def main():
     if a.cmd == "setup":
         return setup()
     if a.cmd == "forecast":
-        for d in refresh_forecast():
-            print(d)
+        if sys.stdout is None or Path(sys.executable).stem.lower() == "pythonw":
+            CONFIG.parent.mkdir(parents=True, exist_ok=True)
+            sys.stdout = sys.stderr = open(CONFIG.parent / "agent.log", "a",
+                                           encoding="utf-8", buffering=1)
+        try:
+            days = refresh_forecast()
+            print(f"{len(days)} days stored")
+        except Exception as ex:
+            log(f"forecast failed: {type(ex).__name__}: {ex}")
         return
     if a.cmd == "build":
         print(run_build(load_config(), _dt.date.fromisoformat(a.date) if a.date else None,

@@ -33,6 +33,10 @@ HEARTBEAT_KEY = "hotsos_agent_heartbeat"         # {at, host}
 ROSTER_STATUS_KEY = "roster_sync_status"         # last Schedule.xlsx import
 HEALTH_KEY = "agent_health"                      # the agent's own report, every minute
 EVENTS_KEY = "agent_events"                      # its last 80 log lines, newest last
+# The Schedule page's "run for a date": the page asks, the office PC (the only
+# machine that can reach SSRS) answers with that day's rooms and Arrival Report.
+DAYLOAD_REQUEST_KEY = "day_rooms_request"        # {id, date, by, at}
+DAYLOAD_RESULT_KEY = "day_rooms_result"          # {id, date, status, room_text, ...}
 
 # What a row of the plan can say. The page colours by these.
 ASSIGN = "assign"            # will be (or was) assigned

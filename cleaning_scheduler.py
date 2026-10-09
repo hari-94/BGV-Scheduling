@@ -1495,6 +1495,117 @@ footer{visibility:hidden!important;}
 </div>""", unsafe_allow_html=True)
     st.stop()
 
+# ── Running another day by hand ───────────────────────────────────────────────
+# "Run schedule for a date" asks the office PC (the only machine that reaches
+# SSRS) for that day's rooms and Arrival Report; the page puts them in the
+# boxes and that day's crew on the attendance list, and Generate runs as ever.
+# A day other than today is a PREVIEW: this session stops writing to the
+# database altogether -- the app holds one schedule, today's, and a look at
+# Saturday must not replace it, nor today's attendance, nor the floor's
+# room statuses. "Back to today" puts this session's today back exactly.
+def _today_iso():
+    return _datetime.now(_MTN_TZ).date().isoformat()
+
+
+def _previewing():
+    """The date being looked at, when it isn't today."""
+    _d = st.session_state.get("sched_day")
+    return _d if _d and _d != _today_iso() else None
+
+
+_DAY_KEYS = ("hk_roster", "insp_roster", "rqs1", "rqs2", "ds_team", "rqs1_sel", "rqs2_sel",
+             "groups_data", "inspectors_data", "total_rooms", "used_hk_set",
+             "room_input", "email_input")
+
+
+def _apply_day_roster(iso):
+    """`iso`'s attendance, RQS 1/2 and Daily Service team on this page only:
+    _auto_apply_today's steps without any of its saves."""
+    import roster_import as _ri
+    wk = _ri.find_week_key(db.staff_week_keys(), iso)
+    week = db.load_staff_week(wk) if wk else None
+    update = (_ri.day_roster(week, db.load_staff_overrides(), wk, iso,
+                             st.session_state.get("hk_roster", {})) if week else None)
+    if not update:
+        return f"the staff schedule has nothing for {iso}, so attendance is unchanged"
+    st.session_state["hk_roster"] = _ri.merge_roster(
+        update, st.session_state.get("hk_roster", {}), keep_missing=True)
+    new_insp = dict(update["insp_roster"])
+    for name in st.session_state.get("insp_roster", {}):
+        new_insp.setdefault(name, False)
+    st.session_state["insp_roster"] = new_insp
+    st.session_state["rqs1"] = update["rqs1"]
+    st.session_state["rqs2"] = update["rqs2"]
+    st.session_state["ds_team"] = [n for n in update["ds_team"]
+                                   if st.session_state["hk_roster"].get(n, {}).get("present")]
+    st.session_state["_att_gen"] = st.session_state.get("_att_gen", 0) + 1
+    for _k in [k for k in list(st.session_state) if k.startswith(("att_", "insp_att_"))]:
+        st.session_state.pop(_k, None)
+    for _sel, _val in (("rqs1_sel", update["rqs1"]), ("rqs2_sel", update["rqs2"])):
+        st.session_state[_sel] = _val if (_val and new_insp.get(_val)) else RQS_NONE
+    n_hk = sum(1 for v in st.session_state["hk_roster"].values() if v["present"])
+    return f"{n_hk} housekeepers · RQS 1 {update['rqs1'] or '—'} · RQS 2 {update['rqs2'] or '—'}"
+
+
+def _back_to_today():
+    import copy as _copy
+    stash = st.session_state.pop("_today_stash", None) or {}
+    for k in _DAY_KEYS:
+        if k in stash:
+            st.session_state[k] = _copy.deepcopy(stash[k])
+        else:
+            st.session_state.pop(k, None)
+    st.session_state.pop("sched_day", None)
+    st.session_state.pop("_dayload_note", None)
+    st.session_state["_att_gen"] = st.session_state.get("_att_gen", 0) + 1
+    for _k in [k for k in list(st.session_state) if k.startswith(("att_", "insp_att_"))]:
+        st.session_state.pop(_k, None)
+
+
+_dl = st.session_state.pop("_dayload_payload", None)
+if _dl:
+    import copy as _copy
+    if not _previewing() and "_today_stash" not in st.session_state:
+        st.session_state["_today_stash"] = {k: _copy.deepcopy(st.session_state[k])
+                                            for k in _DAY_KEYS if k in st.session_state}
+    st.session_state["sched_day"] = _dl["date"]
+    st.session_state["room_input"] = _dl.get("room_text", "")
+    st.session_state["email_input"] = _dl.get("arrival_text", "")
+    for _k in ("groups_data", "inspectors_data", "total_rooms", "used_hk_set"):
+        st.session_state[_k] = None
+    try:
+        _crew = _apply_day_roster(_dl["date"])
+    except Exception as _ex:
+        _crew = f"couldn't read the staff schedule for that day ({_ex})"
+    st.session_state["_dayload_note"] = (
+        f"{_dl.get('rooms', 0)} rooms from SSRS · "
+        + (f"Arrival Report '{_dl['arrival']}'" if _dl.get("arrival")
+           else "no Arrival Report for that day")
+        + f" · {_crew}")
+
+
+class _PreviewDB:
+    """The db module with its writes switched off, for this session only,
+    while it is looking at a day other than today."""
+    _BLOCK = {"save_full_schedule", "save_roster", "save_autoapply", "save_snapshot",
+              "delete_snapshot", "upsert_room_status", "bulk_upsert_room_statuses",
+              "save_fc_mode"}
+
+    def __init__(self, real):
+        self._real = real
+
+    def __getattr__(self, name):
+        if name in self._BLOCK:
+            def _blocked(*a, **k):
+                st.toast("Preview of another day — not saved.", icon="🔒")
+                return None
+            return _blocked
+        return getattr(self._real, name)
+
+
+if _previewing():
+    db = _PreviewDB(db)
+
 # ── Restore today's shared schedule — ONCE per browser session ────────────────
 # Runs only on the first script execution of a session. After that the flag
 # stays True for the whole session, so generating a new schedule (which sets
@@ -3703,7 +3814,9 @@ def pack_fc_sequential(room_list):
     return charts
 
 
-def build_all_groups(rooms):
+def build_all_groups(rooms, weekend=None):
+    """`weekend` is for callers outside the page (the forecast); the page
+    leaves it None and the day being scheduled decides."""
     verify_rooms = [r for r in rooms if r.get("verify")]
     rooms = [r for r in rooms if not r.get("verify")]
     # Buyback and Unallocated Full Cleans are probably clean already. They used
@@ -3748,7 +3861,7 @@ def build_all_groups(rooms):
     # ── Stage 3: Daily Service — HARD 460-min cap per chart, +leftover IH ──────
     if ds_rooms or ih_leftover:
         # Weekends: up to DS_CAP_WEEKEND a housekeeper, buildings ignored.
-        _wk = _sched_weekend()
+        _wk = _sched_weekend() if weekend is None else weekend
         _cap = DS_CAP_WEEKEND if _wk else DS_CAP
         ds_charts = split_daily_service(ds_rooms, extra_rooms=ih_leftover,
                                         cap=_cap, pooled=_wk)
@@ -4907,6 +5020,23 @@ if _aa_note:
         f'letter-spacing:.11em;opacity:.75">Today loaded automatically</span>'
         f'{e(_aa_note)}</div>', unsafe_allow_html=True)
 
+_pv = _previewing()
+if _pv:
+    _pvd = _datetime.strptime(_pv, "%Y-%m-%d")
+    _b1, _b2 = st.columns([5, 1], vertical_alignment="center")
+    _b1.markdown(
+        f'<div style="background:#fff8e6;border:1px solid #f5d48a;border-left:4px solid #d97706;'
+        f'border-radius:10px;padding:9px 14px;font-size:.86rem;color:#4a3300">'
+        f'<b>Previewing {_pvd:%A %b} {_pvd.day}</b> — nothing on this page is saved while you '
+        f'look at another day; today\'s schedule, attendance and room statuses are untouched.'
+        f'<br><span style="opacity:.8">{e(st.session_state.get("_dayload_note", ""))}</span>'
+        f'</div>', unsafe_allow_html=True)
+    # A callback, so it runs before the next run draws the widgets it resets.
+    _b2.button("Back to today", icon=":material/today:", use_container_width=True,
+               on_click=_back_to_today)
+elif st.session_state.get("_dayload_note"):
+    st.caption("Loaded: " + st.session_state["_dayload_note"])
+
 st.markdown("---")
 # Once a schedule has been generated, collapse the upload/paste inputs so the
 # dashboard (metrics + table) is front and center. The section can be reopened
@@ -4916,6 +5046,58 @@ _inp_exp = st.expander("Room Data + Front-Desk Email"
                        + ("  —  tap to edit / regenerate" if _has_sched else ""),
                        expanded=not _has_sched)
 with _inp_exp:
+    if auth.can("can_generate"):
+        import uuid as _uuid
+        import hotsos_sync as _hs
+
+        @st.fragment(run_every=3)
+        def _dayload_wait():
+            rid = st.session_state.get("_dayload_id")
+            if not rid:
+                return
+            res = db._load_key(_hs.DAYLOAD_RESULT_KEY) or {}
+            asked = st.session_state.get("_dayload_at", 0)
+            import time as _time
+            if res.get("id") != rid or res.get("status") == "running":
+                if _time.time() - asked > 120:
+                    st.session_state.pop("_dayload_id", None)
+                    st.warning("The office PC didn't answer in two minutes — it may be "
+                               "offline (see the Health page). Try again later.")
+                else:
+                    st.caption("⏳ Asking the office PC for that day's rooms from SSRS and "
+                               "its Arrival Report… about 15 seconds.")
+                return
+            st.session_state.pop("_dayload_id", None)
+            if res.get("status") == "done":
+                st.session_state["_dayload_payload"] = res
+            else:
+                st.session_state["_dayload_err"] = res.get("error", "unknown error")
+            st.rerun()
+
+        _today_d = _datetime.now(_MTN_TZ).date()
+        _cur = st.session_state.get("sched_day") or _today_d.isoformat()
+        _dc1, _dc2, _dc3 = st.columns([2, 1.4, 3.6], gap="small", vertical_alignment="bottom")
+        _pick = _dc1.date_input(
+            "Run schedule for a date", key="run_day_pick", format="MM/DD/YYYY",
+            value=_datetime.strptime(_cur, "%Y-%m-%d").date(),
+            help="Pulls that day's rooms from SSRS, its Arrival Report and who is working "
+                 "that day from the staff schedule. Then press Generate. Any day but "
+                 "today is a preview and is not saved.")
+        if _dc2.button("Load this day", icon=":material/event:", use_container_width=True,
+                       disabled=bool(st.session_state.get("_dayload_id"))):
+            import time as _time
+            _rid = _uuid.uuid4().hex
+            db._upsert_key(_hs.DAYLOAD_REQUEST_KEY, {
+                "id": _rid, "date": _pick.isoformat(), "at": _now_iso(),
+                "by": st.session_state.get("display_name", "")})
+            st.session_state["_dayload_id"] = _rid
+            st.session_state["_dayload_at"] = _time.time()
+        _err = st.session_state.pop("_dayload_err", None)
+        if _err:
+            _dc3.error(f"Couldn't load that day: {_err}")
+        if st.session_state.get("_dayload_id"):
+            with _dc3:
+                _dayload_wait()
     col_data, col_cfg = st.columns([5,1], gap="medium")
     with col_data:
         inp_a, inp_b = st.columns([3,2], gap="small")
@@ -4977,7 +5159,8 @@ with _inp_exp:
         _today_tx = "#475569" if _IS_LIGHT else "#94a3b8"
         st.markdown(f'<div style="background:{_today_bg};border:1px solid {_today_br};border-radius:10px;'
                     f'padding:11px 13px;font-size:.78rem;color:{_today_tx};margin-bottom:10px">'
-                    f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">Today</div>'
+                    f'<div style="font-weight:700;color:{_today_hd};margin-bottom:5px">'
+                    f'{_datetime.strptime(_previewing(), "%Y-%m-%d").strftime("%a %b %d") if _previewing() else "Today"}</div>'
                     f'<div> <b>{len(present_hk)}</b> HKs present</div>'
                     f'<div> <b>{len(present_insp)}</b> inspectors</div></div>', unsafe_allow_html=True)
         # There used to be a choice here between "stay in one building" and

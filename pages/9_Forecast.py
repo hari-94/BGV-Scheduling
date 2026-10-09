@@ -55,6 +55,11 @@ st.markdown("""<style>
 .fc-chg{font-size:.85rem;color:#1f2733;line-height:1.7;margin-bottom:14px}
 .fc-dl{font-size:.75rem;font-weight:600;margin-left:4px}
 .fc-up{color:#b42318}.fc-down{color:#067647}
+.fc-built{margin-top:10px;padding:8px 10px;background:#fff8e6;border-radius:10px;
+          font-size:.78rem;color:#1f2733;line-height:1.5}
+.fc-bh{font-weight:700;color:#7a4b00;margin-bottom:2px}
+.cram{color:#7a4b00;font-weight:600}
+.cram-red{color:#b42318;font-weight:700}
 </style>""", unsafe_allow_html=True)
 auth.require_login()
 ui.topnav("Forecast")
@@ -109,6 +114,55 @@ def _gap_html(gap, unit):
     return '<span class="gap gap-ok">✓ covered</span>'
 
 
+BUILD_KEY = "daily_build_status"          # daily_build.BUILD_KEY
+
+
+def _cram(b):
+    """What the built schedule had to do to fit the day in, as phrases."""
+    out = []
+    for who, role in zip(b.get("borrowed") or [], b.get("borrowed_roles") or
+                         ["Housekeeper"] * len(b.get("borrowed") or [])):
+        name, _, duty = who.partition(" (")
+        out.append(f"{name.split()[0]}{' (RQS)' if role == 'RQS' else ''} pulled from "
+                   f"{duty.rstrip(')').lower()}")
+    out += [s.replace(" min Daily Service", " min of Daily Service")
+            for s in b.get("stretched") or []]
+    # Ideally RQS 1 and 2 inspect no Full Clean; when they had to, it's the
+    # loudest part of the line.
+    out += [f'<span class="cram-red">{s.replace(" Full Clean rooms", " Full Clean rooms to inspect")}'
+            f'</span>' for s in b.get("rqs_on_fc") or []]
+    return out
+
+
+def _built_brief(b):
+    if not b:
+        return ""
+    bits = _cram(b)
+    vac = b.get("vacant_charts") or 0
+    if not bits and not vac:
+        return "built schedule covers it"
+    s = "crammed in: " + "; ".join(bits) if bits else "built"
+    if vac:
+        s += f" · {vac} chart{'s' if vac != 1 else ''} still vacant"
+    return s
+
+
+def _built_html(b):
+    if not b:
+        return ""
+    bits, vac = _cram(b), b.get("vacant_charts") or 0
+    t = _parse(b.get("finished_at"))
+    head = (f"Built {t.astimezone(clock.MTN):%I:%M %p}".replace(" 0", " ") if t else "Built")
+    head += f" · {b.get('housekeepers')} HK on {b.get('charts')} charts"
+    if not bits and not vac:
+        body = "Everyone fits on a normal day's load."
+    else:
+        body = ("<b>Crammed in:</b> " + "; ".join(bits) + "<br>" if bits else "")
+        if vac:
+            body += f"<b>{vac}</b> chart{'s' if vac != 1 else ''} still with nobody"
+    return (f'<div class="fc-built"><div class="fc-bh">🧩 {head}</div>{body}</div>')
+
+
 def _layout(fig, height, legend=True):
     fig.update_layout(
         height=height, margin=dict(l=8, r=8, t=30, b=8),
@@ -148,7 +202,8 @@ def forecast_panel():
     pulled, asked = _parse(fc.get("pulled_at")), _parse(req.get("at"))
     if asked and (not pulled or asked > pulled):
         if online:
-            st.info(f"⏳ Pulling fresh numbers from SSRS (asked by {req.get('by')})… about a minute.")
+            st.info(f"⏳ Pulling fresh numbers from SSRS (asked by {req.get('by')})… the first "
+                    "numbers in about a minute, every day worked through in a few.")
         else:
             st.warning("Refresh asked for, but the office PC isn't connected — it will "
                        "pull as soon as it's back on.")
@@ -161,7 +216,10 @@ def forecast_panel():
     if not days:
         st.caption("No forecast yet — it appears after the office PC's first pull.")
         return
-    st.caption(f"**Need**: SSRS Housekeeping Dashboard, updated {_when(fc.get('pulled_at'))} · "
+    sim = sum(1 for d in days if d.get("method") == "simulated")
+    st.caption(f"**Need**: SSRS Housekeeping Dashboard, updated {_when(fc.get('pulled_at'))}, "
+               f"each day packed into charts the way the 5 AM build does "
+               f"({sim} of {len(days)} days so far) · "
                f"**Scheduled**: Schedule.xlsx in SharePoint, last synced "
                f"{_when(sync.get('at')) if sync.get('at') else 'when it last changed'}")
 
@@ -178,7 +236,20 @@ def forecast_panel():
         p = prev.get(d["date"])
         if not p or p.get(key) is None or d.get(key) is None:
             return 0
+        # A day switching from the old arithmetic to the simulation moved
+        # because the method did, not the bookings.
+        if p.get("method", "estimate") != d.get("method", "estimate"):
+            return 0
         return d[key] - p[key]
+
+    # The day's built sheet, where there is one (today's 5 AM build and the
+    # look-ahead): the forecast counts heads, the build shows how the day was
+    # actually squeezed into the people there are.
+    builds = {}
+    for key in (BUILD_KEY, BUILD_KEY + "_ahead"):
+        b = db._load_key(key) or {}
+        if b.get("status") == "done" and b.get("date"):
+            builds[b["date"]] = b
 
     # ── 1. short days, in words ─────────────────────────────────────────────
     horizon = days[:LOOKAHEAD_ALERT]
@@ -193,29 +264,52 @@ def forecast_panel():
                 bits.append(f"<b>{-d['gap_rqs']}</b> RQS")
             spare = len(d["have"]["other"])
             extra = f" · {spare} on other duties" if spare else ""
+            built = _built_brief(builds.get(d["date"]))
             lines.append(f'<b class="d">{_day_name(d["date"], today_iso)}</b> short '
                          + " and ".join(bits)
                          + f' <span style="color:#5b6675">(need {d["hskp"]} HK / {d["rqs"]} RQS, '
-                           f'scheduled {d["have"]["hskp"]} / {len(d["have"]["rqs"])}{extra})</span>')
+                           f'scheduled {d["have"]["hskp"]} / {len(d["have"]["rqs"])}{extra})</span>'
+                         + (f' <span class="cram">→ {built}</span>' if built else ""))
         st.markdown(f'<div class="alert">⚠️ <b>Short on {len(short)} of the next '
                     f'{len(horizon)} days</b><br>' + "<br>".join(lines) + "</div>",
                     unsafe_allow_html=True)
     else:
         st.success(f"Every day in the next {len(horizon)} is covered by the schedule.")
 
-    # ── 2. cards: today, tomorrow, the worst day ahead ──────────────────────
+    # ── 2. cards, three days at a time; arrows step through the rest ────────
     worst = min([d for d in days[2:] if d["gap_hk"] is not None] or days,
                 key=lambda d: ((d["gap_hk"] or 0) + (d["gap_rqs"] or 0), d["date"]))
-    picks = [(days[0], _day_name(days[0]["date"], today_iso))]
-    if len(days) > 1:
-        picks.append((days[1], "Tomorrow"))
-    picks.append((worst, ("Tightest day ahead · " if (worst["gap_hk"] or 0) < 0
-                          else "Busiest day ahead · ") + _day_name(worst["date"], today_iso)))
-    for col, (d, title) in zip(st.columns(len(picks)), picks):
+    per = 3
+    last = max(len(days) - per, 0)
+    off = min(max(st.session_state.get("fc_off", 0), 0), last)
+
+    def step(to):
+        st.session_state["fc_off"] = min(max(to, 0), last)
+
+    a, mid, b, jump = st.columns([1, 6, 1, 3])
+    a.button("", icon=":material/chevron_left:", key="fc_prev", disabled=off == 0,
+             on_click=step, args=(off - per,), use_container_width=True)
+    b.button("", icon=":material/chevron_right:", key="fc_next", disabled=off >= last,
+             on_click=step, args=(off + per,), use_container_width=True)
+    shown = days[off:off + per]
+    mid.markdown(f'<div style="text-align:center;color:#5b6675;font-size:.85rem;'
+                 f'padding-top:8px">{_day_name(shown[0]["date"], today_iso)} – '
+                 f'{_day_name(shown[-1]["date"], today_iso)} · day {off + 1}–'
+                 f'{off + len(shown)} of {len(days)}</div>', unsafe_allow_html=True)
+    if (worst["gap_hk"] or 0) < 0:
+        jump.button(f"Tightest: {_day_name(worst['date'], today_iso)}",
+                    icon=":material/warning:", key="fc_jump", use_container_width=True,
+                    on_click=step, args=(days.index(worst) - 1,))
+
+    for col, d in zip(st.columns(per), shown):
         s = d["have"]
         have_hk = "—" if s is None else s["hskp"]
         have_rq = "—" if s is None else len(s["rqs"])
-        col.markdown(f"""<div class="fc-card">
+        title = _day_name(d["date"], today_iso)
+        if d is worst and (d["gap_hk"] or 0) < 0:
+            title += " · tightest day"
+        short_day = (d["gap_hk"] or 0) < 0 or (d["gap_rqs"] or 0) < 0
+        col.markdown(f"""<div class="fc-card" style="{'border-color:#f5c2c2' if short_day else ''}">
   <div class="fc-day">{title}</div>
   <div class="fc-big">
     <div><div class="fc-num">{d['hskp']}</div><div class="fc-lab">housekeepers needed</div>
@@ -225,6 +319,7 @@ def forecast_panel():
   </div>
   <div class="fc-sub">{d.get('checkouts')} checkouts · {d.get('dailies')} daily ·
        {d.get('dustnvac')} dust n vac</div>
+  {_built_html(builds.get(d['date']))}
 </div>""", unsafe_allow_html=True)
 
     # ── 3. short or over, every day ─────────────────────────────────────────
