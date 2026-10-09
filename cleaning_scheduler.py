@@ -5854,7 +5854,6 @@ if _is_hk:
                     f'{_hk_dot}{sm["icon"]} {sm["label"]}</div>'
                     f'</div>', unsafe_allow_html=True)
 
-                import roomstatus as _rst
                 if _rst.mirrored():
                     # HotSOS is where rooms are marked for now; the app mirrors it
                     # (hotsos_agent.sync_room_status), so its own buttons are off.
