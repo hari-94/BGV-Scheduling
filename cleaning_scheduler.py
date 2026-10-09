@@ -5049,13 +5049,16 @@ with _inp_exp:
     if auth.can("can_generate"):
         import uuid as _uuid
         import hotsos_sync as _hs
+        # getattr: a deploy doesn't reload an already-imported module (CLAUDE.md).
+        _DL_REQUEST = getattr(_hs, "DAYLOAD_REQUEST_KEY", "day_rooms_request")
+        _DL_RESULT = getattr(_hs, "DAYLOAD_RESULT_KEY", "day_rooms_result")
 
         @st.fragment(run_every=3)
         def _dayload_wait():
             rid = st.session_state.get("_dayload_id")
             if not rid:
                 return
-            res = db._load_key(_hs.DAYLOAD_RESULT_KEY) or {}
+            res = db._load_key(_DL_RESULT) or {}
             asked = st.session_state.get("_dayload_at", 0)
             import time as _time
             if res.get("id") != rid or res.get("status") == "running":
@@ -5087,7 +5090,7 @@ with _inp_exp:
                        disabled=bool(st.session_state.get("_dayload_id"))):
             import time as _time
             _rid = _uuid.uuid4().hex
-            db._upsert_key(_hs.DAYLOAD_REQUEST_KEY, {
+            db._upsert_key(_DL_REQUEST, {
                 "id": _rid, "date": _pick.isoformat(), "at": _now_iso(),
                 "by": st.session_state.get("display_name", "")})
             st.session_state["_dayload_id"] = _rid
