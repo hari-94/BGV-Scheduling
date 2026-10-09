@@ -5452,9 +5452,30 @@ if run:
                     import copy as _copy
                     _fg_packed = _copy.deepcopy(fg)
 
+                    # Daily Service nobody is marked for in the staff sheet used
+                    # to go to whoever was left over -- Alejandro at 5 AM on
+                    # 9 Oct, someone else on a Generate an hour later. The
+                    # manager's rule instead (ds_pick): someone working today
+                    # who hasn't done Daily Service yet this week.
+                    _ds_team = list(st.session_state.get("ds_team") or [])
+                    st.session_state["ds_auto"] = {}
+                    _n_ds = sum(1 for g in fg if g.get("service_type") == SVC_DS
+                                and not g.get("verify_group") and not g.get("dv_rqs2"))
+                    if _n_ds and not [n for n in _ds_team if n in present_hk]:
+                        try:
+                            import ds_pick as _dsp
+                            _day = _datetime.strptime(st.session_state.get("sched_day")
+                                                      or _today_iso(), "%Y-%m-%d").date()
+                            _cover = [n for n in present_hk
+                                      if n in st.session_state.get("insp_roster", {})]
+                            _ds_team, _why = _dsp.pick(_n_ds, present_hk, _day, _cover)
+                            st.session_state["ds_auto"] = _why
+                        except Exception as _ex:
+                            print(f"[app] Daily Service pick failed: {_ex}")
+
                     def _staff(fg, present_hk, present_insp):
                         hk_asgn, used_hk_set = assign_hk_building_aware(
-                            fg, present_hk, roster, ds_team=st.session_state.get("ds_team",[]))
+                            fg, present_hk, roster, ds_team=_ds_team)
                         for g in fg: g["housekeeper"] = hk_asgn.get(g["label"],"")
                         # Short of people: fill the short charts from the ones
                         # nobody could take, before inspectors are handed charts.
@@ -5484,6 +5505,13 @@ if run:
                             fg, inspectors, used_hk_set = _staff(
                                 _copy.deepcopy(_fg_packed), present_hk, present_insp)
                             st.session_state["borrowed"] = _taken
+                    # Report only the picks that still hold Daily Service once
+                    # everything is staffed: a 40-minute leftover round is given
+                    # up for a bigger chart by staff_biggest_first.
+                    _on_ds = {g.get("housekeeper") for g in fg if g.get("service_type") == SVC_DS}
+                    st.session_state["ds_auto"] = {n: w for n, w in
+                                                   (st.session_state.get("ds_auto") or {}).items()
+                                                   if n in _on_ds}
 
                     # Store fresh result in session state
                     st.session_state["groups_data"] = fg
@@ -5511,6 +5539,9 @@ if run:
                     _loader.empty()
                     st.success(f"Schedule generated — {len(fg)} groups from {len(df)} rooms."
                                + (" Preview only — not saved." if _previewing() else ""))
+                    for _n, _w in (st.session_state.get("ds_auto") or {}).items():
+                        st.info(f"Daily Service: nobody is marked for it in the staff "
+                                f"schedule, so **{_n}** takes it — {_w}.")
                     _bw = st.session_state.get("borrowed") or []
                     if _bw:
                         st.info("Short of people — moved onto rooms from other duties: "

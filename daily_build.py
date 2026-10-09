@@ -196,6 +196,7 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         at.session_state["sched_day"] = iso          # weekend rules follow the day built
         generate.borrowed = []
         generate.roles = {}
+        generate.ds_auto = {}
 
         def run_generate():
             at.text_area(key="room_input").set_value(room_text)
@@ -216,6 +217,8 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         # read back for the sheet's notes.
         generate.borrowed = [tuple(x) for x in (at.session_state["borrowed"]
                                                 if "borrowed" in at.session_state else [])]
+        generate.ds_auto = dict(at.session_state["ds_auto"]
+                                if "ds_auto" in at.session_state else {})
         generate.roles = {k: (at.session_state[k] if k in at.session_state else "")
                           for k in ("rqs1", "rqs2")}
         return fg
@@ -349,7 +352,7 @@ def _fingerprint(ws) -> str:
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
-def _write_summary(ws, top, frame, day=None, borrowed=(), rqs_fc=()):
+def _write_summary(ws, top, frame, day=None, borrowed=(), rqs_fc=(), ds_auto=None):
     """Under the rooms: minutes per housekeeper, then suggestions for the
     light ones. Nothing in either table starts with a room code, so a push
     -- which reads only rows whose first cell is a room -- never sees them."""
@@ -377,6 +380,11 @@ def _write_summary(ws, top, frame, day=None, borrowed=(), rqs_fc=()):
     ws.cell(row=r + 1, column=1, value=f"Light = under {LOW_MIN} min · Full Clean chart up to "
                                        f"{CAP_FC} · Daily Service up to {_ds_cap(day)}"
                                        + (" (weekend)" if _ds_cap(day) != CAP_DS else "")).font = reg
+    for name, why in (ds_auto or {}).items():
+        r += 1
+        ws.cell(row=r + 1, column=1, value=(
+            f"Daily Service: nobody is marked for it in the staff schedule, so {name} "
+            f"takes it — {why}.")).font = Font(name="Arial", size=10, bold=True, color="7A4B00")
     r += 2
     header(r, ["Housekeeper", "Rooms", "Minutes", "Full Clean min", "Daily min",
                "Dust n Vac rooms", "Status", "After suggestions"])
@@ -506,7 +514,7 @@ def _save_in_place(path, data: bytes, tries=30, wait=20):
 
 
 def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=(),
-              rqs_fc=()):
+              rqs_fc=(), ds_auto=None):
     """Write `frame` as the day's tab. Returns "written", "replaced" or
     "kept (edited)". `state` remembers the fingerprint of what was written,
     so an edited tab is never overwritten."""
@@ -528,7 +536,7 @@ def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=
         wb.remove(wb[name])
         outcome = "replaced"
     ws = wb.create_sheet(name)
-    _fill_sheet(ws, day, frame, note, borrowed, rqs_fc)
+    _fill_sheet(ws, day, frame, note, borrowed, rqs_fc, ds_auto)
     # Day tabs in date order, the newest last, and only the last month kept.
     from hotsos_sync import tab_date
     dated = sorted((tab_date(s, day.year) or _dt.date.min, s) for s in wb.sheetnames)
@@ -547,7 +555,7 @@ def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=
     return outcome
 
 
-def _fill_sheet(ws, day, frame, note="", borrowed=(), rqs_fc=()):
+def _fill_sheet(ws, day, frame, note="", borrowed=(), rqs_fc=(), ds_auto=None):
     """The day's rooms, the summary under them and the "Built ..." stamp."""
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -570,7 +578,8 @@ def _fill_sheet(ws, day, frame, note="", borrowed=(), rqs_fc=()):
             if v is None or (isinstance(v, float) and v != v) or v == "nan":
                 v = ""                         # NaN is pandas' blank; write it as one
             ws.cell(row=ri, column=ci, value=v).font = reg
-    _write_summary(ws, len(frame) + 3, frame, day, borrowed, rqs_fc)
+    _write_summary(ws, len(frame) + 3, frame, day, borrowed, rqs_fc, ds_auto)
+    _highlight(ws, frame, borrowed, rqs_fc)
     import clock
     built = clock.now()
     c = ws.cell(row=1, column=STAMP_COL,
@@ -582,8 +591,35 @@ def _fill_sheet(ws, day, frame, note="", borrowed=(), rqs_fc=()):
     ws.freeze_panes = "A2"
 
 
+def _highlight(ws, frame, borrowed=(), rqs_fc=()):
+    """Colour the cells that need someone's eye: red where a chart or an
+    inspection has nobody, amber where the person was pulled off another duty
+    to cover (or RQS 1/2 is inspecting Full Clean). The manager's ask -- the
+    summary at the bottom says so too, but this is where the RQS are looking."""
+    from openpyxl.styles import Font, PatternFill
+    red = PatternFill("solid", fgColor="F8C9C9")
+    amber = PatternFill("solid", fgColor="FFE3A3")
+    red_font = Font(name="Arial", size=10, bold=True, color="9B1C1C")
+    amber_font = Font(name="Arial", size=10, bold=True, color="7A4B00")
+    hk_col, rq_col = COLUMNS.index("HSKP") + 1, COLUMNS.index("RQS") + 1
+    pulled_hk = {n for n, role, _ in borrowed if role == "Housekeeper"}
+    pulled_rq = {n for n, role, _ in borrowed if role == "RQS"}
+    fc_rooms = {str(x) for _, _, rooms in rqs_fc for x in rooms}
+    for i, row in enumerate(frame.to_dict("records"), 2):
+        hk = str(row.get("HSKP") or "").strip()
+        rq = str(row.get("RQS") or "").strip()
+        if _needs_person(hk):
+            c = ws.cell(row=i, column=hk_col); c.fill, c.font = red, red_font
+        elif hk in pulled_hk:
+            c = ws.cell(row=i, column=hk_col); c.fill, c.font = amber, amber_font
+        if rq.startswith("Inspector "):
+            c = ws.cell(row=i, column=rq_col); c.fill, c.font = red, red_font
+        elif rq in pulled_rq or str(row.get("Room")) in fc_rooms:
+            c = ws.cell(row=i, column=rq_col); c.fill, c.font = amber, amber_font
+
+
 def write_big_tab(path, day: _dt.date, frame, state: dict, note="", borrowed=(),
-                  guard=None, rqs_fc=()):
+                  guard=None, rqs_fc=(), ds_auto=None):
     """The same tab, added to the team's big GC8 Inspections workbook -- the
     file the RQS have the link to, and the one Push reads first.
 
@@ -623,7 +659,7 @@ def write_big_tab(path, day: _dt.date, frame, state: dict, note="", borrowed=(),
                   if (tab_date(t, day.year) or _dt.date.max) < day]
         pos = max(before) + 1 if before else len(wb.sheetnames)
     ws = wb.create_sheet(name, pos)
-    _fill_sheet(ws, day, frame, note, borrowed, rqs_fc)
+    _fill_sheet(ws, day, frame, note, borrowed, rqs_fc, ds_auto)
     if old_fp is not None and had_stamp and _fingerprint(ws) == old_fp:
         return "unchanged"
     if path.stat().st_mtime != mtime:
@@ -883,13 +919,14 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
     note = ("Arrival Report included" if (arrival_text or "").strip()
             else "no Arrival Report yet")
     borrowed = getattr(generate, "borrowed", [])
+    ds_auto = getattr(generate, "ds_auto", {}) or {}
     outcome = write_tab(workbook_path, day, frame, state, note=note, borrowed=borrowed,
-                        rqs_fc=rqs_fc)
+                        rqs_fc=rqs_fc, ds_auto=ds_auto)
     big = None
     if big_path:
         try:
             big = write_big_tab(big_path, day, frame, state.setdefault("big", {}),
-                                note, borrowed, guard, rqs_fc)
+                                note, borrowed, guard, rqs_fc, ds_auto)
         except Exception as ex:                # the daily file is written either way
             big = f"error: {type(ex).__name__}: {ex}"
     # What it took to staff the day, for the Forecast page: who was pulled
@@ -908,4 +945,5 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
             "stretched": stretched, "vacant_charts": int(vacant),
             "rooms_without_rqs": int(no_rqs), "big_tab": big,
             "rqs_on_fc": [f"{label} ({name}) {len(rooms)} Full Clean rooms"
-                          for label, name, rooms in rqs_fc]}
+                          for label, name, rooms in rqs_fc],
+            "ds_auto": ds_auto}
