@@ -401,11 +401,16 @@ def health():
         st.markdown('<div class="hl-banner hl-ok">✓ Everything is running</div>',
                     unsafe_allow_html=True)
     # The cards are made in a fixed order; name them for the diagram.
-    agent_s, db_s, ssrs_s, sync_s, build_s, _ahead_s, arr_s, hot_s, files_s, app_s = states
+    # (The room-status mirror's card sits after HotSOS's; adding it without
+    # naming it here broke this page on 9 Oct.)
+    (agent_s, db_s, ssrs_s, sync_s, build_s, _ahead_s, arr_s, hot_s, mirror_s,
+     files_s, app_s) = states
+    _sev = {"bad": 3, "warn": 2, "ok": 1}
+    hotsos_s = max((hot_s, mirror_s), key=lambda x: _sev.get(x, 0))
     st.markdown(flow_svg({
         "email": arr_s, "flow": arr_s, "arr": files_s, "ssrs": ssrs_s, "staff": sync_s,
         "agent": agent_s, "build": build_s, "sheet": build_s, "push": "human",
-        "hotsos": hot_s, "db": db_s, "app": app_s}), unsafe_allow_html=True)
+        "hotsos": hotsos_s, "db": db_s, "app": app_s}), unsafe_allow_html=True)
     st.caption("Moving lines: data flowing normally · amber: worth a look · red ✕: broken "
                "there — see that step's card below.")
     cols = st.columns(3)
