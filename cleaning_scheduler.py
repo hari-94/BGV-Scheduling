@@ -1252,6 +1252,25 @@ def _init_state():
                         ("ds_team",[])]:
         if k not in st.session_state:
             st.session_state[k] = default
+    # Once per session: every name in its full form, nobody listed twice. The
+    # stored roster was cleaned when the names were merged, but a browser tab
+    # opened before that kept its own copy -- "Gustavo" crossed out beside
+    # "Gustavo Ramirez" -- and every merge since kept the old spelling alive.
+    if not st.session_state.get("_roster_canon_v1"):
+        try:
+            import staff_names as _sn
+            _tbl = _sn.aliases()
+            st.session_state["hk_roster"] = _sn.canon_roster(st.session_state["hk_roster"], _tbl)
+            st.session_state["insp_roster"] = _sn.canon_roster(st.session_state["insp_roster"], _tbl)
+            for _k in ("rqs1", "rqs2"):
+                if st.session_state.get(_k):
+                    st.session_state[_k] = _sn.full(st.session_state[_k], _tbl)
+            st.session_state["ds_team"] = list(dict.fromkeys(
+                _sn.full(n, _tbl) for n in st.session_state.get("ds_team") or []))
+            st.session_state["_att_gen"] = st.session_state.get("_att_gen", 0) + 1
+        except Exception as _ex:
+            print(f"[app] roster canon failed: {_ex}")
+        st.session_state["_roster_canon_v1"] = True
 
 def _auto_apply_today(force=False):
     """Set today's attendance from the stored staff schedule, once per day.
@@ -1545,6 +1564,42 @@ def _apply_day_roster(iso):
         st.session_state[_sel] = _val if (_val and new_insp.get(_val)) else RQS_NONE
     n_hk = sum(1 for v in st.session_state["hk_roster"].values() if v["present"])
     return f"{n_hk} housekeepers · RQS 1 {update['rqs1'] or '—'} · RQS 2 {update['rqs2'] or '—'}"
+
+
+def _borrow_short(need_hk, need_rqs):
+    """Mark the first `need_hk` housekeepers and `need_rqs` RQS on other
+    duties today (daily_build.borrowable: Dust and Vac first, then projects;
+    never deep cleans or HSP) present. Returns [(name, role, duty)]."""
+    import daily_build as _dbuild
+    import roster_import as _ri
+    iso = st.session_state.get("sched_day") or _today_iso()
+    hk = st.session_state["hk_roster"]
+    insp = st.session_state["insp_roster"]
+    by_hk = {_ri.norm_name(n): n for n in hk}
+    by_rq = {_ri.norm_name(n): n for n in insp}
+    taken = []
+    try:
+        cands = _dbuild.borrowable(iso)
+    except Exception as _ex:
+        print(f"[app] borrowable failed: {_ex}")
+        cands = []
+    for name, group, duty in cands:
+        if group == "hk" and need_hk > 0:
+            key = by_hk.get(_ri.norm_name(name))
+            if key and not hk[key].get("present"):
+                hk[key] = dict(hk[key], present=True)
+                need_hk -= 1
+                taken.append((key, "Housekeeper", duty))
+        elif group == "rqs" and need_rqs > 0:
+            key = by_rq.get(_ri.norm_name(name), name)
+            if not insp.get(key):
+                insp[key] = True
+                need_rqs -= 1
+                taken.append((key, "RQS", duty))
+    if taken:
+        # Their tick boxes come back ticked on the next run.
+        st.session_state["_att_gen"] = st.session_state.get("_att_gen", 0) + 1
+    return taken
 
 
 def _back_to_today():
@@ -5394,14 +5449,41 @@ if run:
                     for g,lbl in zip(ua2, make_labels("CHECK",len(ua2))): g["label"]=lbl
                     for g in fg: g["cross_bld"]=len(g["blds"])>1
 
-                    hk_asgn, used_hk_set = assign_hk_building_aware(
-                        fg, present_hk, roster, ds_team=st.session_state.get("ds_team",[]))
-                    for g in fg: g["housekeeper"] = hk_asgn.get(g["label"],"")
-                    # Short of people: fill the short charts from the ones
-                    # nobody could take, before inspectors are handed charts.
-                    fg = fill_from_unstaffed(fg, roster)
-                    fg = staff_biggest_first(fg)
-                    inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
+                    import copy as _copy
+                    _fg_packed = _copy.deepcopy(fg)
+
+                    def _staff(fg, present_hk, present_insp):
+                        hk_asgn, used_hk_set = assign_hk_building_aware(
+                            fg, present_hk, roster, ds_team=st.session_state.get("ds_team",[]))
+                        for g in fg: g["housekeeper"] = hk_asgn.get(g["label"],"")
+                        # Short of people: fill the short charts from the ones
+                        # nobody could take, before inspectors are handed charts.
+                        fg = fill_from_unstaffed(fg, roster)
+                        fg = staff_biggest_first(fg)
+                        inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
+                        return fg, inspectors, used_hk_set
+
+                    fg, inspectors, used_hk_set = _staff(fg, present_hk, present_insp)
+                    # Still short: people on Dust and Vac, then projects and
+                    # other non-room duties that day, are counted as working --
+                    # the manager's rule, and the same one the 5 AM build used
+                    # to apply on its own, which is why a Generate here and the
+                    # morning's sheet came out differently.
+                    st.session_state["borrowed"] = []
+                    _need_hk = sum(1 for g in fg if not g.get("verify_group")
+                                   and not g.get("dv_rqs2")
+                                   and str(g.get("housekeeper") or "").startswith(
+                                       (NO_HK_LABEL, NEED_HK_PREFIX)))
+                    _need_rqs = sum(1 for _e in inspectors
+                                    if str(_e.get("name", "")).startswith("Inspector "))
+                    if _need_hk or _need_rqs:
+                        _taken = _borrow_short(_need_hk, _need_rqs)
+                        if _taken:
+                            present_hk = present_hk + [n for n, r, _ in _taken if r == "Housekeeper"]
+                            present_insp = present_insp + [n for n, r, _ in _taken if r == "RQS"]
+                            fg, inspectors, used_hk_set = _staff(
+                                _copy.deepcopy(_fg_packed), present_hk, present_insp)
+                            st.session_state["borrowed"] = _taken
 
                     # Store fresh result in session state
                     st.session_state["groups_data"] = fg
@@ -5427,7 +5509,21 @@ if run:
                         pass
 
                     _loader.empty()
-                    st.success(f"Schedule generated — {len(fg)} groups from {len(df)} rooms.")
+                    st.success(f"Schedule generated — {len(fg)} groups from {len(df)} rooms."
+                               + (" Preview only — not saved." if _previewing() else ""))
+                    _bw = st.session_state.get("borrowed") or []
+                    if _bw:
+                        st.info("Short of people — moved onto rooms from other duties: "
+                                + "; ".join(f"**{n}** ({r}, was {d})" for n, r, d in _bw))
+                    # Ideally RQS 1 and 2 inspect no Full Clean; say so when they must.
+                    _r12 = [(lbl, nm) for lbl, nm in (("RQS 1", rqs1), ("RQS 2", rqs2)) if nm]
+                    for _lbl, _nm in _r12:
+                        _fc = [str(r["room"]) for g in fg if g.get("service_type") == SVC_FC
+                               and g.get("inspector") == _nm for r in g["rooms"]]
+                        if _fc:
+                            st.error(f"⚠ {_lbl} ({_nm}) is inspecting {len(_fc)} Full Clean "
+                                     f"room{'s' if len(_fc) != 1 else ''} to cover the "
+                                     f"shortage: {', '.join(_fc)}")
             except Exception as ex:
                 _loader.empty()
                 st.error(f"Error: {ex}")

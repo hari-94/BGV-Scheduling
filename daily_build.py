@@ -210,22 +210,12 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
             return fg
 
         fg = run_generate()
-        need_hk, need_rqs = _shortfall(
-            fg, at.session_state["inspectors_data"] if "inspectors_data" in at.session_state
-            else [])
-        if need_hk or need_rqs:
-            rqs = {k: (at.session_state[k] if k in at.session_state else "")
-                   for k in ("rqs1", "rqs2")}
-            taken = _borrow(at, iso, need_hk, need_rqs)
-            if taken:
-                at.run()                         # redraw attendance with them in it
-                none = "— none —"
-                for sel, k in (("rqs1_sel", "rqs1"), ("rqs2_sel", "rqs2")):
-                    opts = list(at.selectbox(key=sel).options)
-                    at.selectbox(key=sel).set_value(rqs[k] if rqs[k] in opts else none)
-                at.run()
-                fg = run_generate()
-                generate.borrowed = taken
+        # The page's own Generate borrows people when short (Dust and Vac,
+        # then projects) -- the same rule this build used to apply on its own,
+        # moved there so a Generate by hand comes out the same. Its choice is
+        # read back for the sheet's notes.
+        generate.borrowed = [tuple(x) for x in (at.session_state["borrowed"]
+                                                if "borrowed" in at.session_state else [])]
         generate.roles = {k: (at.session_state[k] if k in at.session_state else "")
                           for k in ("rqs1", "rqs2")}
         return fg
@@ -323,45 +313,6 @@ def borrowable(iso):
             continue
         out.append((0 if _DV_DUTY.search(p["raw"]) else 1, p["name"], p["group"], p["raw"]))
     return [(n, g, raw) for _, n, g, raw in sorted(out, key=lambda x: x[0])]
-
-
-def _shortfall(fg, inspectors):
-    """(charts with no housekeeper, inspector slots with nobody named)."""
-    hk = sum(1 for g in fg if not g.get("verify_group") and not g.get("dv_rqs2")
-             and str(g.get("housekeeper") or "").startswith(("No HK available",
-                                                              "Need Housekeeper")))
-    rqs = sum(1 for e in inspectors or [] if str(e.get("name", "")).startswith("Inspector "))
-    return hk, rqs
-
-
-def _borrow(at, iso, need_hk, need_rqs):
-    """Mark the first `need_hk` housekeepers and `need_rqs` RQS from
-    borrowable() present on the page. Returns who was taken."""
-    import roster_import as ri
-    hk = dict(at.session_state["hk_roster"]) if "hk_roster" in at.session_state else {}
-    insp = dict(at.session_state["insp_roster"]) if "insp_roster" in at.session_state else {}
-    by_norm_hk = {ri.norm_name(n): n for n in hk}
-    by_norm_rq = {ri.norm_name(n): n for n in insp}
-    taken = []
-    for name, group, duty in borrowable(iso):
-        if group == "hk" and need_hk > 0:
-            key = by_norm_hk.get(ri.norm_name(name))
-            if key and not hk[key].get("present"):
-                hk[key] = dict(hk[key], present=True)
-                need_hk -= 1
-                taken.append((key, "Housekeeper", duty))
-        elif group == "rqs" and need_rqs > 0:
-            key = by_norm_rq.get(ri.norm_name(name), name)
-            if not insp.get(key):
-                insp[key] = True
-                need_rqs -= 1
-                taken.append((key, "RQS", duty))
-    if taken:
-        at.session_state["hk_roster"] = hk
-        at.session_state["insp_roster"] = insp
-        gen = at.session_state["_att_gen"] if "_att_gen" in at.session_state else 0
-        at.session_state["_att_gen"] = gen + 1
-    return taken
 
 
 def _raise(at, step):

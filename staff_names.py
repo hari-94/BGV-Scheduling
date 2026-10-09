@@ -57,7 +57,11 @@ def full(name: str, table=None) -> str:
     the rows would mix two sections' days -- and only the name is renamed."""
     table = aliases() if table is None else table
     base, sep, suffix = name.partition(SUFFIX)
-    return table.get(base, base) + sep + suffix
+    if base not in table:
+        # The sheet and old logins shout some names ("ARACELI", "DIANIS").
+        low = {k.lower(): v for k, v in table.items()}
+        return low.get(base.lower(), base) + sep + suffix
+    return table[base] + sep + suffix
 
 
 def names_in_use(weeks=None, roster=None, since_days=28) -> dict:
