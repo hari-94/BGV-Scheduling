@@ -286,6 +286,21 @@ def _day_roles(at):
     for k in ("rqs1", "rqs2"):
         if not (at.session_state[k] if k in at.session_state else None) and update.get(k):
             at.session_state[k] = update[k]
+    # The RQS dropdowns write their value back on every run; left at "none"
+    # they blanked RQS 1 and 2 on a rebuild later in the day (10 Oct: David,
+    # RQS 2, was treated as an ordinary inspector). Point them at the people,
+    # as _apply_roster does -- after a run, once they're among the options.
+    want = {k: (at.session_state[k] if k in at.session_state else "") or update.get(k) or ""
+            for k in ("rqs1", "rqs2")}      # read before the run blanks them
+    at.run()
+    none = "— none —"                       # the page's RQS_NONE
+    for sel, k in (("rqs1_sel", "rqs1"), ("rqs2_sel", "rqs2")):
+        val = want[k]
+        try:
+            opts = list(at.selectbox(key=sel).options)
+            at.selectbox(key=sel).set_value(val if val in opts else none)
+        except Exception:
+            pass
 
 
 def _apply_roster(at, iso):

@@ -112,10 +112,10 @@ section[data-testid="stSidebar"]{background:#fff!important;border-right:1px soli
 ui.topnav("My Home")
 def e(s): return _html.escape(str(s) if s is not None else "")
 
-def person_label(info):
+def person_label(info, section=None):
     """Name for a picker: the person, their team, and their home property if
     they are visiting from one."""
-    txt = f'{info["label"]}  ·  {info["sections"][0]}'
+    txt = f'{info["label"]}  ·  {section or info["sections"][0]}'
     return txt + f'  ·  {info["home"]}' if info.get("home") else txt
 
 
@@ -151,6 +151,29 @@ overrides = db.load_staff_overrides()
 rows = _all_rows(f'{meta.get("uploaded_at","")}|{len(week_keys)}|{len(overrides)}')
 index = ri.people_index(rows)
 
+
+def _current_sections(rows):
+    """{pid: "Building 3"} -- where each person is listed now: today's row if
+    there is one, else the nearest day of this week, else their latest. The
+    hero used to show `sections[0]`, the alphabetically first section the
+    person had ever been in, so Jennyfer (Building 3 this week, Building 2
+    once) was shown Building 2 -- sixteen people were, on 10 Oct. Someone on
+    two rows the same day (Nancy: Building 3 and Houseperson PM) gets both."""
+    t = clock.today().isoformat()
+    best = {}
+    for r in rows:
+        k = (r["date"] != t, abs((datetime.date.fromisoformat(r["date"]) - clock.today()).days),
+             r["date"] > t)
+        cur = best.get(r["pid"])
+        if cur is None or k < cur[0]:
+            best[r["pid"]] = (k, {r["date"]: [r["section"]]})
+        elif k == cur[0]:
+            cur[1].setdefault(r["date"], []).append(r["section"])
+    return {pid: " · ".join(dict.fromkeys(next(iter(v[1].values())))) for pid, v in best.items()}
+
+
+now_section = _current_sections(rows)
+
 # Sign-in names rarely match the sheet exactly, so try the display name and the
 # username, which often carries digits or dots. A login named by a nickname
 # ("DIANIS") is first turned into the full name the app's name directory has
@@ -168,7 +191,7 @@ can_browse = auth.can("can_manage_users")
 
 if mine is None or can_browse:
     order = sorted(index, key=lambda p: index[p]["label"].lower())
-    labels = [person_label(index[p]) for p in order]
+    labels = [person_label(index[p], now_section.get(p)) for p in order]
     default = order.index(mine) if mine in order else 0
     sel = st.selectbox(
         "Whose schedule?" if can_browse else
@@ -186,7 +209,7 @@ greet = info["label"].split()[0].title()
 st.markdown(
     f'<div class="hero"><h1>Hello, {e(greet)}</h1>'
     f'<p>Your schedule, straight from the staff sheet.</p>'
-    f'<span class="role">{e(info["sections"][0])}'
+    f'<span class="role">{e(now_section.get(mine) or info["sections"][0])}'
     f'{" · " + e(info["home"]) if info.get("home") else ""}</span></div>', unsafe_allow_html=True)
 
 # ── Week strips ───────────────────────────────────────────────────────────────
