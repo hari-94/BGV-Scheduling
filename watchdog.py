@@ -173,7 +173,7 @@ def run(cfg) -> list:
                                  "current": current}))
     if send:
         d = _alerts_dir(cfg)
-        body = (f"BGV Peak 8 — {len(send)} thing{'s' if len(send) != 1 else ''} need a look "
+        body = (f"BGV Peak 8 — {len(send)} thing{'s need' if len(send) != 1 else ' needs'} a look "
                 f"({now:%a %b %d, %I:%M %p}):\n\n" + "\n".join(f"• {p}" for p in send)
                 + "\n\nStats: https://bgv-scheduling-qvt9nhbqqbusvbcpm7kidq.streamlit.app/Stats\n")
         (d / f"BGV alert {now:%Y-%m-%d %H%M}.txt").write_text(body, encoding="utf-8")
