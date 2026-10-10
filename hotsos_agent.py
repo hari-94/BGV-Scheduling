@@ -869,6 +869,7 @@ def run_loop():
     log(f"agent up on {socket.gethostname()}; workbook {cfg.get('workbook') or '(not set up)'}")
     done_req = (db._load_key(hs.RESULT_KEY) or {}).get("id")
     done_day = (db._load_key(hs.DAYLOAD_RESULT_KEY) or {}).get("id")
+    last_watch = 0
     # The last Refresh request is still on record at start-up; treating it as
     # new started another forecast on every restart (two at once, 9 Oct).
     done_fc = (db._load_key(hs.FORECAST_REQUEST_KEY) or {}).get("id")
@@ -969,6 +970,19 @@ def run_loop():
                         f"{', '.join(f'{v} {k}' for k, v in d.items() if v) or 'nothing'}")
             except Exception as ex:
                 log(f"free plan job: {type(ex).__name__}: {ex}")
+
+            # The watchdog: every 10 minutes, its own checks; anything new goes
+            # to SharePoint's "App Alerts" for the cloud flow to e-mail. Doesn't
+            # depend on anybody's session being signed in.
+            if time.time() - last_watch > 600:
+                last_watch = time.time()
+                try:
+                    import watchdog
+                    sent = watchdog.run(cfg)
+                    if sent:
+                        log("alert sent: " + " | ".join(x[:80] for x in sent))
+                except Exception as ex:
+                    log(f"watchdog: {type(ex).__name__}: {ex}")
 
             slot = (now.date(), now.hour)
             freq = db._load_key(hs.FORECAST_REQUEST_KEY) or {}

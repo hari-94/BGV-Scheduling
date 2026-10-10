@@ -102,29 +102,67 @@ def borrow(*names, path=PAGE):
 
 
 # ── the Arrival Report ───────────────────────────────────────────────────────
+_MONTHS = {m: i for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+
+
+def _name_date(stem, day: _dt.date):
+    """The date a file's name gives, if any: "10-8-26", "10-10" (no year),
+    "Oct 10". Without a year it's the one nearest `day`."""
+    low = stem.lower()
+    m = re.search(r"(?<!\d)(\d{1,2})[-._ ](\d{1,2})(?:[-._ ](\d{2,4}))?(?!\d)", low)
+    mo = d = y = None
+    if m:
+        mo, d = int(m.group(1)), int(m.group(2))
+        y = int(m.group(3)) if m.group(3) else None
+    else:
+        m = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[ .-]*(\d{1,2})"
+                      r"(?:\D{1,3}(\d{2,4}))?", low)
+        if m:
+            mo, d = _MONTHS[m.group(1)], int(m.group(2))
+            y = int(m.group(3)) if m.group(3) else None
+    if mo is None:
+        return None
+    if y is not None:
+        y = y + 2000 if y < 100 else y
+        years = [y]
+    else:
+        years = [day.year - 1, day.year, day.year + 1]
+    best = None
+    for yy in years:
+        try:
+            cand = _dt.date(yy, mo, d)
+        except ValueError:
+            continue
+        if best is None or abs((cand - day).days) < abs((best - day).days):
+            best = cand
+    return best
+
+
 def find_arrival_report(folder, day: _dt.date):
     """The Arrival Report for `day` in `folder`, or None.
 
-    The flow names each file after the e-mail's subject, "Arrival Report
-    10/8/26" -> "Arrival Report 10-8-26.txt". The date in the subject is the
-    day it's for, which is what matters: it's sent the night before. A resend
-    wins over an earlier one."""
+    The flow names each file after the e-mail's subject. The desk's subject
+    isn't fixed: "Arrival Report 10/8/26" most nights, "Arrivals 10/10/26"
+    on 10 Oct -- and the flow, which then looked for "Arrival Report" only,
+    skipped that one. It now saves anything with "Arrival" in the subject, so
+    this picks carefully: a name with "arriv" in it, a date in the name that
+    is `day` (sent the night before; the date is the day it's for), and of
+    those the ones that read like the report -- a list of rooms -- first; a
+    resend wins over an earlier one."""
     folder = Path(folder)
     if not folder.exists():
         return None
     hits = []
     for p in [*folder.glob("*.txt"), *folder.glob("*.htm*")]:
-        m = re.search(r"(\d{1,2})[-._ ](\d{1,2})[-._ ](\d{2,4})", p.stem)
-        if not m:
+        if "arriv" not in p.stem.lower() or _name_date(p.stem, day) != day:
             continue
-        mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        y = y + 2000 if y < 100 else y
         try:
-            if _dt.date(y, mo, d) == day:
-                hits.append(p)
-        except ValueError:
-            pass
-    return max(hits, key=lambda p: p.stat().st_mtime) if hits else None
+            rooms = len(set(re.findall(r"\b\d{4}[A-Ia-i]\b", read_arrival_report(p))))
+        except Exception:
+            rooms = 0
+        hits.append((rooms >= 5, p.stat().st_mtime, p))
+    return max(hits)[2] if hits else None
 
 
 def read_arrival_report(path) -> str:
