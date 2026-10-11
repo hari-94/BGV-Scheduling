@@ -379,7 +379,14 @@ _insp_names = sorted({g.get("inspector", "") for g in charts
                       if g.get("inspector")})
 my_insp = assignments.match_name(_insp_names, me_display, me_user)
 
-if can_browse:
+# A manager who is also on the floor today -- inspecting a team, or with rooms
+# of their own -- comes here for that, like anybody else on the floor. The
+# picker opened on the first name in the alphabet and mixed that person's
+# rooms in with their own team's; it now waits in a closed section under the
+# header. A manager with no work of their own still gets it at the top.
+browse_aside = can_browse and bool(mine or my_insp)
+
+if can_browse and not browse_aside:
     mine = st.selectbox(
         T("rooms.whose"), hk_names,
         index=hk_names.index(mine) if mine in hk_names else 0, key="mr_person")
@@ -430,6 +437,19 @@ st.markdown(
     f'<div class="mrbar"><i style="width:{pct}%"></i></div>'
     f'<div class="mrcount">{e(T("rooms.progress", done=done_n, total=total_n))}'
     f'</div></div>', unsafe_allow_html=True)
+
+def _t(key, fallback):
+    """T, with English to fall back on. i18n is an imported module, so a
+    running app keeps its old copy after a deploy and an unknown key comes
+    back as itself -- 'rooms.everyone' on the page until the next reboot."""
+    s = T(key)
+    return fallback if s == key else s
+
+
+# Drawn here so it sits under the header, filled at the end of the page once
+# the room-row helpers exist. Closed until somebody wants it.
+_aside = (st.expander("👥 " + _t("rooms.everyone", "Everyone's rooms"))
+          if browse_aside else None)
 
 if not my_rooms and not my_insp:
     st.markdown(f'<div class="mrcard"><div class="mrroom">'
@@ -982,3 +1002,30 @@ for _g, _r in _flat:
     _room_row(_g, _r, "mr", _g.get("housekeeper") or mine,
               show_owner=_mixed,
               when=(T("rooms.by") + " " + _day.hhmm(_blk["end"])) if _blk else None)
+
+# ── everyone else, for a manager who is on the floor today ───────────────────
+# Nothing is drawn until a name is picked: a closed section still runs its
+# contents, and a hundred rooms of buttons on every rerun is a slow phone.
+if _aside is not None:
+    with _aside:
+        _pick = st.selectbox(T("rooms.whose"), hk_names, index=None,
+                             placeholder=_t("rooms.pick_person", "Pick a housekeeper"),
+                             key="mr_person_aside")
+        if _pick:
+            _theirs = [(g, r) for g in charts if g.get("housekeeper") == _pick
+                       for r in (g.get("rooms") or [])]
+            try:
+                _pblocks = _day.plan_day([r for _g, r in _theirs])
+            except Exception:
+                _pblocks = []
+            _pseat = {b["room"]: (i, b) for i, b in enumerate(_pblocks)}
+            _pstrip = _day_strip(_pblocks)
+            if _pstrip:
+                st.markdown(_pstrip, unsafe_allow_html=True)
+            _key = lambda item: _pseat.get(
+                str(item[1].get("room", "")).strip().upper(), (999, None))
+            for _g, _r in sorted(_theirs, key=lambda it: _key(it)[0]):
+                _blk = _key((_g, _r))[1]
+                _room_row(_g, _r, "mrx", _pick,
+                          when=(T("rooms.by") + " " + _day.hhmm(_blk["end"]))
+                          if _blk else None)

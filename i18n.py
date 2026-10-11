@@ -50,6 +50,8 @@ STRINGS = {
                            "No pudimos encontrar tu nombre en el horario de hoy "
                            "— elige tu nombre"),
     "rooms.whose":        ("Whose rooms?", "¿Cuartos de quién?"),
+    "rooms.everyone":     ("Everyone's rooms", "Los cuartos de todos"),
+    "rooms.pick_person":  ("Pick a housekeeper", "Elige una camarista"),
     "rooms.progress":     ("{done} of {total} done", "{done} de {total} listos"),
     "rooms.all_done":     ("All done — great work!",
                            "¡Todo listo — excelente trabajo!"),
