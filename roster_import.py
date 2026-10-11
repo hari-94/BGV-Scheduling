@@ -414,12 +414,25 @@ def cover_building(raw, default=1) -> int:
         return int(m.group(1) or m.group(2))
     return default
 
+def rqs_roles(raw) -> set:
+    """Every RQS role a cell names: {1}, {2}, or {1, 2}.
+
+    "RQS 1 + RQS 2" is one inspector doing both on a light day. Stopping at
+    the first match read it as RQS 1 alone and left RQS 2 empty, so that day's
+    Daily Service and Dust n Vac had no inspector -- 13 such cells in the 12
+    weeks to 19 October."""
+    low = _norm(raw)
+    out = set()
+    if re.search(r"\b(rqs?\s*1|rq\s*1)\b", low): out.add(1)
+    if re.search(r"\b(rqs?\s*2|rq\s*2)\b", low): out.add(2)
+    if re.search(r"\brqs?\s*1\s*(?:\+|&|/|and|y)\s*2\b", low): out.add(2)   # "RQS 1 + 2"
+    return out
+
+
 def rqs_role(raw):
     """Return 1 or 2 when a cell names an explicit RQS role, else None."""
-    low = _norm(raw)
-    if re.search(r"\b(rqs?\s*1|rq\s*1)\b", low): return 1
-    if re.search(r"\b(rqs?\s*2|rq\s*2)\b", low): return 2
-    return None
+    roles = rqs_roles(raw)
+    return min(roles) if roles else None
 
 # ── Sheet scanning ────────────────────────────────────────────────────────────
 def sheet_dates(ws, max_scan_rows=200):
@@ -1448,7 +1461,7 @@ def build_roster_update(people, existing_roster=None):
     by_norm = {norm_name(n): n for n in existing_roster}
 
     hk_roster, ds_team, changes, new_people = {}, [], [], []
-    inspectors, rqs = {}, {1: "", 2: ""}
+    inspectors, rqs, claims = {}, {1: "", 2: ""}, []
     others, unknown, cover = [], [], []
 
     for p in people:
@@ -1477,11 +1490,17 @@ def build_roster_update(people, existing_roster=None):
                 ds_team.append(canonical)
         elif p["group"] == "rqs":
             inspectors[p["name"]] = p["present"]
-            role = rqs_role(p["raw"])
-            if role and p["present"] and not rqs[role]:
-                rqs[role] = p["name"]
+            if p["present"]:
+                claims.append((p["name"], rqs_roles(p["raw"])))
         else:
             others.append(p)
+
+    # A cell naming one role wins it over a cell naming both: "RQS 1 + RQS 2"
+    # is somebody covering, and only takes a role nobody holds on their own
+    # (17 Oct: Mayra "RQS 1 + RQS 2", David "RQS2 + Dust and vac").
+    for role in (1, 2):
+        rqs[role] = (next((n for n, rs in claims if rs == {role}), "")
+                     or next((n for n, rs in claims if role in rs), ""))
 
     return {
         "hk_roster":   hk_roster,

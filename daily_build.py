@@ -959,7 +959,12 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
     rqs_fc = []
     svc = frame["Service"].fillna("").astype(str).str.strip()
     who = frame["RQS"].fillna("").astype(str).str.strip()
-    for key, label in (("rqs1", "RQS 1"), ("rqs2", "RQS 2")):
+    pairs = (("rqs1", "RQS 1"), ("rqs2", "RQS 2"))
+    if roles.get("rqs1") and roles.get("rqs1") == roles.get("rqs2"):
+        # One person holding both ("RQS 1 + RQS 2" on the staff sheet): flag
+        # their rooms once, not once per role.
+        pairs = (("rqs1", "RQS 1 + 2"),)
+    for key, label in pairs:
         names = {roles.get(key)} - {"", None} | {label}
         mask = svc.eq("Full Clean") & who.isin(names)
         if mask.any():
