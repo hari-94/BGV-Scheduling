@@ -79,8 +79,11 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 auth.require_login()
 ui.topnav("HotSOS")
-if not auth.can("can_generate"):
-    st.error("Only RQS and admins can push to HotSOS.")
+# Managers only (the admin role); see Stats for why not a new permission.
+# On the days the morning push runs by itself, the RQS change rooms in HotSOS
+# directly and the app follows.
+if not auth.can("can_manage_users"):
+    st.error("HotSOS is for managers.")
     st.stop()
 
 me = st.session_state.get("display_name") or auth.current_user().get("username", "")

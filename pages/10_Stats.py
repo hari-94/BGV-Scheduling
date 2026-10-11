@@ -53,8 +53,11 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 auth.require_login()
 ui.topnav("Stats")
-if not auth.can("can_view_dashboard"):
-    st.error("Stats are for RQS and admins.")
+# Managers only (the admin role). can_manage_users rather than a new
+# permission: auth is an imported module, and a running app keeps its old copy
+# after a deploy -- a permission it has never heard of would lock everyone out.
+if not auth.can("can_manage_users"):
+    st.error("Stats are for managers.")
     st.stop()
 
 e = html.escape

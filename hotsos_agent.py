@@ -753,6 +753,75 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
     return status
 
 
+# ── auto-push on chosen days ─────────────────────────────────────────────────
+#: app_settings: {"days": ["2026-10-12", ...], "after": "05:30", "set_by": ...}.
+#: On a day listed here -- the manager is away -- the morning's sheet goes to
+#: HotSOS without anybody pressing Push; whoever is on can still change rooms
+#: in HotSOS directly, and the app follows (the mirror reconciles).
+AUTO_PUSH_KEY = "hotsos_auto_push"
+AUTO_PUSH_GIVE_UP = 9          # no finished build by 9 AM: leave it to a person
+
+
+def auto_push_due(now, plan, build, last, done_day):
+    """Why the day's auto-push should or shouldn't be queued now:
+    ("push", why), ("wait", why) or ("skip", why). No side effects."""
+    today = str(now.date())
+    if done_day == today:
+        return "skip", "already handled today"
+    if today not in (plan.get("days") or []):
+        return "skip", "not an auto-push day"
+    hh, mm = (int(x) for x in str(plan.get("after") or "05:30").split(":"))
+    if (now.hour, now.minute) < (hh, mm):
+        return "wait", f"before {hh:02d}:{mm:02d}"
+    if last.get("mode") == "push" and last.get("date") == today:
+        return "skip", f"pushed already by {last.get('by') or 'someone'}"
+    if build.get("date") != today or build.get("status") != "done":
+        if now.hour >= AUTO_PUSH_GIVE_UP:
+            return "skip", f"no finished 5 AM build by {AUTO_PUSH_GIVE_UP}:00 ({build.get('status')})"
+        return "wait", f"the 5 AM build is {build.get('status') or 'not started'}"
+    return "push", "build done"
+
+
+_auto_plan = {"read": 0.0, "plan": {}}
+
+
+def _auto_push():
+    """Queue the day's Push once, as an ordinary request -- so it runs,
+    answers on the HotSOS page and is logged exactly like somebody pressing
+    Push. Reads the agent's state fresh: the copy the loop holds is stale once
+    a build has written its tab fingerprints.
+
+    The loop comes round every few seconds, so the list of days is read at
+    most every ten minutes, and the build and push records only on a listed
+    day once it is time -- not three database reads a pass, all day."""
+    import daily_build
+    now = clock.now()
+    state = _state()
+    if state.get("auto_pushed") == str(now.date()):
+        return
+    if time.time() - _auto_plan["read"] > 600:
+        _auto_plan.update(read=time.time(), plan=db._load_key(AUTO_PUSH_KEY) or {})
+    plan = _auto_plan["plan"]
+    verdict, why = auto_push_due(now, plan, {}, {}, None)
+    if verdict == "wait" and why.startswith("before") or why == "not an auto-push day":
+        return
+    verdict, why = auto_push_due(now, plan,
+                                 db._load_key(daily_build.BUILD_KEY) or {},
+                                 db._load_key(hs.LAST_KEY) or {},
+                                 state.get("auto_pushed"))
+    if verdict == "wait" or why in ("already handled today", "not an auto-push day"):
+        return
+    state["auto_pushed"] = str(now.date())
+    STATE.write_text(json.dumps(state))
+    if verdict == "skip":
+        log(f"auto-push {now.date()}: not sent -- {why}")
+        return
+    db._upsert_key(hs.REQUEST_KEY, {"id": uuid.uuid4().hex, "date": str(now.date()),
+                                    "mode": "push", "by": "auto (5 AM build)",
+                                    "at": clock.stamp()})
+    log(f"auto-push {now.date()}: queued after the 5 AM build")
+
+
 # ── push / preview ───────────────────────────────────────────────────────────
 def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
     """Build the plan for `day` and, for mode 'push', send it. Returns the
@@ -950,6 +1019,12 @@ def run_loop():
                 st_["built"] = str(now.date())
                 STATE.write_text(json.dumps(st_))
                 run_build(cfg)
+
+            # Days somebody asked for: the morning's sheet to HotSOS by itself.
+            try:
+                _auto_push()
+            except Exception as ex:
+                log(f"auto-push: {type(ex).__name__}: {ex}")
 
             # The room-status mirror runs on its own thread (start_mirror).
             start_mirror()

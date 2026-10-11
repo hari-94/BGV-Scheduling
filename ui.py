@@ -29,8 +29,8 @@ NAV_ITEMS = [
     ("pages/3_Roster_Import.py", "Roster Import", ":material/upload_file:", "can_generate", "nav.roster_import"),
     ("pages/6_Property.py",      "Property",      ":material/apartment:", "can_view_insp_tab", "nav.property"),
     ("pages/9_Forecast.py",      "Forecast",      ":material/trending_up:", "can_view_dashboard", "nav.forecast"),
-    ("pages/10_Stats.py",        "Stats",         ":material/monitoring:",    "can_view_dashboard", "nav.health"),
-    ("pages/8_HotSOS.py",        "HotSOS",        ":material/sync_alt:", "can_generate", "nav.hotsos"),
+    ("pages/10_Stats.py",        "Stats",         ":material/monitoring:",    "can_manage_users", "nav.health"),
+    ("pages/8_HotSOS.py",        "HotSOS",        ":material/sync_alt:", "can_manage_users", "nav.hotsos"),
     ("pages/7_Profile.py",       "Profile",       ":material/account_circle:", None, "nav.profile"),
     ("pages/2_Admin.py",         "Admin",         ":material/admin_panel_settings:", "can_manage_users", "nav.admin"),
 ]
