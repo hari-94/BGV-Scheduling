@@ -4112,6 +4112,122 @@ def staff_biggest_first(groups):
     return groups
 
 
+def balance_light_charts(groups):
+    """Give the open charts and the long Daily Service rounds to whoever is light.
+
+    Once names are on, the packer's one-person-per-chart plan can leave three
+    people on a single 70-minute room each while a "Need Housekeeper" chart
+    sits open in the same building and the Daily Service round runs to 440 --
+    12 October: Dania, Adrian and Ana on 70 minutes, 2432A/B with nobody,
+    Darling on 440. fill_from_unstaffed never saw it: it only tops up Full
+    Clean charts with Full Clean rooms.
+
+    1. Every open chart (any service) goes to the lightest person it fits:
+       their day stays within MAX_FC, someone already in that building first,
+       and nobody ends up with rooms in both buildings 2 and 3.
+    2. Then, while someone is still under LOW_MIN and a Daily Service round is
+       over it, rooms move from the round to them -- whole apartments (one
+       guest, one door number), their own building first -- until the round
+       is back to LOW_MIN or they are full. Moved rooms become a Daily
+       Service chart of their own, so the original round keeps its label.
+    """
+    live = [g for g in groups if not g.get("verify_group") and not g.get("dv_rqs2")
+            and g.get("service_type") != SVC_DV]
+
+    def total(p):
+        return sum(g["time"] for g in live if g.get("housekeeper") == p)
+
+    def bset(rooms):
+        return {get_building(str(r.get("room", ""))) for r in rooms}
+
+    def p_blds(p):
+        return set().union(*[bset(g["rooms"]) for g in live if g.get("housekeeper") == p] or [set()])
+
+    def mixes(a):
+        return 2 in a and 3 in a
+
+    # 1. open charts to the lightest person they fit
+    for g in sorted([g for g in live if is_unassigned_hk(g.get("housekeeper"))],
+                    key=lambda g: -g["time"]):
+        people = {x["housekeeper"] for x in live if not is_unassigned_hk(x.get("housekeeper"))}
+        gb = bset(g["rooms"])
+        fits = [p for p in people if total(p) + g["time"] <= MAX_FC and total(p) < LOW_MIN
+                and not mixes(p_blds(p) | gb)]
+        if fits:
+            g["housekeeper"] = min(fits, key=lambda p: (not (p_blds(p) & gb), total(p)))
+
+    # 2. long Daily Service rounds shared with the light
+    new = []
+    for ds in sorted([g for g in live if g.get("service_type") == SVC_DS
+                      and not is_unassigned_hk(g.get("housekeeper"))], key=lambda g: -g["time"]):
+        while ds["time"] > LOW_MIN:
+            light = [p for p in {x["housekeeper"] for x in live + new
+                                 if not is_unassigned_hk(x.get("housekeeper"))}
+                     if p != ds["housekeeper"] and total(p) + sum(
+                         n["time"] for n in new if n["housekeeper"] == p) < LOW_MIN - 20]
+            if not light:
+                break
+            units = {}
+            for r in ds["rooms"]:
+                code = str(r.get("room", ""))
+                units.setdefault((str(r.get("guest", "")).strip().lower(), code[:4]), []).append(r)
+            moved = False
+            for p in sorted(light, key=lambda p: total(p) + sum(
+                    n["time"] for n in new if n["housekeeper"] == p)):
+                mine = next((n for n in new if n["housekeeper"] == p and n["_from"] is ds), None)
+                have = total(p) + sum(n["time"] for n in new if n["housekeeper"] == p)
+                pb = p_blds(p) | (bset(mine["rooms"]) if mine else set())
+                cands = sorted((u for u in units.values()
+                                if not mixes(pb | bset(u))
+                                and have + sum(r["time"] for r in u) <= LOW_MIN
+                                and ds["time"] - sum(r["time"] for r in u) >= LOW_MIN - 35),
+                               key=lambda u: (not (bset(u) & pb), str(u[0].get("room"))))
+                if not cands:
+                    continue
+                u = cands[0]
+                if mine is None:
+                    mine = dict(ds, rooms=[], time=0, housekeeper=p, _from=ds)
+                    new.append(mine)
+                for r in u:
+                    ds["rooms"].remove(r)
+                    mine["rooms"].append(r)
+                t = sum(r["time"] for r in u)
+                ds["time"] -= t
+                mine["time"] += t
+                moved = True
+                break
+            if not moved:
+                break
+    # A building's last few dailies stranded on the round (1423C left on
+    # Darling's Building 3 round on 12 Oct) go to whoever now has that
+    # building's others, while they stay within LOW_MIN.
+    for n in new:
+        ds = n["_from"]
+        for b in bset(n["rooms"]):
+            rest = [r for r in ds["rooms"] if get_building(str(r.get("room", ""))) == b]
+            t = sum(r["time"] for r in rest)
+            if rest and t <= 40 and len(bset(ds["rooms"])) > 1 and \
+                    total(n["housekeeper"]) + sum(x["time"] for x in new
+                                                   if x["housekeeper"] == n["housekeeper"]) + t <= LOW_MIN:
+                for r in rest:
+                    ds["rooms"].remove(r)
+                    n["rooms"].append(r)
+                ds["time"] -= t
+                n["time"] += t
+    if new:
+        labels = {g.get("label") for g in groups}
+        extra = (l for l in make_labels("DS", len(labels) + len(new) + 30) if l not in labels)
+        for n in new:
+            n.pop("_from", None)
+            n["label"] = next(extra)
+        for g in [x for x in groups if x.get("service_type") == SVC_DS] + new:
+            g["blds"] = bset(g["rooms"])
+            g["floors"] = {r.get("floor", 0) for r in g["rooms"]}
+            g["cross_bld"] = len(g["blds"]) > 1
+        groups = groups + new
+    return groups
+
+
 def fill_from_unstaffed(groups, roster):
     """Top up every short Full Clean chart from the charts nobody could take.
 
@@ -5481,6 +5597,7 @@ if run:
                         # nobody could take, before inspectors are handed charts.
                         fg = fill_from_unstaffed(fg, roster)
                         fg = staff_biggest_first(fg)
+                        fg = balance_light_charts(fg)
                         inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
                         return fg, inspectors, used_hk_set
 
