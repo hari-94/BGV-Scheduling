@@ -28,6 +28,7 @@ Commands:
   python hotsos_agent.py setup        one-time: HotSOS login, workbook path
   python hotsos_agent.py forecast     pull SSRS now and store it
   python hotsos_agent.py roster       import the synced Schedule.xlsx now
+  python hotsos_agent.py report       read GC8 Inspections for the Report page now
   python hotsos_agent.py preview [--date 2026-10-08]
   python hotsos_agent.py push    [--date 2026-10-08] [--only-room 3346E]
   python hotsos_agent.py run          the loop (Task Scheduler starts this)
@@ -753,6 +754,46 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
     return status
 
 
+# ── the Report page's numbers ────────────────────────────────────────────────
+def sync_report(cfg, by="4 PM"):
+    """Read every day tab of GC8 Inspections and store it for the Report page
+    (report_data). Live from SharePoint, so a correction typed a minute ago
+    is counted; the synced copy if SharePoint can't be reached. Only reads
+    the workbook."""
+    import importlib
+    import io
+    import report_data
+    import sharepoint
+    report_data = importlib.reload(report_data)     # a fix reaches the next sync
+    path = cfg["workbook"]
+    db._upsert_key(report_data.SYNC_KEY, dict(db._load_key(report_data.SYNC_KEY) or {},
+                                              status="running", started_at=clock.stamp(),
+                                              by=by))
+    try:
+        data, info = sharepoint.fetch(Path(path).name)
+        if data is not None:
+            src, source = io.BytesIO(data), "live from SharePoint"
+            saved_at, saved_by = info.get("modified"), info.get("by", "")
+        else:
+            src = path
+            source = "the synced copy on the office PC" + (
+                f" (SharePoint: {info['error']})" if info.get("error") else "")
+            saved_at = _dt.datetime.fromtimestamp(Path(path).stat().st_mtime,
+                                                  clock.MTN).isoformat(timespec="seconds")
+            saved_by = ""
+        res = report_data.read_workbook(src, report_data.workbook_year(path), upto=clock.today())
+        rec = report_data.store(db, res, clock.stamp(), by, source, saved_at, saved_by)
+        log(f"report: {len(res['days'])} days read {source}; months changed: "
+            f"{', '.join(rec['written']) or 'none'}")
+        return rec
+    except Exception as ex:
+        log(f"report sync failed: {traceback.format_exc()}")
+        rec = dict(db._load_key(report_data.SYNC_KEY) or {}, status="error",
+                   error=f"{type(ex).__name__}: {ex}", failed_at=clock.stamp())
+        db._upsert_key(report_data.SYNC_KEY, rec)
+        return rec
+
+
 # ── auto-push on chosen days ─────────────────────────────────────────────────
 #: app_settings: {"days": ["2026-10-12", ...], "after": "05:30", "set_by": ...}.
 #: On a day listed here -- the manager is away -- the morning's sheet goes to
@@ -957,6 +998,9 @@ def run_loop():
     # The last Refresh request is still on record at start-up; treating it as
     # new started another forecast on every restart (two at once, 9 Oct).
     done_fc = (db._load_key(hs.FORECAST_REQUEST_KEY) or {}).get("id")
+    import report_data as rdm
+    done_rep = (db._load_key(rdm.REQUEST_KEY) or {}).get("id")
+    last_rep = 0
     last_slot = None
     last_beat = 0
     while True:
@@ -1061,6 +1105,26 @@ def run_loop():
             except Exception as ex:
                 log(f"free plan job: {type(ex).__name__}: {ex}")
 
+            # The Report page's numbers: GC8 Inspections read at 4 PM, once the
+            # day's rooms are in, or when somebody presses Sync on the page.
+            # Asked about every 30 seconds, not every pass.
+            if time.time() - last_rep > 30 and cfg.get("workbook"):
+                last_rep = time.time()
+                try:
+                    rreq = db._load_key(rdm.REQUEST_KEY) or {}
+                    asked = rreq.get("id") and rreq["id"] != done_rep
+                    due = now.hour == rdm.SYNC_HOUR and _state().get("report_day") != str(now.date())
+                    if asked or due:
+                        done_rep = rreq.get("id")
+                        if due:
+                            st2 = _state()           # fresh: the build may have written it
+                            st2["report_day"] = str(now.date())
+                            STATE.write_text(json.dumps(st2))
+                        sync_report(cfg, by=(rreq.get("by") or "the page") if asked and not due
+                                    else "4 PM")
+                except Exception as ex:
+                    log(f"report sync: {type(ex).__name__}: {ex}")
+
             # The watchdog: every 10 minutes, its own checks; anything new goes
             # to SharePoint's "App Alerts" for the cloud flow to e-mail. Doesn't
             # depend on anybody's session being signed in.
@@ -1091,7 +1155,7 @@ def run_loop():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["setup", "forecast", "roster", "staff", "build",
-                                    "preview", "push", "run"])
+                                    "preview", "push", "run", "report"])
     ap.add_argument("--date", default=None)
     ap.add_argument("--only-room", default=None)
     a = ap.parse_args()
@@ -1111,6 +1175,10 @@ def main():
     if a.cmd == "build":
         print(run_build(load_config(), _dt.date.fromisoformat(a.date) if a.date else None,
                         by="console"))
+        return
+    if a.cmd == "report":
+        rec = sync_report(load_config(), by="console")
+        print({k: rec.get(k) for k in ("status", "source", "written", "error")})
         return
     if a.cmd == "roster":
         print(sync_roster(load_config()["staff_workbook"], force=True))
