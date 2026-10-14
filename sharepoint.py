@@ -20,8 +20,8 @@ Inspections, which is what the office PC syncs as
 "ENG & RQS - GC8 Inspections".
 """
 import base64
-
 import os
+import threading
 
 CDP = "http://127.0.0.1:9333"
 # The browser profile that was signed in to Microsoft 365 for Power Automate.
@@ -47,9 +47,24 @@ _JS = """async (url) => {
 }"""
 
 
+#: One read at a time. The Report sync reads on its own thread, and two hidden
+#: Chromes can't share the profile -- the second would fail and a Push would
+#: fall back to the synced copy for nothing. A Push waits its turn instead.
+_ONE_AT_A_TIME = threading.Lock()
+
+
 def fetch(file_name, timeout_ms=60000):
     """(bytes, info) for `file_name` in the GC8 Inspections folder, where
     info = {"modified", "by"}; or (None, {"error": why})."""
+    if not _ONE_AT_A_TIME.acquire(timeout=150):
+        return None, {"error": "another SharePoint read is still running"}
+    try:
+        return _fetch(file_name, timeout_ms)
+    finally:
+        _ONE_AT_A_TIME.release()
+
+
+def _fetch(file_name, timeout_ms):
     try:
         from playwright.sync_api import sync_playwright
     except Exception as ex:

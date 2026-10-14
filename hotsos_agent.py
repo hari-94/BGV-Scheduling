@@ -794,6 +794,26 @@ def sync_report(cfg, by="4 PM"):
         return rec
 
 
+_REPORT = {"thread": None}
+
+
+def start_report(cfg, by) -> bool:
+    """sync_report on its own thread; False if one is still running.
+
+    Reading every tab takes seconds on a quiet PC and can take many minutes
+    on a busy one -- on 14 Oct the PC had 0.2 GB free, the agent was paged
+    out, and the first sync held the loop (and with it Push) for over ten
+    minutes. The loop has to keep answering while it reads."""
+    import threading
+    t = _REPORT["thread"]
+    if t is not None and t.is_alive():
+        return False
+    t = threading.Thread(target=sync_report, args=(cfg, by), name="report-sync", daemon=True)
+    _REPORT["thread"] = t
+    t.start()
+    return True
+
+
 # ── auto-push on chosen days ─────────────────────────────────────────────────
 #: app_settings: {"days": ["2026-10-12", ...], "after": "05:30", "set_by": ...}.
 #: On a day listed here -- the manager is away -- the morning's sheet goes to
@@ -1107,21 +1127,21 @@ def run_loop():
 
             # The Report page's numbers: GC8 Inspections read at 4 PM, once the
             # day's rooms are in, or when somebody presses Sync on the page.
-            # Asked about every 30 seconds, not every pass.
+            # Asked about every 30 seconds, not every pass, and read on a
+            # thread of its own (start_report). One still running: next time.
             if time.time() - last_rep > 30 and cfg.get("workbook"):
                 last_rep = time.time()
                 try:
                     rreq = db._load_key(rdm.REQUEST_KEY) or {}
                     asked = rreq.get("id") and rreq["id"] != done_rep
                     due = now.hour == rdm.SYNC_HOUR and _state().get("report_day") != str(now.date())
-                    if asked or due:
+                    if (asked or due) and start_report(
+                            cfg, (rreq.get("by") or "the page") if asked and not due else "4 PM"):
                         done_rep = rreq.get("id")
                         if due:
                             st2 = _state()           # fresh: the build may have written it
                             st2["report_day"] = str(now.date())
                             STATE.write_text(json.dumps(st2))
-                        sync_report(cfg, by=(rreq.get("by") or "the page") if asked and not due
-                                    else "4 PM")
                 except Exception as ex:
                     log(f"report sync: {type(ex).__name__}: {ex}")
 
