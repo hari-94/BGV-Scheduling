@@ -19,6 +19,7 @@ import sys
 import uuid
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, clock, db, ui            # noqa: E402
@@ -35,29 +36,46 @@ st.markdown("""<style>
 .rp-b{font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:999px;background:#e8f6ec;
       color:#11692f;border:1px solid #c6ebd1}
 .rp-b.warn{background:#fff6e5;color:#7a4b00;border-color:#f6d9a0}
+.rp-badges [data-tip]{position:relative;cursor:help;outline:none}
+.rp-badges [data-tip]:hover::after,.rp-badges [data-tip]:focus::after{content:attr(data-tip);
+  position:absolute;top:calc(100% + 7px);left:0;z-index:40;width:300px;white-space:pre-line;
+  font-weight:500;font-size:.76rem;line-height:1.45;color:#1f2733;background:#fff;
+  border:1px solid #d5dce6;border-radius:10px;padding:9px 11px;
+  box-shadow:0 10px 26px rgba(16,26,42,.16)}
+.rp-hint{font-size:.74rem;color:#7b8798;margin:2px 2px 0}
+.rp-lo{font-size:.82rem;color:#1f2733;line-height:1.75}
+.rp-lo b{color:#16202e}
+</style>""", unsafe_allow_html=True)
+
+# The tables are drawn inside the report_table component (components/
+# report_table), which sorts them when a column name is clicked; their look
+# goes with them, since a component's frame doesn't see the page's styles.
+TABLE_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap');
+html,body{margin:0;padding:0;background:transparent}
+body{font-family:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;color:#1f2733;
+     -webkit-font-smoothing:antialiased}
+#root{padding:2px 2px 4px}
 .rp-card{background:#fff;border:1px solid #e6e9ee;border-radius:16px;padding:14px 16px 8px;
-         margin:4px 0 6px;box-shadow:0 1px 2px rgba(16,26,42,.04)}
+         box-shadow:0 1px 2px rgba(16,26,42,.04)}
 .rp-ct{font-size:1.12rem;font-weight:800;color:#16202e}
 .rp-cs{font-size:.8rem;color:#5b6675;margin:2px 0 10px}
+.rp-cs b{color:#16202e}
+.rp-scroll{overflow-x:auto}
 .rp-tab{min-width:900px}
-/* Wide screens show the whole table, so the column notes can hang below the
-   header freely; a phone scrolls it sideways instead. */
-@media (max-width:1000px){.rp-scroll{overflow-x:auto}}
 .rp-grid{display:grid;align-items:center;column-gap:10px}
 .rp-hdr{background:#f3f6fa;border-radius:10px;padding:7px 8px;row-gap:3px}
 .rp-hdr .h{font-size:.64rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
            color:#4b5667;text-align:right;line-height:1.25}
 .rp-hdr .h.l{text-align:left}
+.rp-hdr .h.s{cursor:pointer;user-select:none;border-radius:6px;padding:3px 4px;margin:-3px -4px;
+             outline:none;transition:background .12s,color .12s}
+.rp-hdr .h.s:hover,.rp-hdr .h.s:focus-visible{background:#e2e9f2;color:#16202e}
+.rp-hdr .h.on{color:#1c4a78;background:#e8eff8}
+.rp-hdr .h .ar{display:inline-block;margin-left:4px;font-size:.66rem;color:#aab3bf;letter-spacing:0}
+.rp-hdr .h.on .ar{color:#2563a8}
 .rp-hdr .g{font-size:.6rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
            color:#7b8798;text-align:center;border-bottom:1px solid #d5dce6;padding-bottom:3px}
-.rp-hdr [data-tip]{text-decoration:underline dotted #9aa5b4;text-underline-offset:3px}
-.rp [data-tip]{position:relative;cursor:help;outline:none}
-.rp [data-tip]:hover::after,.rp [data-tip]:focus::after{content:attr(data-tip);position:absolute;
-  top:calc(100% + 7px);right:0;z-index:40;width:280px;white-space:pre-line;text-transform:none;
-  letter-spacing:0;font-weight:500;font-size:.76rem;line-height:1.45;color:#1f2733;
-  background:#fff;border:1px solid #d5dce6;border-radius:10px;padding:9px 11px;
-  box-shadow:0 10px 26px rgba(16,26,42,.16);text-align:left;text-decoration:none}
-.rp [data-tip].tl:hover::after,.rp [data-tip].tl:focus::after{left:0;right:auto}
 details.rp-p{border-bottom:1px solid #eef1f5}
 details.rp-p:last-child{border-bottom:none}
 details.rp-p>summary{list-style:none;cursor:pointer;padding:7px 8px;border-radius:8px}
@@ -89,10 +107,11 @@ details[open] .chev{transform:rotate(90deg)}
 .rp-k .kl{font-size:.74rem;color:#3b4554;line-height:1.5}
 .rp-k.empty{opacity:.5}
 .rp-k .nc{color:#b42318;font-weight:700}
-.rp-hint{font-size:.74rem;color:#7b8798;margin:6px 2px 0}
-.rp-lo{font-size:.82rem;color:#1f2733;line-height:1.75}
-.rp-lo b{color:#16202e}
-</style>""", unsafe_allow_html=True)
+"""
+_table = components.declare_component(
+    "report_table",
+    path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "components", "report_table"))
 auth.require_login()
 ui.topnav("Report")
 # Managers only, the same permission Stats uses: auth is an imported module and
@@ -361,17 +380,24 @@ def _num(v, key):
 
 
 def _header(cols, role):
+    """Column names that sort the table when clicked (report_table does the
+    sorting): numbers most first, names A to Z, a second click reverses."""
     cells, groups = [], {}
-    for i, (k, g, lab, note) in enumerate(cols, 1):
+    for i, (k, g, lab, _note) in enumerate(cols, 1):
         left = " l" if k in ("person", "in", "cleaned") else ""
-        tl = " tl" if i <= 3 else ""
+        first = "asc" if k in ("rank", "person") else "desc"
         if g:
             groups.setdefault(g, []).append(i)
             pos = f"grid-row:2;grid-column:{i}"
         else:
             pos = f"grid-row:1/span 2;grid-column:{i}"
-        cells.append(f'<div class="h{left}{tl}" style="{pos}" data-tip="{tip(note)}" '
-                     f'tabindex="0">{e(lab)}</div>')
+        cells.append(f'<div class="h s{left}" style="{pos}" data-col="{k}" data-first="{first}" '
+                     f'role="button" tabindex="0" aria-label="Sort by {e(lab)}">'
+                     # The arrow travels with the last word rather than
+                     # wrapping onto a line of its own in a narrow column.
+                     f'{e(lab).rsplit(" ", 1)[0] + " " if " " in lab else ""}'
+                     f'<span style="white-space:nowrap">{e(lab.rsplit(" ", 1)[-1])}'
+                     f'<span class="ar">⇅</span></span></div>')
     for g, idx in groups.items():
         cells.append(f'<div class="g" style="grid-row:1;grid-column:{idx[0]}/span {len(idx)}">'
                      f'{e(g)}</div>')
@@ -431,11 +457,15 @@ def table_html(rows, role, start, end, title, sub):
     cols = RQS_COLS if role == "rqs" else HK_COLS
     bar_key = "in" if role == "rqs" else "cleaned"
     top = max([r.get(bar_key, 0) for r in rows] + [1])
-    parts = [f'<div class="rp rp-card"><div class="rp-ct">{e(title)}</div>'
+    parts = [f'<div class="rp-card" data-table="{role}"><div class="rp-ct">{e(title)}</div>'
              f'<div class="rp-cs">{sub}</div><div class="rp-scroll"><div class="rp-tab">',
-             _header(cols, role)]
+             _header(cols, role), '<div class="rp-body">']
     cuts = rd.slices(start, end)
     for r in rows:
+        # What each column sorts on, as numbers ("per day" stays blank, not 0,
+        # for someone with no inspections, and sorts last).
+        sort_on = {k: (r.get(k) if k in ("per_day", "person") else r.get(k, 0))
+                   for k, *_ in cols}
         cells = []
         for k, _g, _lab, _tip in cols:
             if k == "rank":
@@ -450,35 +480,18 @@ def table_html(rows, role, start, end, title, sub):
                 cells.append(_num(r.get(k, 0) if k != "per_day" else r.get(k), k))
         by_day = res["days"].get(r["person"], {})
         cards = "".join(_card(lab, rd.tally(by_day, a_, b_, role), role) for lab, a_, b_ in cuts)
-        parts.append(f'<details class="rp-p"><summary class="rp-grid" '
+        parts.append(f'<details class="rp-p" data-s="{e(json.dumps(sort_on))}">'
+                     f'<summary class="rp-grid" '
                      f'style="grid-template-columns:{GRID[role]}">{"".join(cells)}</summary>'
                      f'<div class="rp-more"><div class="rp-facts">{_facts(r, role, start, end)}</div>'
                      f'<div class="rp-cards">{cards}</div></div></details>')
-    parts.append("</div></div></div>")
+    parts.append("</div></div></div></div>")
     return "".join(parts)
-
-
-SORTS = {"rqs": {"Rooms inspected": "in", "Per day": "per_day", "Days inspecting": "days_in",
-                 "Days on the schedule": "sched", "Rooms they cleaned": "cleaned",
-                 "No call / no show": "nocall", "Name": "person"},
-         "hk": {"Rooms cleaned": "cleaned", "Full Clean": "fc", "Daily Service": "ds",
-                "Days on the schedule": "sched", "Projects": "project",
-                "No call / no show": "nocall", "Name": "person"}}
 
 
 def show(role):
     rows = rd.rows_for(res, start, end, role)
     label = "RQS" if role == "rqs" else "Housekeepers"
-    t1, t2 = st.columns([4, 1.6], vertical_alignment="bottom")
-    with t2:
-        how = st.selectbox(f"Sort {label}", list(SORTS[role]), key=f"rp_sort_{role}",
-                           label_visibility="collapsed",
-                           format_func=lambda x: f"{label}: sort by {x.lower()}")
-    key = SORTS[role][how]
-    if key == "person":
-        rows.sort(key=lambda r: r["person"].lower())
-    else:
-        rows.sort(key=lambda r: (-(r.get(key) or 0), r["rank"], r["person"]))
     if not rows:
         st.info(f"No {label.lower()} on the sheet or the schedule for {period}.")
         return
@@ -492,10 +505,16 @@ def show(role):
                f"({sum(r.get('fc', 0) for r in rows):,} Full Clean · "
                f"{sum(r.get('ds', 0) for r in rows):,} Daily Service) · "
                f"{sum(r.get('nocall', 0) for r in rows)} no-call/no-show days")
-    st.markdown(table_html(rows, role, start, end, f"{label} · {period}{so_far}", sub),
-                unsafe_allow_html=True)
-    st.markdown('<div class="rp-hint">Click a name for their months · hover a column name for '
-                'what it means and whether more or less is better.</div>', unsafe_allow_html=True)
+    _table(html=table_html(rows, role, start, end, f"{label} · {period}{so_far}", sub),
+           css=TABLE_CSS, key=f"rp_table_{role}", default=None)
+    st.markdown('<div class="rp-hint">Click a column name to sort by it — again to reverse · '
+                'click a name for their months.</div>', unsafe_allow_html=True)
+    with st.expander(f"What each {'RQS' if role == 'rqs' else 'housekeeper'} column means"):
+        st.markdown("\n".join(
+            f"- **{e(g) + ' · ' if g else ''}{e(lab)}** — "
+            f"{e(note).replace(chr(10) + chr(10), ' ').replace(chr(10), ' ')}"
+            for k, g, lab, note in (RQS_COLS if role == "rqs" else HK_COLS)
+            if k not in ("person",)))
 
 
 if team in ("Both", "RQS"):

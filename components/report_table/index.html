@@ -1,0 +1,140 @@
+<!doctype html>
+<!--
+  The Report page's tables (pages/11_Report.py): the table is drawn in Python
+  and handed over as HTML; this page shows it and sorts it. Click a column
+  name to sort by it, again to turn the order round. Sorting happens here, in
+  the browser, so it is instant and costs the app nothing; the last sort of
+  each table is remembered on this device.
+
+  It speaks Streamlit's component protocol by hand (componentReady, render,
+  setFrameHeight), so there is nothing to build. The frame grows with the
+  table, including when a person's row is opened.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style id="css"></style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function () {
+  "use strict";
+  var root = document.getElementById("root");
+  var css = document.getElementById("css");
+  var shown = null;
+
+  function send(type, extra) {
+    var msg = {isStreamlitMessage: true, type: type};
+    for (var k in extra) { msg[k] = extra[k]; }
+    window.parent.postMessage(msg, "*");
+  }
+
+  var lastHeight = -1;
+  function fit() {
+    var h = Math.ceil(root.getBoundingClientRect().height) + 4;
+    if (h !== lastHeight) {
+      lastHeight = h;
+      send("streamlit:setFrameHeight", {height: h});
+    }
+  }
+
+  function remember(table, sort) {
+    try { localStorage.setItem("rp-sort-" + table, JSON.stringify(sort)); } catch (e) {}
+  }
+  function recall(table) {
+    try { return JSON.parse(localStorage.getItem("rp-sort-" + table) || "null"); } catch (e) { return null; }
+  }
+
+  function values(row) {
+    if (!row._v) {
+      try { row._v = JSON.parse(row.getAttribute("data-s") || "{}"); } catch (e) { row._v = {}; }
+    }
+    return row._v;
+  }
+
+  // Names A to Z; numbers most first, blanks (no inspections, so no "per
+  // day") always last; ties keep the ranking.
+  function sortTable(card, col, dir) {
+    var body = card.querySelector(".rp-body");
+    if (!body) { return; }
+    var rows = Array.prototype.slice.call(body.children);
+    rows.sort(function (a, b) {
+      var x = values(a)[col], y = values(b)[col];
+      var xb = (x === null || x === undefined), yb = (y === null || y === undefined);
+      if (xb !== yb) { return xb ? 1 : -1; }
+      var c = 0;
+      if (!xb) {
+        if (typeof x === "string" || typeof y === "string") {
+          c = String(x).localeCompare(String(y), undefined, {sensitivity: "base"});
+        } else {
+          c = x - y;
+        }
+      }
+      if (dir === "desc") { c = -c; }
+      return c || (values(a).rank - values(b).rank) ||
+        String(values(a).person).localeCompare(String(values(b).person));
+    });
+    rows.forEach(function (r) { body.appendChild(r); });
+    var heads = card.querySelectorAll("[data-col]");
+    Array.prototype.forEach.call(heads, function (h) {
+      var on = h.getAttribute("data-col") === col;
+      h.classList.toggle("on", on);
+      h.setAttribute("aria-sort", on ? (dir === "asc" ? "ascending" : "descending") : "none");
+      var ar = h.querySelector(".ar");
+      if (ar) { ar.textContent = on ? (dir === "asc" ? "▲" : "▼") : "⇅"; }
+    });
+    card.setAttribute("data-sorted", col + ":" + dir);
+  }
+
+  function firstDir(head) {
+    return head.getAttribute("data-first") || "desc";
+  }
+
+  function onSortClick(head) {
+    var card = head.closest(".rp-card");
+    var col = head.getAttribute("data-col");
+    var now = (card.getAttribute("data-sorted") || "").split(":");
+    var dir = (now[0] === col) ? (now[1] === "desc" ? "asc" : "desc") : firstDir(head);
+    sortTable(card, col, dir);
+    remember(card.getAttribute("data-table"), {col: col, dir: dir});
+  }
+
+  root.addEventListener("click", function (ev) {
+    var head = ev.target.closest("[data-col]");
+    if (head) { onSortClick(head); }
+  });
+  root.addEventListener("keydown", function (ev) {
+    var head = ev.target.closest("[data-col]");
+    if (head && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); onSortClick(head); }
+  });
+
+  function show(args) {
+    if (args.css !== undefined && css.textContent !== args.css) { css.textContent = args.css; }
+    if (args.html === shown) { fit(); return; }
+    shown = args.html;
+    root.innerHTML = args.html || "";
+    Array.prototype.forEach.call(root.querySelectorAll(".rp-card"), function (card) {
+      var saved = recall(card.getAttribute("data-table"));
+      var have = saved && card.querySelector('[data-col="' + saved.col + '"]');
+      if (have) {
+        sortTable(card, saved.col, saved.dir === "asc" ? "asc" : "desc");
+      } else {
+        sortTable(card, "rank", "asc");
+      }
+    });
+    fit();
+  }
+
+  window.addEventListener("message", function (ev) {
+    var d = ev.data || {};
+    if (d.type === "streamlit:render") { show(d.args || {}); }
+  });
+  if (window.ResizeObserver) { new ResizeObserver(fit).observe(root); }
+  root.addEventListener("toggle", fit, true);       // a person's row opened or closed
+  window.addEventListener("load", fit);
+  send("streamlit:componentReady", {apiVersion: 1});
+})();
+</script>
+</body>
+</html>

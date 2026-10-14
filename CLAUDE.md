@@ -45,7 +45,7 @@ several of them read the *real* schedule to test against a real day.
 | `roomstatus.py` | 105 | the one vocabulary for a room's state |
 | `assignments.py` | 92 | who is on which rooms today (shared by the page and the nav) |
 | `pages/6_Property.py` | 300 | the property in 3-D, coloured by status — admin and RQS only |
-| `pages/11_Report.py` | 680 | rooms inspected and cleaned per person, beside their schedule days — managers only |
+| `pages/11_Report.py` | 720 | rooms inspected and cleaned per person, beside their schedule days — managers only; its tables are drawn in `components/report_table/` (a static component: click a column name to sort) |
 | `report_data.py` | 870 | reads every GC8 Inspections day tab (office PC, 4 PM), matches typed names to people, counts — no Streamlit |
 | `property_map.py` | 400 | where every room is and what it costs to walk between two |
 | `daystart.py` | 210 | what to clean first, and when each room is reached |
