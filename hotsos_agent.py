@@ -901,6 +901,21 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
                     log(f"  app charts: {res['app']}")
                 except Exception as ex:
                     res.setdefault("errors", []).append(f"App charts not updated: {ex}")
+                # The Engineering team's daily sheet (RQS-ENG-Runners tab):
+                # the day's RQS rooms and AM housepersons, queued for the
+                # "BGV ENG sheet" flow to write in Excel Online. Today only:
+                # that sheet is the day's, and a push ahead must not replace it.
+                # On every push, not only one that moved rooms: an RQS swap on
+                # the sheet changes nothing in HotSOS but does change this.
+                if not only_room:
+                    try:
+                        import eng_sheet
+                        f = eng_sheet.publish(Path(cfg["workbook"]).parent, day, rows)
+                        res["eng_sheet"] = f.name
+                        log(f"  ENG sheet values queued: {f.name}")
+                    except Exception as ex:
+                        res["eng_sheet"] = f"not queued: {type(ex).__name__}: {ex}"
+                        log(f"  ENG sheet not queued: {ex}")
         res["status"] = "done" if not res.get("errors") else "done with errors"
     except Exception as ex:
         res.update(status="error", error=f"{type(ex).__name__}: {ex}")
