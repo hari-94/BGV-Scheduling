@@ -45,7 +45,7 @@ several of them read the *real* schedule to test against a real day.
 | `roomstatus.py` | 105 | the one vocabulary for a room's state |
 | `assignments.py` | 92 | who is on which rooms today (shared by the page and the nav) |
 | `pages/6_Property.py` | 300 | the property in 3-D, coloured by status — admin and RQS only |
-| `pages/11_Report.py` | 720 | rooms inspected and cleaned per person, beside their schedule days — managers only; its tables are drawn in `components/report_table/` (a static component: click a column name to sort) |
+| `pages/11_Report.py` | 720 | rooms inspected and cleaned per person, beside their schedule days — managers only; its tables are drawn by `report_table.py` (a static component in `components/report_table/`: click a column name to sort) |
 | `report_data.py` | 870 | reads every GC8 Inspections day tab (office PC, 4 PM), matches typed names to people, counts — no Streamlit |
 | `property_map.py` | 400 | where every room is and what it costs to walk between two |
 | `daystart.py` | 210 | what to clean first, and when each room is reached |
@@ -533,6 +533,15 @@ it from a page in the same commit is the shape to watch for.
 
 **Test what a person does.** Two bugs survived a passing test because the test
 committed a value with a rerun before clicking, which nobody does.
+
+**Declare a component in a module, never in a page.** `declare_component`
+names the component after the module that calls it, and a page Streamlit runs
+from `pages/` is not a module it can find. The Report page declared its table
+in the page, passed every local test -- AppTest and `runpy` both run a page as
+a script -- and on the live app raised "module is None. This should never
+happen." for everyone who opened it. `report_table.py` declares it now. To
+test a page the way the app runs it, sign in from a throwaway main script and
+`st.switch_page` to it.
 
 ## Agreed but not built
 

@@ -19,12 +19,12 @@ import sys
 import uuid
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, clock, db, ui            # noqa: E402
 import hotsos_sync as hs              # noqa: E402
 import report_data as rd              # noqa: E402
+import report_table                   # noqa: E402
 
 st.set_page_config(page_title="Report", page_icon="📋", layout="wide")
 st.markdown("""<style>
@@ -108,10 +108,6 @@ details[open] .chev{transform:rotate(90deg)}
 .rp-k.empty{opacity:.5}
 .rp-k .nc{color:#b42318;font-weight:700}
 """
-_table = components.declare_component(
-    "report_table",
-    path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "components", "report_table"))
 auth.require_login()
 ui.topnav("Report")
 # Managers only, the same permission Stats uses: auth is an imported module and
@@ -505,8 +501,8 @@ def show(role):
                f"({sum(r.get('fc', 0) for r in rows):,} Full Clean · "
                f"{sum(r.get('ds', 0) for r in rows):,} Daily Service) · "
                f"{sum(r.get('nocall', 0) for r in rows)} no-call/no-show days")
-    _table(html=table_html(rows, role, start, end, f"{label} · {period}{so_far}", sub),
-           css=TABLE_CSS, key=f"rp_table_{role}", default=None)
+    report_table.table(html=table_html(rows, role, start, end, f"{label} · {period}{so_far}", sub),
+                       css=TABLE_CSS, key=f"rp_table_{role}")
     st.markdown('<div class="rp-hint">Click a column name to sort by it — again to reverse · '
                 'click a name for their months.</div>', unsafe_allow_html=True)
     with st.expander(f"What each {'RQS' if role == 'rqs' else 'housekeeper'} column means"):
