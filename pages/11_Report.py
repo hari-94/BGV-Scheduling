@@ -80,6 +80,15 @@ body{font-family:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;color:#
 .rp-hdr .h.s:hover,.rp-hdr .h.s:focus-visible{background:#e2e9f2;color:#16202e}
 .rp-hdr .h.on{color:#1c4a78;background:#e8eff8}
 .rp-hdr .h .ar{display:inline-block;margin-left:4px;font-size:.66rem;color:#aab3bf;letter-spacing:0}
+/* What each number counts: rooms (blue) or days (green), under its name. */
+.rp-hdr .uw{display:block;margin-top:3px;line-height:1}
+.u{display:inline-block;padding:2px 5px;border-radius:5px;font-size:.55rem;font-weight:800;
+   letter-spacing:.06em;text-transform:uppercase;line-height:1.1}
+.u.r{background:#e3edfa;color:#1d5aa0}
+.u.d{background:#e2f4e7;color:#156b37}
+.u.rd{background:#eee9fb;color:#55369f}
+.rp-units{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.74rem;color:#5b6675;margin:-4px 0 10px}
+.rp-units .u{margin-right:5px}
 .rp-hdr .h.on .ar{color:#2563a8}
 .rp-hdr .g{font-size:.6rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
            color:#7b8798;text-align:center;border-bottom:1px solid #d5dce6;padding-bottom:3px}
@@ -391,26 +400,27 @@ RQS_COLS = [
      "Daily Service rooms (stayovers, exchanges) with this person's name in the HSKP column." +
      NEITHER),
     ("days_in", None, "Days inspecting",
-     "Days with at least one inspected room on the sheet. The gap to Days on the schedule is "
-     "RQS 2 days (Daily Service and Dust n Vac rounds), projects, and days nobody wrote a name."
-     + MORE),
-    ("per_day", None, "Per day",
+     "Days with at least one inspected room on the sheet. The gap to the days on the schedule "
+     "is RQS 2 days (Daily Service and Dust n Vac rounds), other work, and days nobody wrote a "
+     "name." + MORE),
+    ("per_day", None, "Rooms per day",
      "Rooms inspected ÷ days inspecting: the size of an ordinary day. 12–13 is a full round."
      "\n\n▲ Higher means a heavier day — but very high can mean rushed inspections."),
-    ("sched", "On the schedule", "Days",
-     "Days the staff schedule had them working on the RQS team, projects included, up to the "
+    ("sched", "Days on the schedule", "Total",
+     "Days the staff schedule had them working on the RQS team, other work included, up to the "
      "last synced day." + MORE),
-    ("rqs1", "On the schedule", "RQS 1",
+    ("rqs1", "Days on the schedule", "RQS 1",
      "Days the staff schedule named them RQS 1 (\"RQS 1\", or \"RQS 1 + RQS 2\" — counted for "
      "both). RQS 1 gets no rooms of its own on the charts. Most RQS days only say ON: an "
-     "ordinary Full Clean inspecting day, counted in Days but in neither role." + NEITHER),
-    ("rqs2", "On the schedule", "RQS 2",
+     "ordinary Full Clean inspecting day, counted in Total but in neither role." + NEITHER),
+    ("rqs2", "Days on the schedule", "RQS 2",
      "Days the staff schedule named them RQS 2: the Daily Service and Dust n Vac round, which "
      "is why those days have few Full Clean inspections." + NEITHER),
-    ("project", "On the schedule", "Projects",
+    ("project", "Days on the schedule", "Other work",
      "Days on their RQS row that weren't inspecting: projects, ENG, ULLR, rollaways…" + NEITHER),
-    ("nocall", None, "No call / no show",
-     "Days marked no-call/no-show on the staff schedule — a red cell, or NCNS typed in." + LESS),
+    ("nocall", None, "Last minute inform",
+     "Days the staff schedule marks red (or NCNS typed in): they let us know at the last minute "
+     "that they weren't coming." + LESS),
 ]
 HK_COLS = [
     ("rank", None, "#", "Rank by rooms cleaned in this period. The same number shared means the same count."),
@@ -428,14 +438,22 @@ HK_COLS = [
      "Days the staff schedule had them on Full Clean charts (a building number or ON)." + MORE),
     ("ds_days", "Days on the schedule", "Daily Service",
      "Days the staff schedule had them on Daily Service." + NEITHER),
-    ("project", "Days on the schedule", "Projects",
-     "Days on their row that were other duties: projects, garages, food, HSP cover, stripping "
+    ("project", "Days on the schedule", "Other work",
+     "Days on their row that were other work: projects, garages, food, HSP cover, stripping "
      "linen…" + NEITHER),
-    ("nocall", None, "No call / no show",
-     "Days marked no-call/no-show on the staff schedule — a red cell, or NCNS typed in." + LESS),
+    ("nocall", None, "Last minute inform",
+     "Days the staff schedule marks red (or NCNS typed in): they let us know at the last minute "
+     "that they weren't coming." + LESS),
 ]
-GRID = {"rqs": "36px minmax(165px,1.3fr) minmax(140px,1.6fr) 64px 64px 72px 56px 56px 54px 54px 64px 70px",
-        "hk": "36px minmax(185px,1.4fr) minmax(170px,1.8fr) 72px 72px 74px 74px 66px 78px"}
+GRID = {"rqs": "36px minmax(165px,1.3fr) minmax(140px,1.6fr) 64px 64px 72px 62px 56px 54px 54px 64px 78px",
+        "hk": "36px minmax(185px,1.4fr) minmax(170px,1.8fr) 72px 72px 74px 74px 66px 84px"}
+#: What a column's number counts, shown under its name: rooms, or days.
+UNIT = {"in": "rooms", "fc": "rooms", "ds": "rooms", "cleaned": "rooms", "per_day": "rooms/day",
+        "days_in": "days", "sched": "days", "rqs1": "days", "rqs2": "days", "project": "days",
+        "main": "days", "ds_days": "days", "nocall": "days"}
+UNIT_CLASS = {"rooms": "r", "days": "d", "rooms/day": "rd"}
+UNITS_KEY = ('<div class="rp-units"><span><span class="u r">rooms</span> a count of rooms</span>'
+             '<span><span class="u d">days</span> a number of days</span></div>')
 
 
 def _num(v, key):
@@ -460,13 +478,16 @@ def _header(cols, role):
             pos = f"grid-row:2;grid-column:{i}"
         else:
             pos = f"grid-row:1/span 2;grid-column:{i}"
+        unit = UNIT.get(k)
         cells.append(f'<div class="h s{left}" style="{pos}" data-col="{k}" data-first="{first}" '
                      f'role="button" tabindex="0" aria-label="Sort by {e(lab)}">'
                      # The arrow travels with the last word rather than
                      # wrapping onto a line of its own in a narrow column.
                      f'{e(lab).rsplit(" ", 1)[0] + " " if " " in lab else ""}'
                      f'<span style="white-space:nowrap">{e(lab.rsplit(" ", 1)[-1])}'
-                     f'<span class="ar">⇅</span></span></div>')
+                     f'<span class="ar">⇅</span></span>'
+                     + (f'<span class="uw"><span class="u {UNIT_CLASS[unit]}">{unit}</span></span>'
+                        if unit else "") + '</div>')
     for g, idx in groups.items():
         cells.append(f'<div class="g" style="grid-row:1;grid-column:{idx[0]}/span {len(idx)}">'
                      f'{e(g)}</div>')
@@ -488,18 +509,18 @@ def _facts(r, role, start, end):
                    f"({r.get('sched', 0)} days in {weeks:.1f} weeks)")
     if role == "rqs":
         on = r.get("main", 0) - r.get("role_days", 0)
-        out.append(f"On the schedule: RQS 1 <b>{r.get('rqs1', 0)}</b> · RQS 2 "
+        out.append(f"Days on the schedule: RQS 1 <b>{r.get('rqs1', 0)}</b> · RQS 2 "
                    f"<b>{r.get('rqs2', 0)}</b> · inspecting (ON) <b>{max(on, 0)}</b> · "
-                   f"projects <b>{r.get('project', 0)}</b> days")
+                   f"other work <b>{r.get('project', 0)}</b>")
         if r.get("dv"):
-            out.append(f"Dust n Vac inspected <b>{r['dv']:,}</b>")
+            out.append(f"Dust n Vac inspected <b>{r['dv']:,}</b> rooms")
     else:
         out.append(f"Rooms on the sheet on <b>{r.get('days_clean', 0)}</b> days")
         if r.get("in"):
             out.append(f"Inspected <b>{r['in']}</b> rooms")
     if r.get("projects"):
         top = sorted(r["projects"].items(), key=lambda x: -x[1])[:5]
-        out.append("Projects: " + " · ".join(f"{e(k)} <b>{v}</b>" for k, v in top))
+        out.append("Other work (days): " + " · ".join(f"{e(k)} <b>{v}</b>" for k, v in top))
     if r.get("other_team"):
         teams = ", ".join(e(t) for t in r.get("teams") or {})
         out.append(f"Worked with another team on <b>{r['other_team']}</b> days ({teams})")
@@ -509,20 +530,25 @@ def _facts(r, role, start, end):
 
 
 def _card(label, t, role):
+    def n(v, one, many):
+        return f"{v} {one if v == 1 else many}"
     if role == "rqs":
-        main = f'{t.get("in", 0):,}<small>inspected</small>'
-        lines = [f'{t["per_day"]} a day · {t.get("days_in", 0)} days' if t.get("per_day") else "",
-                 f'Cleaned FC {t.get("fc", 0)} · DS {t.get("ds", 0)}' if t.get("fc") or t.get("ds") else "",
-                 f'Scheduled {t.get("sched", 0)} days' + (f' · projects {t["project"]}' if t.get("project") else ""),
-                 f'RQS 1 on {t.get("rqs1", 0)} · RQS 2 on {t.get("rqs2", 0)} days'
+        main = f'{t.get("in", 0):,}<small>rooms inspected</small>'
+        lines = [f'{t["per_day"]} rooms a day · {n(t.get("days_in", 0), "day", "days")} inspecting'
+                 if t.get("per_day") else "",
+                 f'Cleaned {t.get("fc", 0)} FC · {t.get("ds", 0)} DS rooms'
+                 if t.get("fc") or t.get("ds") else "",
+                 f'{n(t.get("sched", 0), "day", "days")} on the schedule'
+                 + (f' · {t["project"]} other work' if t.get("project") else ""),
+                 f'RQS 1: {t.get("rqs1", 0)} · RQS 2: {t.get("rqs2", 0)} days'
                  if t.get("rqs1") or t.get("rqs2") else ""]
     else:
-        main = f'{t.get("cleaned", 0):,}<small>cleaned</small>'
-        lines = [f'FC {t.get("fc", 0)} · DS {t.get("ds", 0)}',
-                 f'Days FC {t.get("main", 0)} · DS {t.get("ds_days", 0)}'
-                 + (f' · proj {t["project"]}' if t.get("project") else "")]
+        main = f'{t.get("cleaned", 0):,}<small>rooms cleaned</small>'
+        lines = [f'{t.get("fc", 0)} FC · {t.get("ds", 0)} DS rooms',
+                 f'Days: {t.get("main", 0)} FC · {t.get("ds_days", 0)} DS'
+                 + (f' · {t["project"]} other work' if t.get("project") else "")]
     if t.get("nocall"):
-        lines.append(f'<span class="nc">No call / no show {t["nocall"]}</span>')
+        lines.append(f'<span class="nc">Last minute inform: {n(t["nocall"], "day", "days")}</span>')
     empty = not (t.get("sched") or t.get("in") or t.get("cleaned") or t.get("nocall"))
     return (f'<div class="rp-k{" empty" if empty else ""}"><div class="kt">{e(label)}</div>'
             f'<div class="kv">{main}</div>'
@@ -534,7 +560,7 @@ def table_html(rows, role, start, end, title, sub):
     bar_key = "in" if role == "rqs" else "cleaned"
     top = max([r.get(bar_key, 0) for r in rows] + [1])
     parts = [f'<div class="rp-card" data-table="{role}"><div class="rp-ct">{e(title)}</div>'
-             f'<div class="rp-cs">{sub}</div><div class="rp-scroll"><div class="rp-tab">',
+             f'<div class="rp-cs">{sub}</div>{UNITS_KEY}<div class="rp-scroll"><div class="rp-tab">',
              _header(cols, role), '<div class="rp-body">']
     cuts = rd.slices(start, end)
     for r in rows:
@@ -584,20 +610,21 @@ def show(role):
     if role == "rqs":
         tot = sum(r.get("in", 0) for r in rows)
         sub = (f"{people} · <b>{tot:,}</b> rooms inspected · "
-               f"{sum(r.get('nocall', 0) for r in rows)} no-call/no-show days")
+               f"{sum(r.get('nocall', 0) for r in rows)} days of last minute inform")
     else:
         tot = sum(r.get("cleaned", 0) for r in rows)
         sub = (f"{people} · <b>{tot:,}</b> rooms cleaned "
                f"({sum(r.get('fc', 0) for r in rows):,} Full Clean · "
                f"{sum(r.get('ds', 0) for r in rows):,} Daily Service) · "
-               f"{sum(r.get('nocall', 0) for r in rows)} no-call/no-show days")
+               f"{sum(r.get('nocall', 0) for r in rows)} days of last minute inform")
     report_table.table(html=table_html(rows, role, start, end, f"{label} · {period}{so_far}", sub),
                        css=TABLE_CSS, key=f"rp_table_{role}")
     st.markdown('<div class="rp-hint">Click a column name to sort by it — again to reverse · '
                 'click a name for their months.</div>', unsafe_allow_html=True)
     with st.expander(f"What each {'RQS' if role == 'rqs' else 'housekeeper'} column means"):
         st.markdown("\n".join(
-            f"- **{e(g) + ' · ' if g else ''}{e(lab)}** — "
+            f"- **{e(g) + ' · ' if g else ''}{e(lab)}**"
+            f"{' (' + UNIT[k] + ')' if k in UNIT else ''} — "
             f"{e(note).replace(chr(10) + chr(10), ' ').replace(chr(10), ' ')}"
             for k, g, lab, note in (RQS_COLS if role == "rqs" else HK_COLS)
             if k not in ("person",)))
@@ -611,18 +638,19 @@ if team in ("Both", "Housekeepers"):
 
 # ── download ─────────────────────────────────────────────────────────────────
 EXCEL = {
-    "rqs": [("Rank", "rank"), ("Name", "person"), ("Rooms inspected", "in"),
-            ("Cleaned: Full Clean", "fc"), ("Cleaned: Daily Service", "ds"),
-            ("Days inspecting", "days_in"), ("Inspections per day", "per_day"),
-            ("Days on the schedule (RQS)", "sched"), ("Project days", "project"),
-            ("No call / no show", "nocall"), ("RQS 1 days", "rqs1"), ("RQS 2 days", "rqs2"),
-            ("Dust n Vac inspected", "dv"), ("Days with another team", "other_team"),
-            ("VTO days", "vto")],
-    "hk": [("Rank", "rank"), ("Name", "person"), ("Rooms cleaned", "cleaned"),
-           ("Full Clean", "fc"), ("Daily Service", "ds"), ("Days on Full Clean", "main"),
-           ("Days on Daily Service", "ds_days"), ("Project days", "project"),
-           ("No call / no show", "nocall"), ("Days with rooms on the sheet", "days_clean"),
-           ("Days with another team", "other_team"), ("VTO days", "vto")],
+    "rqs": [("Rank", "rank"), ("Name", "person"), ("Rooms inspected (rooms)", "in"),
+            ("Cleaned: Full Clean (rooms)", "fc"), ("Cleaned: Daily Service (rooms)", "ds"),
+            ("Days inspecting (days)", "days_in"), ("Rooms per day", "per_day"),
+            ("On the schedule: total (days)", "sched"), ("RQS 1 (days)", "rqs1"),
+            ("RQS 2 (days)", "rqs2"), ("Other work (days)", "project"),
+            ("Last minute inform (days)", "nocall"), ("Dust n Vac inspected (rooms)", "dv"),
+            ("With another team (days)", "other_team"), ("VTO (days)", "vto")],
+    "hk": [("Rank", "rank"), ("Name", "person"), ("Rooms cleaned (rooms)", "cleaned"),
+           ("Full Clean (rooms)", "fc"), ("Daily Service (rooms)", "ds"),
+           ("On the schedule: Full Clean (days)", "main"),
+           ("On the schedule: Daily Service (days)", "ds_days"), ("Other work (days)", "project"),
+           ("Last minute inform (days)", "nocall"), ("Rooms on the sheet (days)", "days_clean"),
+           ("With another team (days)", "other_team"), ("VTO (days)", "vto")],
 }
 
 
@@ -677,14 +705,16 @@ def _excel(who, start, end, token):
     span = rd.weeks_in(start, end) * 7
     if span > 7:                          # a week's slices are its days: "By day" has them
         sheets["By month" if span > 35 else "By week"] = (
-            ["Name", "Role", "Period", "From", "To", "Rooms inspected", "Inspections per day",
-             "Rooms cleaned", "Full Clean cleaned", "Daily Service cleaned",
-             "Days on the schedule", "Full Clean / RQS days", "Daily Service days",
-             "Project days", "No call / no show", "RQS 1 days", "RQS 2 days"], by_month)
+            ["Name", "Role", "Period", "From", "To", "Rooms inspected (rooms)", "Rooms per day",
+             "Rooms cleaned (rooms)", "Full Clean cleaned (rooms)",
+             "Daily Service cleaned (rooms)", "On the schedule (days)",
+             "Full Clean / RQS (days)", "Daily Service (days)", "Other work (days)",
+             "Last minute inform (days)", "RQS 1 (days)", "RQS 2 (days)"], by_month)
     sheets["By day"] = (["Name", "Role", "Date", "Day", "On the schedule", "Sheet tab",
-                         "Rooms inspected", "Inspected rooms", "Full Clean cleaned",
-                         "Full Clean rooms", "Daily Service cleaned", "Daily Service rooms",
-                         "Dust n Vac inspected", "No call / no show"], by_day)
+                         "Rooms inspected (rooms)", "Inspected rooms",
+                         "Full Clean cleaned (rooms)", "Full Clean rooms",
+                         "Daily Service cleaned (rooms)", "Daily Service rooms",
+                         "Dust n Vac inspected (rooms)", "Last minute inform"], by_day)
     lo = rd.loose_for(res, start, end)
     notes = [f"BGV Peak 8 report — {who} — {start} to {end}",
              f"Rooms: GC8 Inspections, synced {sync.get('at', '')} ({sync.get('source', '')}). "
