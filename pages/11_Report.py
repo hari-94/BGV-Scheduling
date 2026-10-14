@@ -307,6 +307,16 @@ if chk.get("app_copies"):
                    "Tabs the app made to compare with the team's: " + ", ".join(chk["app_copies"])))
 badges.append(("", f"✓ Repeated rows removed ({chk.get('repeats_removed', 0)})",
                "A room listed twice for the same job on one tab is counted once."))
+if chk.get("redated"):
+    badges.append(("", f"✓ {len(chk['redated'])} tab(s) dated by their place",
+                   "A tab whose name doesn't give its day is read by where it sits between "
+                   "the days around it:\n" +
+                   "\n".join(f"'{n}' → {_d(iso)}" for n, iso in sorted(chk["redated"].items(),
+                                                                        key=lambda x: x[1]))))
+if chk.get("columns_found"):
+    badges.append(("", f"✓ {len(chk['columns_found'])} blank or mistyped header(s) read",
+                   "A column whose header label was blank or mistyped, found by what it holds:\n"
+                   + "\n".join(chk["columns_found"])))
 badges.append(("" if not chk.get("copied_tabs") else "warn",
                "✓ No copied tabs" if not chk.get("copied_tabs") else
                f"! {len(chk['copied_tabs'])} tab(s) look copied",
@@ -317,7 +327,7 @@ if chk.get("unreadable"):
                    "No Service/RQS header row found:\n" + "\n".join(chk["unreadable"])))
 if chk.get("missing_dates"):
     badges.append(("warn", f"! {len(chk['missing_dates'])} date(s) have no tab",
-                   "No tab for: " + ", ".join(_d(d) for d in chk["missing_dates"])))
+                   "No tab anywhere in the workbook for: " + ", ".join(_d(d) for d in chk["missing_dates"])))
 st.markdown('<div class="rp rp-badges">' + "".join(
     f'<span class="rp-b {c} tl" data-tip="{tip(t_)}" tabindex="0">{e(lab)}</span>'
     for c, lab, t_ in badges) + "</div>", unsafe_allow_html=True)

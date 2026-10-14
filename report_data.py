@@ -94,26 +94,46 @@ def _col_kind(label):
     return None
 
 
-def read_tab(rows):
-    """(room rows, repeats removed) from one day tab, given its rows as tuples.
+# Headers of the columns that are none of ours -- never taken for a missing one.
+_OTHER_LABELS = ("time", "pet", "current guest", "res type", "notes", "notas", "status",
+                 "late", "arriving", "carpet", "stripping", "stripper")
 
-    The header is found by its labels in the first rows. Two tabs have lost
-    one: "Sep 19" has "p" where "Room" was and "Oct 1" a blank over the
-    housekeepers, so a missing Room column is the one holding room codes and
-    a missing HSKP column is the unlabelled one just before RQS."""
+
+def _share(rows, j, test, n=60):
+    """The share of the filled cells of column j, in the first n rows, that
+    pass `test`."""
+    vals = [str(r[j]).strip() for r in rows[:n] if j < len(r) and str(r[j] or "").strip()]
+    return sum(1 for v in vals if test(v)) / len(vals) if vals else 0.0
+
+
+def read_tab(rows):
+    """(room rows, repeats removed, notes) from one day tab, given its rows
+    as tuples.
+
+    The header is the row in the first few that names most of Room, Service,
+    HSKP and RQS. Several tabs have lost a label, and a missing column is
+    found by what it holds; `notes` says which:
+      "Sep 19"  "p" where "Room" was  -> the column of room numbers
+      "July 19" no "Service"          -> the column of Full Clean / Daily Service
+      "Aug 8", "JAN 5"  no "RQS" (blank; "Hold, COD/RENTAL STATUS")
+                                      -> the column of names just after HSKP
+      "Oct 1"   no "HSKP"             -> the column of names just before RQS"""
     rows = [tuple(r) for r in rows]
-    cols, start = None, 0
+    best, start = None, 0
     for i, r in enumerate(rows[:8]):
         found = {}
         for j, v in enumerate(r):
             k = _col_kind(_label(v))
             if k and k not in found:
                 found[k] = j
-        if "service" in found and "rqs" in found:
-            cols, start = found, i + 1
+        if len(found) >= 2 and (best is None or len(found) > len(best)):
+            best, start = found, i + 1
+        if best and len(best) == 4:
             break
-    if cols is None:
-        raise ValueError("no header row with Service and RQS")
+    if best is None:
+        raise ValueError("no header row")
+    cols, notes = dict(best), []
+    header = rows[start - 1]
     body = rows[start:]
     if "room" not in cols:
         hits = collections.Counter(j for r in body[:60] for j, v in enumerate(r[:4])
@@ -121,11 +141,32 @@ def read_tab(rows):
         if not hits:
             raise ValueError("no Room column")
         cols["room"] = hits.most_common(1)[0][0]
-    if "hskp" not in cols:
-        j = cols["rqs"] - 1
-        header = rows[start - 1] if start else ()
-        if j >= 0 and j not in cols.values() and not _label(header[j] if j < len(header) else ""):
-            cols["hskp"] = j
+        notes.append("Room column found by its room numbers")
+    rooms = [r for r in body if cols["room"] < len(r) and _ROOM.match(_label(r[cols["room"]]).upper())]
+    width = max([len(r) for r in rooms[:60]] + [0])
+
+    def free(j):
+        lab = _label(header[j] if j < len(header) else "")
+        return (0 <= j < width and j not in cols.values() and _col_kind(lab) is None
+                and not lab.startswith(_OTHER_LABELS))
+
+    def names_in(j):
+        return _share(rooms, j, lambda v: is_name(v) and not re.search(r"\d", v)) >= 0.6
+
+    if "service" not in cols:
+        scored = sorted(((_share(rooms, j, lambda v: family(v) != ""), j)
+                         for j in range(width) if free(j)), reverse=True)
+        if scored and scored[0][0] >= 0.6:
+            cols["service"] = scored[0][1]
+            notes.append("Service column found by what's in it")
+    if "rqs" not in cols and "hskp" in cols and free(cols["hskp"] + 1) and names_in(cols["hskp"] + 1):
+        cols["rqs"] = cols["hskp"] + 1
+        notes.append("RQS column found next to the housekeepers")
+    if "hskp" not in cols and "rqs" in cols and free(cols["rqs"] - 1) and names_in(cols["rqs"] - 1):
+        cols["hskp"] = cols["rqs"] - 1
+        notes.append("housekeeper column found next to the RQS")
+    if "service" not in cols or not ({"rqs", "hskp"} & set(cols)):
+        raise ValueError("no Service, HSKP or RQS column")
 
     def cell(r, key):
         j = cols.get(key)
@@ -147,7 +188,7 @@ def read_tab(rows):
             continue
         seen[key] = len(out)
         out.append(row)
-    return out, repeats
+    return out, repeats, notes
 
 
 def _filled(rows):
@@ -166,22 +207,27 @@ def read_workbook(src, year=None, upto=None):
     try:
         year = year or clock.today().year
         by_date, no_date, app_copies, unreadable, repeats = {}, [], [], [], 0
+        order = []
         for name in wb.sheetnames:
             if _APP_COPY.search(name.replace("_", " ")) or "_app_" in name.lower():
                 app_copies.append(name)
-                continue
-            d = hs.tab_date(name, year)
+            else:
+                order.append([name, hs.tab_date(name, year)])
+        redated = place_dates(order)
+        found = []
+        for name, d in order:
             if d is None or d.year != year:
                 no_date.append(name)
                 continue
             if upto and d > upto:
                 continue
             try:
-                rows, rep = read_tab(wb[name].iter_rows(values_only=True))
+                rows, rep, notes = read_tab(wb[name].iter_rows(values_only=True))
             except ValueError as ex:
                 unreadable.append(f"{name}: {ex}")
                 continue
             repeats += rep
+            found += [f"{name}: {n}" for n in notes]
             by_date.setdefault(d, []).append((name, rows))
     finally:
         wb.close()
@@ -216,8 +262,39 @@ def read_workbook(src, year=None, upto=None):
             "checks": {"tabs_used": len(days), "two_tabs": doubles, "app_copies": app_copies,
                        "other_tabs": no_date, "unreadable": unreadable,
                        "repeats_removed": repeats, "copied_tabs": copies,
-                       "missing_dates": missing,
+                       "missing_dates": missing, "redated": redated,
+                       "columns_found": found,
                        "first": have[0] if have else None, "last": have[-1] if have else None}}
+
+
+def place_dates(order) -> dict:
+    """Date the tabs whose name says one thing and whose place another.
+
+    The tabs run in date order, so a tab's neighbours say what day it can
+    be: "Jun 26" between "jan 25" and "Jan27" is Jan 26 (a typo for "Jan"),
+    and "9" between "April 8th" and "APRIL 10" is Apr 9. Only where the
+    neighbours leave exactly one day with that day number; a tab in its
+    place, or with neighbours far apart, keeps its name's date. `order` is
+    [[name, date or None], ...] and is corrected in place; returns
+    {name: ISO date} for the tabs it re-dated."""
+    out = {}
+    for i, (name, d) in enumerate(order):
+        prev = next((order[k][1] for k in range(i - 1, -1, -1) if order[k][1]), None)
+        nxt = next((order[k][1] for k in range(i + 1, len(order)) if order[k][1]), None)
+        if not prev or not nxt or not 2 <= (nxt - prev).days <= 4:
+            continue
+        if d and prev <= d <= nxt:
+            continue
+        bare = re.fullmatch(r"\s*(\d{1,2})\s*", name)
+        day = d.day if d else (int(bare.group(1)) if bare else None)
+        if day is None:
+            continue
+        fits = [prev + _dt.timedelta(days=k) for k in range(1, (nxt - prev).days)
+                if (prev + _dt.timedelta(days=k)).day == day]
+        if len(fits) == 1:
+            order[i][1] = fits[0]
+            out[name] = fits[0].isoformat()
+    return out
 
 
 
