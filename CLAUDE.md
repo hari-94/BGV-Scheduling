@@ -80,7 +80,8 @@ models, no-guest rooms — deliberately unassigned).
 (one row per room per day), `app_users`, `login_events`, `schedule_log`, and
 `app_settings` — a TEXT key plus JSONB payload used for everything that has no table
 of its own: `roster`, `staffsched_*`, `lang_<user>`, `session_<hash>`,
-`noteseen_<user>`.
+`noteseen_<user>`; for the Report, `report_sync`, `report_days_<YYYY-MM>`,
+`report_names` (its name fixes) and `staff_left` (people who no longer work here).
 
 `room_status` columns, and there are no others: `date, room, status, group_label,
 housekeeper, inspector, started_at, cleaned_at, inspected_at, marked_clean_at, notes,

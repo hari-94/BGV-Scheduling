@@ -26,6 +26,13 @@ import hotsos_sync as hs              # noqa: E402
 import report_data as rd              # noqa: E402
 import report_table                   # noqa: E402
 
+# A running app keeps the report_data it imported first -- a deploy doesn't
+# reload an imported module (CLAUDE.md) -- and this page calls what later
+# versions added. An old copy is reloaded rather than crashing the page.
+if not hasattr(rd, "worked_span"):
+    import importlib
+    rd = importlib.reload(rd)
+
 st.set_page_config(page_title="Report", page_icon="📋", layout="wide")
 st.markdown("""<style>
 .block-container{max-width:min(1200px,97%);}
@@ -86,9 +93,12 @@ details.rp-p[open]>summary{background:#eef4fb}
       font-family:'DM Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
 .rp-c.z{color:#a9b1bd}
 .rp-c.rk{color:#7b8798}
-.rp-c.nm{text-align:left;font-family:inherit;font-weight:600;white-space:nowrap;overflow:hidden;
-         text-overflow:ellipsis}
-.rp-c.nm .chev{display:inline-block;color:#9aa5b4;margin-left:6px;transition:transform .15s}
+.rp-c.nm{text-align:left;font-family:inherit;font-weight:600;display:flex;align-items:center;
+         min-width:0}
+/* A long name gives way, never the tag beside it. */
+.rp-c.nm .nmt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rp-c.nm .rp-left{flex:none}
+.rp-c.nm .chev{display:inline-block;flex:none;color:#9aa5b4;margin-left:6px;transition:transform .15s}
 details[open] .chev{transform:rotate(90deg)}
 .rp-bar{display:flex;align-items:center;gap:8px}
 .rp-trk{flex:1;height:9px;background:#eef1f5;border-radius:5px;overflow:hidden}
@@ -107,6 +117,15 @@ details[open] .chev{transform:rotate(90deg)}
 .rp-k .kl{font-size:.74rem;color:#3b4554;line-height:1.5}
 .rp-k.empty{opacity:.5}
 .rp-k .nc{color:#b42318;font-weight:700}
+/* Someone who no longer works here: kept, for the record, but greyed. */
+.rp-left{display:inline-block;margin-left:7px;padding:1px 7px;border-radius:999px;
+         background:#eceff3;color:#5f6b7a;font-size:.64rem;font-weight:700;letter-spacing:.04em;
+         text-transform:uppercase;vertical-align:1px}
+.rp-left.soon{background:#fff3df;color:#8a5300}
+details.rp-p.left>summary .rp-c{color:#8a94a3}
+details.rp-p.left>summary .rp-c.nm{color:#5f6b7a}
+details.rp-p.left .rp-fil{background:#b9c3cf}
+details.rp-p.left .rp-nc{background:#f0f2f5;color:#8a94a3}
 """
 auth.require_login()
 ui.topnav("Report")
@@ -153,6 +172,31 @@ def _d(iso) -> str:
     return f"{d:%b} {d.day}"
 
 
+def _long(iso) -> str:
+    d = _dt.date.fromisoformat(iso)
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def per_week(r, start, end):
+    """(days a week, weeks counted): over the part of the period the person
+    was on the schedule -- Luis M, gone on 14 Feb, isn't averaged over the
+    whole year, nor someone hired in July over January."""
+    cut = rd.active((res or {}).get("span", {}).get(r["person"]), start, end) or (start, end)
+    weeks = max(rd.weeks_in(*cut), 1)
+    return r.get("sched", 0) / weeks, weeks
+
+
+def gone(p):
+    """("Left" | "Leaving", their last day on the schedule) for someone marked
+    as no longer working here, else None. "Leaving" while the schedule still
+    has shifts for them ahead."""
+    if p not in left:
+        return None
+    last_day = (res or {}).get("last_day", {}).get(p)
+    soon = bool(last_day) and last_day > clock.today().isoformat()
+    return ("Leaving" if soon else "Left"), last_day
+
+
 # ── the numbers ──────────────────────────────────────────────────────────────
 @st.cache_resource(max_entries=2, show_spinner="Counting every day on the sheet…")
 def _built(sync_token, roster_token, names_token, _weeks, _ov, _fixes, _aliases):
@@ -162,11 +206,22 @@ def _built(sync_token, roster_token, names_token, _weeks, _ov, _fixes, _aliases)
     if not days:
         return None
     first, last = min(days), max(days)
-    roster, visiting = rd.roster_days(_weeks, _ov, first, last)
+    # The schedule as far ahead as it goes, for each person's last shift;
+    # the counting itself stops at the last synced day.
+    ahead = last
+    for w in _weeks:
+        try:
+            ahead = max(ahead, (_dt.date.fromisoformat(w) + _dt.timedelta(days=6)).isoformat())
+        except ValueError:
+            pass
+    roster, visiting = rd.roster_days(_weeks, _ov, first, ahead)
     directory = rd.Directory(list(roster), [a["label"] for a in staff_names.attendants()],
                              _aliases, _fixes, ri.NAME_ALIASES)
+    span = rd.worked_span(roster, directory)
+    roster = {n: {iso: v for iso, v in d.items() if iso <= last} for n, d in roster.items()}
     res = rd.build(days, roster, visiting, directory)
-    res.update(first=first, last=last, names=directory.names,
+    res.update(first=first, last=last, names=directory.names, span=span,
+               last_day={p: s[1] for p, s in span.items()},
                tabs={iso: d["tab"] for iso, d in days.items()})
     return res
 
@@ -174,6 +229,7 @@ def _built(sync_token, roster_token, names_token, _weeks, _ov, _fixes, _aliases)
 sync = db._load_key(rd.SYNC_KEY) or {}
 req = db._load_key(rd.REQUEST_KEY) or {}
 fixes = db._load_key(rd.NAMES_KEY) or {}
+left = db._load_key(rd.LEFT_KEY) or {}
 try:
     import staff_names
     aliases = staff_names.aliases()
@@ -361,8 +417,8 @@ HK_COLS = [
     ("nocall", None, "No call / no show",
      "Days marked no-call/no-show on the staff schedule — a red cell, or NCNS typed in." + LESS),
 ]
-GRID = {"rqs": "36px minmax(150px,1.25fr) minmax(190px,2fr) 72px 72px 78px 62px 60px 66px 78px",
-        "hk": "36px minmax(150px,1.25fr) minmax(190px,2fr) 72px 72px 74px 74px 66px 78px"}
+GRID = {"rqs": "36px minmax(185px,1.4fr) minmax(170px,1.8fr) 72px 72px 78px 62px 60px 66px 78px",
+        "hk": "36px minmax(185px,1.4fr) minmax(170px,1.8fr) 72px 72px 74px 74px 66px 78px"}
 
 
 def _num(v, key):
@@ -403,12 +459,16 @@ def _header(cols, role):
 
 def _facts(r, role, start, end):
     out = []
+    g = gone(r["person"])
+    if g:
+        out.append(f"<b>{g[0]}</b> — " + (f"last day on the schedule <b>{_long(g[1])}</b>"
+                                           if g[1] else "no longer works here"))
     ud = rd.usual_days(r.get("dows") or {})
     if ud:
-        per_wk = r.get("sched", 0) / max(rd.weeks_in(start, end), 1)
+        per_wk, weeks = per_week(r, start, end)
         out.append(f"Usually works <b>{' · '.join(ud)}</b>")
         out.append(f"<b>{per_wk:.1f}</b> days a week on average "
-                   f"({r.get('sched', 0)} days in {rd.weeks_in(start, end):.1f} weeks)")
+                   f"({r.get('sched', 0)} days in {weeks:.1f} weeks)")
     if role == "rqs":
         if r.get("rqs2"):
             out.append(f"RQS 2 on <b>{r['rqs2']}</b> day{'s' if r['rqs2'] != 1 else ''}")
@@ -462,12 +522,16 @@ def table_html(rows, role, start, end, title, sub):
         # for someone with no inspections, and sorts last).
         sort_on = {k: (r.get(k) if k in ("per_day", "person") else r.get(k, 0))
                    for k, *_ in cols}
+        g = gone(r["person"])
         cells = []
         for k, _g, _lab, _tip in cols:
             if k == "rank":
                 cells.append(f'<div class="rp-c rk">{r["rank"]}</div>')
             elif k == "person":
-                cells.append(f'<div class="rp-c nm">{e(r["person"])}<span class="chev">›</span></div>')
+                tag = (f'<span class="rp-left{" soon" if g[0] == "Leaving" else ""}">{g[0]}</span>'
+                       if g else "")
+                cells.append(f'<div class="rp-c nm"><span class="nmt">{e(r["person"])}</span>{tag}'
+                             f'<span class="chev">›</span></div>')
             elif k == bar_key:
                 v = r.get(k, 0)
                 cells.append(f'<div class="rp-c rp-bar"><span class="rp-trk"><span class="rp-fil" '
@@ -475,8 +539,12 @@ def table_html(rows, role, start, end, title, sub):
             else:
                 cells.append(_num(r.get(k, 0) if k != "per_day" else r.get(k), k))
         by_day = res["days"].get(r["person"], {})
-        cards = "".join(_card(lab, rd.tally(by_day, a_, b_, role), role) for lab, a_, b_ in cuts)
-        parts.append(f'<details class="rp-p" data-s="{e(json.dumps(sort_on))}">'
+        # Months (weeks, days) before someone started or after they left
+        # would only be cards of zeros.
+        mine = res.get("span", {}).get(r["person"])
+        cards = "".join(_card(lab, rd.tally(by_day, a_, b_, role), role) for lab, a_, b_ in cuts
+                        if not mine or rd.active(mine, a_, b_))
+        parts.append(f'<details class="rp-p{" left" if g else ""}" data-s="{e(json.dumps(sort_on))}">'
                      f'<summary class="rp-grid" '
                      f'style="grid-template-columns:{GRID[role]}">{"".join(cells)}</summary>'
                      f'<div class="rp-more"><div class="rp-facts">{_facts(r, role, start, end)}</div>'
@@ -491,13 +559,15 @@ def show(role):
     if not rows:
         st.info(f"No {label.lower()} on the sheet or the schedule for {period}.")
         return
+    n_gone = sum(1 for r in rows if gone(r["person"]))
+    people = f"{len(rows)} people" + (f" ({n_gone} no longer here)" if n_gone else "")
     if role == "rqs":
         tot = sum(r.get("in", 0) for r in rows)
-        sub = (f"{len(rows)} people · <b>{tot:,}</b> rooms inspected · "
+        sub = (f"{people} · <b>{tot:,}</b> rooms inspected · "
                f"{sum(r.get('nocall', 0) for r in rows)} no-call/no-show days")
     else:
         tot = sum(r.get("cleaned", 0) for r in rows)
-        sub = (f"{len(rows)} people · <b>{tot:,}</b> rooms cleaned "
+        sub = (f"{people} · <b>{tot:,}</b> rooms cleaned "
                f"({sum(r.get('fc', 0) for r in rows):,} Full Clean · "
                f"{sum(r.get('ds', 0) for r in rows):,} Daily Service) · "
                f"{sum(r.get('nocall', 0) for r in rows)} no-call/no-show days")
@@ -551,12 +621,16 @@ def _excel(who, start, end, token):
     for role in roles:
         rows = [r for r in rd.rows_for(res, start, end, role) if not person or r["person"] == person]
         cols = EXCEL[role]
-        weeks_n = rd.weeks_in(start, end)
+        def status(p):
+            g = gone(p)
+            if not g:
+                return "Working"
+            return g[0] + (f" — last day on the schedule {_long(g[1])}" if g[1] else "")
         sheets["RQS" if role == "rqs" else "Housekeepers"] = (
-            [c for c, _ in cols] + ["Usual days", "Days a week (avg)"],
+            [c for c, _ in cols] + ["Usual days", "Days a week (avg)", "Status"],
             [[r.get(k) if k in ("person", "per_day") else r.get(k, 0) for _, k in cols]
              + [" ".join(rd.usual_days(r.get("dows") or {})),
-                round(r.get("sched", 0) / max(weeks_n, 1), 1)] for r in rows])
+                round(per_week(r, start, end)[0], 1), status(r["person"])] for r in rows])
         for r in rows:
             by_d = res["days"].get(r["person"], {})
             for lab, a_, b_ in rd.slices(start, end):
@@ -620,7 +694,9 @@ GROUPS = {"Both": "RQS and housekeepers", "RQS": "RQS only", "Housekeepers": "Ho
 def _who_label(x):
     if x in GROUPS:
         return GROUPS[x]
-    return f"{x} ({'RQS' if res['people'][x]['role'] == 'rqs' else 'housekeeper'})"
+    g = gone(x)
+    return (f"{x} ({'RQS' if res['people'][x]['role'] == 'rqs' else 'housekeeper'}"
+            f"{', ' + g[0].lower() if g else ''})")
 
 
 d1, d2 = st.columns([2.5, 1.5], vertical_alignment="bottom")
@@ -631,7 +707,7 @@ with d1:
                             "or day) per person, every day with the room numbers, and what each "
                             "column means.")
 with d2:
-    data = _excel(who, start, end, f"{sync.get('at')}|{_md5([fixes, aliases])}|"
+    data = _excel(who, start, end, f"{sync.get('at')}|{_md5([fixes, aliases, left])}|"
                                     f"{getattr(db, '_WEEKS', {}).get('v')}|{_md5(overrides)}")
     st.download_button("Download Excel", data, use_container_width=True, type="primary",
                        file_name=f"BGV report - {who} - {start} to {end}.xlsx",
@@ -689,3 +765,25 @@ with st.expander(f"What these numbers leave out — {period}", expanded=False):
                 fixes = {x: y for x, y in fixes.items() if x != k}
                 db._upsert_key(rd.NAMES_KEY, fixes)
                 st.rerun()
+
+
+# ── people who no longer work here ───────────────────────────────────────────
+with st.expander(f"People who no longer work here ({len(left)})"):
+    st.caption("They stay in the report — the rooms they did were real — but greyed, with a "
+               "Left tag and their last day on the staff schedule. Someone still on the "
+               "schedule for days ahead shows as Leaving until then.")
+    everyone = sorted(set(people_opts) | set(left), key=str.lower)
+
+    def _with_last_day(p):
+        d = res["last_day"].get(p)
+        return p + (f" — last day {_long(d)}" if d else "")
+
+    picked = st.multiselect("No longer working here", everyone, default=sorted(left, key=str.lower),
+                            format_func=_with_last_day, key="rp_left_pick",
+                            label_visibility="collapsed")
+    if st.button("Save", key="rp_left_save", disabled=set(picked) == set(left)):
+        keep = {p: left[p] for p in picked if p in left}
+        for p in picked:
+            keep.setdefault(p, {"by": me, "at": clock.stamp()})
+        db._upsert_key(rd.LEFT_KEY, keep)
+        st.rerun()

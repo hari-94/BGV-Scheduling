@@ -40,6 +40,7 @@ SYNC_KEY = "report_sync"              # {at, by, source, ..., checks, months: {Y
 MONTH_PREFIX = "report_days_"         # + YYYY-MM: {"days": {iso: {"tab", "rows"}}}
 REQUEST_KEY = "report_sync_request"   # {id, by, at}: the page's "Sync now"
 NAMES_KEY = "report_names"            # {name as typed on the sheet: person}: the page's own fixes
+LEFT_KEY = "staff_left"               # {person: {"by", "at"}}: no longer works here (marked on the page)
 SYNC_HOUR = 16                        # 4 PM, property time: the day's work is in
 
 # ── service families ─────────────────────────────────────────────────────────
@@ -532,6 +533,30 @@ def roster_days(weeks, overrides, start, end):
                 mine.setdefault(iso, []).append(
                     (rec.get("group") or "other", rec.get("section") or "", kind, cell))
     return out, visiting
+
+
+def worked_span(roster, directory) -> dict:
+    """{person: (first, last)}: the first and last day the staff schedule has
+    them working. Given a roster that runs past today, someone leaving shows
+    their last shift; someone who started in July isn't averaged over
+    January."""
+    out = {}
+    for name, by_day in roster.items():
+        days = [iso for iso, entries in by_day.items() if any(e[2] in WORKED for e in entries)]
+        if days and is_name(Directory.clean(name)):
+            p = directory.person(name)
+            a, b = out.get(p, (min(days), max(days)))
+            out[p] = (min(a, min(days)), max(b, max(days)))
+    return out
+
+
+def active(span, start, end):
+    """start..end cut down to the part someone was on the schedule, or None
+    if they weren't on it at all then."""
+    if not span:
+        return start, end
+    a, b = max(start, span[0]), min(end, span[1])
+    return (a, b) if a <= b else None
 
 
 # ── who did what ─────────────────────────────────────────────────────────────
