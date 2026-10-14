@@ -156,5 +156,7 @@ def publish(folder, day: _dt.date, rows, now=None) -> Path:
         except OSError:
             pass
     f = out / f"eng-sheet {day.isoformat()} {clock.now():%H%M%S}.txt"
-    f.write_text(json.dumps(p, ensure_ascii=False), encoding="utf-8")
+    # ASCII only: the flow is told the file is text/plain with no charset, and
+    # a "·" or an accented name must not depend on how it guesses one.
+    f.write_text(json.dumps(p, ensure_ascii=True), encoding="ascii")
     return f
