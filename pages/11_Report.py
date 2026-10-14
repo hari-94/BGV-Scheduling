@@ -29,7 +29,7 @@ import report_table                   # noqa: E402
 # A running app keeps the report_data it imported first -- a deploy doesn't
 # reload an imported module (CLAUDE.md) -- and this page calls what later
 # versions added. An old copy is reloaded rather than crashing the page.
-if not hasattr(rd, "worked_span"):
+if getattr(rd, "VERSION", 0) < 3:
     import importlib
     rd = importlib.reload(rd)
 
@@ -69,8 +69,8 @@ body{font-family:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;color:#
 .rp-cs{font-size:.8rem;color:#5b6675;margin:2px 0 10px}
 .rp-cs b{color:#16202e}
 .rp-scroll{overflow-x:auto}
-.rp-tab{min-width:900px}
-.rp-grid{display:grid;align-items:center;column-gap:10px}
+.rp-tab{min-width:1000px}
+.rp-grid{display:grid;align-items:center;column-gap:8px}
 .rp-hdr{background:#f3f6fa;border-radius:10px;padding:7px 8px;row-gap:3px}
 .rp-hdr .h{font-size:.64rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
            color:#4b5667;text-align:right;line-height:1.25}
@@ -400,6 +400,13 @@ RQS_COLS = [
     ("sched", "On the schedule", "Days",
      "Days the staff schedule had them working on the RQS team, projects included, up to the "
      "last synced day." + MORE),
+    ("rqs1", "On the schedule", "RQS 1",
+     "Days the staff schedule named them RQS 1 (\"RQS 1\", or \"RQS 1 + RQS 2\" — counted for "
+     "both). RQS 1 gets no rooms of its own on the charts. Most RQS days only say ON: an "
+     "ordinary Full Clean inspecting day, counted in Days but in neither role." + NEITHER),
+    ("rqs2", "On the schedule", "RQS 2",
+     "Days the staff schedule named them RQS 2: the Daily Service and Dust n Vac round, which "
+     "is why those days have few Full Clean inspections." + NEITHER),
     ("project", "On the schedule", "Projects",
      "Days on their RQS row that weren't inspecting: projects, ENG, ULLR, rollaways…" + NEITHER),
     ("nocall", None, "No call / no show",
@@ -427,7 +434,7 @@ HK_COLS = [
     ("nocall", None, "No call / no show",
      "Days marked no-call/no-show on the staff schedule — a red cell, or NCNS typed in." + LESS),
 ]
-GRID = {"rqs": "36px minmax(185px,1.4fr) minmax(170px,1.8fr) 72px 72px 78px 62px 60px 66px 78px",
+GRID = {"rqs": "36px minmax(165px,1.3fr) minmax(140px,1.6fr) 64px 64px 72px 56px 56px 54px 54px 64px 70px",
         "hk": "36px minmax(185px,1.4fr) minmax(170px,1.8fr) 72px 72px 74px 74px 66px 78px"}
 
 
@@ -480,8 +487,10 @@ def _facts(r, role, start, end):
         out.append(f"<b>{per_wk:.1f}</b> days a week on average "
                    f"({r.get('sched', 0)} days in {weeks:.1f} weeks)")
     if role == "rqs":
-        if r.get("rqs2"):
-            out.append(f"RQS 2 on <b>{r['rqs2']}</b> day{'s' if r['rqs2'] != 1 else ''}")
+        on = r.get("main", 0) - r.get("role_days", 0)
+        out.append(f"On the schedule: RQS 1 <b>{r.get('rqs1', 0)}</b> · RQS 2 "
+                   f"<b>{r.get('rqs2', 0)}</b> · inspecting (ON) <b>{max(on, 0)}</b> · "
+                   f"projects <b>{r.get('project', 0)}</b> days")
         if r.get("dv"):
             out.append(f"Dust n Vac inspected <b>{r['dv']:,}</b>")
     else:
@@ -505,7 +514,8 @@ def _card(label, t, role):
         lines = [f'{t["per_day"]} a day · {t.get("days_in", 0)} days' if t.get("per_day") else "",
                  f'Cleaned FC {t.get("fc", 0)} · DS {t.get("ds", 0)}' if t.get("fc") or t.get("ds") else "",
                  f'Scheduled {t.get("sched", 0)} days' + (f' · projects {t["project"]}' if t.get("project") else ""),
-                 f'RQS 2 on {t["rqs2"]} days' if t.get("rqs2") else ""]
+                 f'RQS 1 on {t.get("rqs1", 0)} · RQS 2 on {t.get("rqs2", 0)} days'
+                 if t.get("rqs1") or t.get("rqs2") else ""]
     else:
         main = f'{t.get("cleaned", 0):,}<small>cleaned</small>'
         lines = [f'FC {t.get("fc", 0)} · DS {t.get("ds", 0)}',
@@ -605,7 +615,7 @@ EXCEL = {
             ("Cleaned: Full Clean", "fc"), ("Cleaned: Daily Service", "ds"),
             ("Days inspecting", "days_in"), ("Inspections per day", "per_day"),
             ("Days on the schedule (RQS)", "sched"), ("Project days", "project"),
-            ("No call / no show", "nocall"), ("RQS 2 days", "rqs2"),
+            ("No call / no show", "nocall"), ("RQS 1 days", "rqs1"), ("RQS 2 days", "rqs2"),
             ("Dust n Vac inspected", "dv"), ("Days with another team", "other_team"),
             ("VTO days", "vto")],
     "hk": [("Rank", "rank"), ("Name", "person"), ("Rooms cleaned", "cleaned"),
@@ -648,7 +658,9 @@ def _excel(who, start, end, token):
                 by_month.append([r["person"], "RQS" if role == "rqs" else "Housekeeper", lab, a_, b_,
                                  t.get("in", 0), t.get("per_day"), t.get("cleaned", 0), t.get("fc", 0),
                                  t.get("ds", 0), t.get("sched", 0), t.get("main", 0),
-                                 t.get("ds_days", 0), t.get("project", 0), t.get("nocall", 0)])
+                                 t.get("ds_days", 0), t.get("project", 0), t.get("nocall", 0),
+                                 t.get("rqs1", 0) if role == "rqs" else "",
+                                 t.get("rqs2", 0) if role == "rqs" else ""])
             for iso in sorted(d for d in by_d if start <= d <= end):
                 slot = by_d[iso]
                 sched = [c for g, _s, k, c in slot.get("sched", ()) if g == role and c]
@@ -668,7 +680,7 @@ def _excel(who, start, end, token):
             ["Name", "Role", "Period", "From", "To", "Rooms inspected", "Inspections per day",
              "Rooms cleaned", "Full Clean cleaned", "Daily Service cleaned",
              "Days on the schedule", "Full Clean / RQS days", "Daily Service days",
-             "Project days", "No call / no show"], by_month)
+             "Project days", "No call / no show", "RQS 1 days", "RQS 2 days"], by_month)
     sheets["By day"] = (["Name", "Role", "Date", "Day", "On the schedule", "Sheet tab",
                          "Rooms inspected", "Inspected rooms", "Full Clean cleaned",
                          "Full Clean rooms", "Daily Service cleaned", "Daily Service rooms",

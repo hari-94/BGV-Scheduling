@@ -36,6 +36,9 @@ import unicodedata
 import clock
 import hotsos_sync as hs
 
+#: Raised whenever the page needs something this module didn't have before:
+#: the page reloads an older copy that a running app is still holding.
+VERSION = 3
 SYNC_KEY = "report_sync"              # {at, by, source, ..., checks, months: {YYYY-MM: hash}}
 MONTH_PREFIX = "report_days_"         # + YYYY-MM: {"days": {iso: {"tab", "rows"}}}
 REQUEST_KEY = "report_sync_request"   # {id, by, at}: the page's "Sync now"
@@ -795,7 +798,15 @@ def tally(by_day, start, end, role):
                 t["ds_days"] += 1
             else:
                 t["main"] += 1
-            if role == "rqs" and any(2 in ri.rqs_roles(e[3]) for e in worked):
+            # The roles the schedule names: "RQS 1", "RQS 2", or "RQS 1 + RQS 2"
+            # (one inspector doing both, counted for both). Most RQS days only
+            # say ON -- an ordinary Full Clean inspecting day.
+            roles = set().union(*(ri.rqs_roles(e[3]) for e in worked)) if role == "rqs" else set()
+            if roles:
+                t["role_days"] += 1
+            if 1 in roles:
+                t["rqs1"] += 1
+            if 2 in roles:
                 t["rqs2"] += 1
         elif any(e[2] == "no_call" for e in entries):
             t["nocall"] += 1
