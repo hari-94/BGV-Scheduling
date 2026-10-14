@@ -125,7 +125,16 @@ def rename_weeks(weeks: dict, table: dict) -> dict:
         for n, p in (w.get("people") or {}).items():
             nn = full(n, table)
             p = dict(p, name=nn)
-            people[nn] = _merge_person(people[nn], p) if nn in people else p
+            key = nn
+            # Same person on two rows of one kind (a housekeeper moved from
+            # Building 2 to 3 mid-week): one record. A row in a different kind
+            # of section is a different job and stays apart, the way
+            # parse_week keeps it. Merging them let Nancy's Houseperson PM
+            # cell ("1") fill her empty housekeeper day on 12 Oct, and the
+            # 5 AM build put her on rooms she was never scheduled for.
+            if key in people and people[key].get("group") != p.get("group"):
+                key = f"{nn} · {p.get('section') or p.get('group')}"
+            people[key] = _merge_person(people[key], p) if key in people else p
         w["people"] = people
         out[wk] = w
     return out
