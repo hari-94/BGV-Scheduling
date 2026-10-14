@@ -896,6 +896,21 @@ def workbook_year(path) -> int:
     return int(m.group(1)) if m else clock.today().year
 
 
+def _keep(write, *args, tries=4):
+    """A write that waits and asks again when the connection drops. A sync on
+    the busy office PC reads for minutes, and on 14 Oct Supabase had closed
+    the idle connection by the time it saved: "Server disconnected" twice,
+    past db's own single retry, and the whole read was lost."""
+    import time
+    for i in range(tries):
+        try:
+            return write(*args)
+        except Exception:
+            if i == tries - 1:
+                raise
+            time.sleep(3 * (i + 1))
+
+
 def store(db, result, stamp, by, source, saved_at=None, saved_by=""):
     """Keep the synced days, a month to a key, writing only the months that
     changed. Returns the sync record."""
@@ -910,17 +925,17 @@ def store(db, result, stamp, by, source, saved_at=None, saved_by=""):
         blob = {"days": mdays}
         h = hashlib.md5(json.dumps(blob, sort_keys=True).encode()).hexdigest()
         if hashes.get(m) != h:
-            db._upsert_key(MONTH_PREFIX + m, blob)
+            _keep(db._upsert_key, MONTH_PREFIX + m, blob)
             written.append(m)
         hashes[m] = h
     for m in list(hashes):               # a month of this year that lost all its tabs
         if m[:4] in years and m not in months:
-            db._delete_key(MONTH_PREFIX + m)
+            _keep(db._delete_key, MONTH_PREFIX + m)
             hashes.pop(m)
     rec = {"at": stamp, "by": by, "status": "done", "source": source,
            "file_saved_at": saved_at, "file_by": saved_by,
            "checks": result["checks"], "months": hashes, "written": written}
-    db._upsert_key(SYNC_KEY, rec)
+    _keep(db._upsert_key, SYNC_KEY, rec)
     return rec
 
 
