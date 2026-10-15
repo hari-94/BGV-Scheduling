@@ -5,6 +5,10 @@ managers (manager_questions). Managers only, like Report and Stats.
 Each manager's answers are one app_settings row (mq_<username>), written when
 they press Save. The second tab lays everyone's answers side by side for
 whoever turns them into rules.
+
+The page follows the app's English / Español switch. What is stored is the
+English option whatever the reader's language -- the choices are shown
+translated through format_func -- so answers compare like for like.
 """
 import html
 import io
@@ -15,7 +19,7 @@ import sys
 import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import auth, clock, db, ui            # noqa: E402
+import auth, clock, db, i18n, ui      # noqa: E402
 import fresh                          # noqa: E402
 import manager_questions as mq        # noqa: E402
 
@@ -41,16 +45,25 @@ st.markdown("""<style>
 auth.require_login()
 fresh.latest("i18n", "ui", "manager_questions")   # the menu and questions as they are on disk
 ui.topnav("Questions")
+
+
+def L(text, **kw):
+    """`text` in the reader's language (the app's English / Español switch)."""
+    out = mq.ES.get(text, text) if i18n.lang() == "es" else text
+    return out.format(**kw) if kw else out
+
+
 # Managers only -- the same permission Report and Stats use; auth is an
 # imported module and a running app keeps its old copy, so no new permission.
 if not auth.can("can_manage_users"):
-    st.error("These questions are for managers.")
+    st.error(L("These questions are for managers."))
     st.stop()
 
 e = html.escape
 user = auth.current_user().get("username", "")
 me = st.session_state.get("display_name") or user
 KEY = mq.KEY_PREFIX + user
+_MESES = "ene feb mar abr may jun jul ago sep oct nov dic".split()
 
 
 def _payload(p):
@@ -61,18 +74,21 @@ def _load_mine():
     try:
         return db._load_key(KEY) or {}
     except Exception as ex:
-        st.error(f"Couldn't load your saved answers: {ex}")
+        st.error(L("Couldn't load your saved answers: {ex}", ex=ex))
         return {}
 
 
 def _when(stamp):
-    """'Oct 15, 2:05 PM' from a stored ISO stamp."""
+    """'Oct 15, 2:05 PM' -- or '15 oct, 2:05 PM' -- from a stored ISO stamp."""
     import datetime as _dt
     try:
         t = _dt.datetime.fromisoformat(str(stamp))
-        return t.strftime("%b %d, %I:%M %p").replace(" 0", " ")
     except ValueError:
         return str(stamp)[:16].replace("T", " ")
+    hm = t.strftime("%I:%M %p").lstrip("0")
+    if i18n.lang() == "es":
+        return f"{t.day} {_MESES[t.month - 1]}, {hm}"
+    return f"{t.strftime('%b')} {t.day}, {hm}"
 
 
 def _wkey(q, fkey):
@@ -100,56 +116,66 @@ def _collect():
     return out
 
 
+def _who(p):
+    return str(p.get("name") or p.get("username") or "")
+
+
 saved = _load_mine()
 answers = saved.get("answers") or {}
 n_q = len(mq.QUESTIONS)
 done = sum(mq.answered(q, answers.get(q["key"])) for q in mq.QUESTIONS)
 
-st.markdown('<div class="mq-h1">Manager questions</div>'
-            f'<div class="mq-sub">{n_q} quick questions about days that don\'t go to plan. '
-            "Your answers teach the 5 AM run to do what you would do.</div>", unsafe_allow_html=True)
+intro = L("{n} quick questions about days that don't go to plan. "
+          "Your answers teach the 5 AM run to do what you would do.", n=n_q)
+st.markdown(f'<div class="mq-h1">{e(L("Manager questions"))}</div><div class="mq-sub">{e(intro)}</div>',
+            unsafe_allow_html=True)
 
-tab_me, tab_all = st.tabs(["My answers", "Everyone's answers"])
+tab_me, tab_all = st.tabs([L("My answers"), L("Everyone's answers")])
 
 with tab_me:
     if st.session_state.pop("mq_just_saved", False):
-        st.success("Saved. Thank you!")
-    st.progress(done / n_q, text=f"{done} of {n_q} answered"
-                + (f" · last saved {_when(saved.get('saved_at'))}" if saved.get("saved_at") else ""))
-    st.caption("Answer what you can and press **Save my answers** at the bottom. "
-               "“Today” shows what the app does now. You can change your answers any time.")
+        st.success(L("Saved. Thank you!"))
+    progress = L("{done} of {n} answered", done=done, n=n_q)
+    if saved.get("saved_at"):
+        progress += L(" · last saved {when}", when=_when(saved.get("saved_at")))
+    st.progress(done / n_q, text=progress)
+    st.caption(L("Answer what you can and press **Save my answers** at the bottom. "
+                 "“Today” shows what the app does now. You can change your answers any time."))
 
     with st.form("mq_form", border=False):
         for part, qs in mq.PARTS:
-            st.markdown(f'<div class="mq-part">{e(part)}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="mq-part">{e(L(part))}</div>', unsafe_allow_html=True)
             for q in qs:
                 a = answers.get(q["key"]) or {}
                 with st.container(border=True):
-                    st.markdown(f'<div class="mq-q"><span class="mq-n">{mq.NUMBER[q["key"]]}.</span>{e(q["q"])}</div>'
-                                + (f'<div class="mq-now"><b>Today:</b> {e(q["now"])}</div>' if q["now"] else ""),
-                                unsafe_allow_html=True)
+                    head = f'<div class="mq-q"><span class="mq-n">{mq.NUMBER[q["key"]]}.</span>{e(L(q["q"]))}</div>'
+                    if q["now"]:
+                        head += f'<div class="mq-now"><b>{e(L("Today:"))}</b> {e(L(q["now"]))}</div>'
+                    st.markdown(head, unsafe_allow_html=True)
                     for kind, fkey, label, *rest in q["fields"]:
                         k, v = _wkey(q, fkey), a.get(fkey)
                         if kind == "one":
                             opts = rest[0]
-                            st.radio(label, opts, index=opts.index(v) if v in opts else None, key=k)
+                            st.radio(L(label), opts, index=opts.index(v) if v in opts else None, key=k,
+                                     format_func=L)          # shown translated, stored in English
                         elif kind == "all":
-                            st.markdown(f'<div class="mq-lbl">{e(label)}</div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="mq-lbl">{e(L(label))}</div>', unsafe_allow_html=True)
                             for i, o in enumerate(rest[0]):
-                                st.checkbox(o, value=o in (v or []), key=f"{k}_{i}")
+                                st.checkbox(L(o), value=o in (v or []), key=f"{k}_{i}")
                         elif kind == "rank":
                             opts = rest[0]
-                            st.multiselect(label, opts, default=[x for x in (v or []) if x in opts], key=k,
-                                           placeholder="Pick the first one…")
+                            st.multiselect(L(label), opts, default=[x for x in (v or []) if x in opts], key=k,
+                                           format_func=L, placeholder=L("Pick the first one…"))
                         elif kind == "num":
-                            st.number_input(label, min_value=0, step=1, key=k,
+                            st.number_input(L(label), min_value=0, step=1, key=k,
                                             value=int(v) if isinstance(v, (int, float)) else None)
                         elif kind == "long":
-                            st.text_area(label, value=v or "", key=k)
+                            st.text_area(L(label), value=v or "", key=k)
                         else:
-                            st.text_input(label, value=v or "", key=k)
-                    st.text_input("Anything to add? (optional)", value=a.get("notes", ""), key=_wkey(q, "notes"))
-        go = st.form_submit_button("Save my answers", type="primary", use_container_width=True)
+                            st.text_input(L(label), value=v or "", key=k)
+                    st.text_input(L("Anything to add? (optional)"), value=a.get("notes", ""),
+                                  key=_wkey(q, "notes"))
+        go = st.form_submit_button(L("Save my answers"), type="primary", use_container_width=True)
 
     if go:
         try:
@@ -157,41 +183,41 @@ with tab_me:
             st.session_state["mq_just_saved"] = True
             st.rerun()
         except Exception as ex:
-            st.error(f"Couldn't save your answers: {ex}")
+            st.error(L("Couldn't save your answers: {ex}", ex=ex))
 
 with tab_all:
     try:
         rows = db._like_keys(mq.KEY_PREFIX, with_payload=True)
     except Exception as ex:
         rows = []
-        st.error(f"Couldn't load the answers: {ex}")
+        st.error(L("Couldn't load the answers: {ex}", ex=ex))
     people = sorted((p for p in (_payload(r.get("payload")) for r in rows) if p.get("answers") is not None),
-                    key=lambda p: str(p.get("name") or p.get("username") or "").lower())
+                    key=lambda p: _who(p).lower())
     if not people:
-        st.info("Nobody has saved answers yet.")
+        st.info(L("Nobody has saved answers yet."))
     else:
-        st.caption(" · ".join(f"**{e(str(p.get('name') or p.get('username')))}** saved "
-                              f"{_when(p.get('saved_at'))}" for p in people))
+        st.caption(" · ".join(L("{name} saved {when}", name=f"**{e(_who(p))}**", when=_when(p.get("saved_at")))
+                              for p in people))
         for part, qs in mq.PARTS:
-            st.markdown(f'<div class="mq-part">{e(part)}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="mq-part">{e(L(part))}</div>', unsafe_allow_html=True)
             for q in qs:
                 with st.container(border=True):
                     lines = []
                     for p in people:
-                        s = mq.summary(q, (p.get("answers") or {}).get(q["key"]))
-                        lines.append(f'<div class="mq-who"><b>{e(str(p.get("name") or p.get("username")))}:</b> '
-                                     + (e(s) if s else '<span class="mq-none">no answer</span>') + "</div>")
-                    st.markdown(f'<div class="mq-q"><span class="mq-n">{mq.NUMBER[q["key"]]}.</span>{e(q["q"])}</div>'
-                                + "".join(lines), unsafe_allow_html=True)
+                        s = mq.summary(q, (p.get("answers") or {}).get(q["key"]), L)
+                        shown = e(s) if s else f'<span class="mq-none">{e(L("no answer"))}</span>'
+                        lines.append(f'<div class="mq-who"><b>{e(_who(p))}:</b> {shown}</div>')
+                    st.markdown(f'<div class="mq-q"><span class="mq-n">{mq.NUMBER[q["key"]]}.</span>'
+                                f'{e(L(q["q"]))}</div>' + "".join(lines), unsafe_allow_html=True)
         # One row per question, one column per manager, for keeping or printing.
         import pandas as pd
         table = pd.DataFrame(
             {"No.": [mq.NUMBER[q["key"]] for q in mq.QUESTIONS],
-             "Question": [q["q"] for q in mq.QUESTIONS],
-             **{str(p.get("name") or p.get("username")):
-                [mq.summary(q, (p.get("answers") or {}).get(q["key"])) for q in mq.QUESTIONS] for p in people}})
+             L("Question"): [L(q["q"]) for q in mq.QUESTIONS],
+             **{_who(p): [mq.summary(q, (p.get("answers") or {}).get(q["key"]), L) for q in mq.QUESTIONS]
+                for p in people}})
         buf = io.BytesIO()
         table.to_excel(buf, index=False, sheet_name="Answers")
-        st.download_button("Download everyone's answers (Excel)", buf.getvalue(),
-                           file_name=f"Manager answers {clock.today_iso()}.xlsx",
+        st.download_button(L("Download everyone's answers (Excel)"), buf.getvalue(),
+                           file_name=f"{L('Manager answers')} {clock.today_iso()}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
