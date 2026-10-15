@@ -814,11 +814,13 @@ def start_report(cfg, by) -> bool:
     return True
 
 
-# ── auto-push on chosen days ─────────────────────────────────────────────────
-#: app_settings: {"days": ["2026-10-12", ...], "after": "05:30", "set_by": ...}.
-#: On a day listed here -- the manager is away -- the morning's sheet goes to
-#: HotSOS without anybody pressing Push; whoever is on can still change rooms
-#: in HotSOS directly, and the app follows (the mirror reconciles).
+# ── auto-push ────────────────────────────────────────────────────────────────
+#: app_settings: {"daily": true, "days": ["2026-10-12", ...], "after": "05:30",
+#: "set_by": ...}. Every day with "daily" (Hari, 15 Oct: push every morning,
+#: changes are made by hand afterwards), otherwise on the days listed -- it
+#: began as the days the manager was away. The morning's sheet goes to HotSOS
+#: without anybody pressing Push; whoever is on can still change rooms in
+#: HotSOS directly, and the app follows (the mirror reconciles).
 AUTO_PUSH_KEY = "hotsos_auto_push"
 AUTO_PUSH_GIVE_UP = 9          # no finished build by 9 AM: leave it to a person
 
@@ -829,7 +831,7 @@ def auto_push_due(now, plan, build, last, done_day):
     today = str(now.date())
     if done_day == today:
         return "skip", "already handled today"
-    if today not in (plan.get("days") or []):
+    if not plan.get("daily") and today not in (plan.get("days") or []):
         return "skip", "not an auto-push day"
     hh, mm = (int(x) for x in str(plan.get("after") or "05:30").split(":"))
     if (now.hour, now.minute) < (hh, mm):
