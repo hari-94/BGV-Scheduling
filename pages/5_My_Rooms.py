@@ -16,9 +16,11 @@ import roomstatus as _rst
 import property_map as pmap
 import daystart as _day
 import ui
+import fresh
 
 st.set_page_config(page_title="My Rooms", page_icon="🛎️", layout="wide")
 auth.require_login()
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("My Rooms")
 
 T = i18n.t

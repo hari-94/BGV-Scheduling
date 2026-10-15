@@ -29,6 +29,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, clock, db, ui          # noqa: E402
+import fresh                        # noqa: E402
 import daily_build                  # noqa: E402
 import hotsos_sync as hs            # noqa: E402
 import staff_names as sn            # noqa: E402
@@ -78,6 +79,7 @@ st.markdown("""<style>
 .legend{font-size:.75rem;color:#5b6675;margin:-4px 0 6px}
 </style>""", unsafe_allow_html=True)
 auth.require_login()
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("HotSOS")
 # Managers only (the admin role); see Stats for why not a new permission.
 # On the days the morning push runs by itself, the RQS change rooms in HotSOS

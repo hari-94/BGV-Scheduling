@@ -40,18 +40,36 @@ CHROME_CSS = """
 <style>
 [data-testid="stSidebarNav"]{display:none !important;}
 
-/* The bar itself. A wrapper <div> cannot contain Streamlit columns — the
-   markdown closes before they render — so the row that HOLDS the page links
-   is styled directly instead. */
-[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
-  background:linear-gradient(180deg,#ffffff 0%,#f7f9fc 100%);
-  border:1px solid #e3e8ef;border-radius:16px;
+/* ── The top menu ──
+   Every page has a stylesheet of its own, and several restyle rows and
+   columns wholesale on a phone: Dashboard, Admin and Roster Import stack every
+   row, My Rooms widens every column, and the Schedule page keeps any row of
+   buttons on one line -- which, the menu holding the language and sign-out
+   buttons, ran it out past its border. The menu therefore sits in its own
+   container (st.container(key="bgvnav")) and every rule for it is scoped
+   with :is(.st-key-bgvnav,#bgvnav). The id never matches anything; it lends
+   the selector an id's weight, which no page's class-and-attribute rule can
+   outrank. One menu, the same on every tab. */
+%NAV% [data-testid="stHorizontalBlock"]{
+  background:linear-gradient(180deg,#ffffff 0%,#f7f9fc 100%) !important;
+  border:1px solid #e3e8ef !important;border-radius:16px !important;
   padding:8px 12px !important;margin:0 0 18px !important;
-  align-items:center !important;gap:2px !important;
-  box-shadow:0 1px 2px rgba(16,26,42,.04),0 10px 26px rgba(16,26,42,.06);
+  display:flex !important;flex-direction:row !important;flex-wrap:wrap !important;
+  align-items:center !important;gap:4px 2px !important;
+  max-width:100% !important;box-sizing:border-box !important;
+  box-shadow:0 1px 2px rgba(16,26,42,.04),0 10px 26px rgba(16,26,42,.06) !important;
 }
-[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"])
-  [data-testid="stVerticalBlock"]{gap:0 !important;}
+%NAV% [data-testid="stVerticalBlock"]{gap:0 !important;}
+/* Content-sized columns: each link takes the width it needs and one spacer
+   soaks up the rest, so the labels are never cropped mid-word. */
+%NAV% [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{
+  flex:0 0 auto !important;width:auto !important;min-width:0 !important;max-width:none !important;
+}
+%NAV% [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.navspacer){
+  flex:1 1 auto !important;}
+/* The marker that says which page you are on takes no room of its own. */
+%NAV% [data-testid="stElementContainer"]:has(.navactive),
+%NAV% [data-testid="stElementContainer"]:has(.navspacer){display:none !important;}
 
 .navwho{
   font-size:.72rem;line-height:1.35;color:#64707f;text-align:right;
@@ -65,44 +83,83 @@ CHROME_CSS = """
 }
 
 /* st.page_link renders an anchor; dress it as a pill. */
-[data-testid="stPageLink"]{margin:0 !important;}
-[data-testid="stPageLink"] a{
-  border-radius:11px !important;padding:9px 10px !important;
-  font-size:.82rem !important;font-weight:600 !important;
-  color:#5a6675 !important;text-decoration:none !important;
+%NAV% [data-testid="stPageLink"]{margin:0 !important;min-width:max-content !important;}
+%NAV% [data-testid="stPageLink"] a{
+  min-width:max-content !important;overflow:visible !important;
+  border-radius:11px !important;padding:9px 10px !important;margin:0 !important;
+  font-size:.82rem !important;font-weight:600 !important;line-height:1.2 !important;
+  color:#5a6675 !important;text-decoration:none !important;background:transparent !important;
   justify-content:center !important;
   transition:background .16s ease,color .16s ease,transform .14s ease,
              box-shadow .16s ease !important;
 }
-[data-testid="stPageLink"] a:hover{
+%NAV% [data-testid="stPageLink"] a:hover{
   background:#eef4fb !important;color:#1c4a78 !important;
   transform:translateY(-1px);
   box-shadow:0 5px 14px rgba(37,99,168,.13) !important;
 }
-[data-testid="stPageLink"] a p{font-weight:600 !important;margin:0 !important;}
+%NAV% [data-testid="stPageLink"] a p{
+  font-weight:600 !important;margin:0 !important;font-size:inherit !important;
+  white-space:nowrap !important;overflow:visible !important;text-overflow:clip !important;
+}
 
 /* The page you are on. */
-.navactive + div [data-testid="stPageLink"] a,
-.navactive ~ div [data-testid="stPageLink"] a{
+%NAV% [data-testid="stColumn"]:has(.navactive) [data-testid="stPageLink"] a{
   background:linear-gradient(135deg,#1b4a80 0%,#2d72b8 52%,#4b93d1 100%) !important;
   color:#fff !important;
   box-shadow:0 4px 14px rgba(27,74,128,.32),
              inset 0 1px 0 rgba(255,255,255,.22) !important;
 }
-.navactive ~ div [data-testid="stPageLink"] a p{color:#fff !important;}
-.navactive ~ div [data-testid="stPageLink"] a:hover{
+%NAV% [data-testid="stColumn"]:has(.navactive) [data-testid="stPageLink"] a p,
+%NAV% [data-testid="stColumn"]:has(.navactive) [data-testid="stPageLink"] a span{
+  color:#fff !important;}
+%NAV% [data-testid="stColumn"]:has(.navactive) [data-testid="stPageLink"] a:hover{
   color:#fff !important;transform:translateY(-1px);filter:brightness(1.05);
 }
 
-/* Sign out sits quietly until you reach for it. */
-[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]) .stButton>button{
+/* Language and sign out sit quietly until you reach for them. */
+%NAV% .stButton>button{
   border-radius:11px !important;font-size:.78rem !important;font-weight:600 !important;
-  background:#fff !important;color:#5a6675 !important;
+  background:#fff !important;color:#5a6675 !important;white-space:nowrap !important;
   border:1px solid #dfe5ee !important;padding:8px 10px !important;
+  min-height:0 !important;height:auto !important;line-height:1.2 !important;
+  box-shadow:none !important;transform:none !important;
 }
-[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]) .stButton>button:hover{
+%NAV% .stButton>button:hover{
   background:#fff1f1 !important;color:#b42323 !important;
   border-color:#f4c9c9 !important;
+}
+
+/* On a phone: a grid of equal buttons -- three across at 390px, more on a
+   wider screen -- all inside the border, the same on every tab. The name
+   and role are left out; the language and sign-out buttons take a cell each. */
+@media (max-width:820px){
+  %NAV% [data-testid="stHorizontalBlock"]{
+    display:grid !important;grid-template-columns:repeat(auto-fill,minmax(104px,1fr)) !important;
+    gap:4px !important;padding:6px !important;border-radius:14px !important;
+    margin:0 0 12px !important;
+  }
+  %NAV% [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{
+    width:auto !important;min-width:0 !important;flex:none !important;}
+  %NAV% [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.navspacer),
+  %NAV% [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.navwho){
+    display:none !important;}
+  %NAV% [data-testid="stPageLink"],
+  %NAV% [data-testid="stPageLink"] a{min-width:0 !important;width:100% !important;}
+  /* Streamlit pulls each item of a centred row in by a few pixels top and
+     bottom; in a grid that stacks the rows on top of one another. */
+  %NAV% [data-testid="stElementContainer"]{margin:0 !important;}
+  %NAV% [data-testid="stPageLink"] a{
+    justify-content:flex-start !important;gap:4px !important;padding:7px 6px !important;
+    font-size:.74rem !important;}
+  %NAV% [data-testid="stPageLink"] a [data-testid="stIconMaterial"]{font-size:1.05rem !important;}
+  %NAV% [data-testid="stPageLink"] a > span:first-child{margin-right:0 !important;}
+  /* A long label ("Roster Import", "Importar horario") takes a second line
+     rather than losing its end. */
+  %NAV% [data-testid="stPageLink"] a p{white-space:normal !important;line-height:1.15 !important;
+    overflow-wrap:break-word !important;text-align:left !important;}
+  %NAV% .stButton>button{width:100% !important;min-height:36px !important;
+    padding:7px 8px !important;font-size:.76rem !important;}
 }
 
 /* Tabs: a soft raised pill on a light track.
@@ -145,44 +202,13 @@ CHROME_CSS = """
 }
 .stButton>button[kind="primary"]:hover{filter:brightness(1.07);transform:translateY(-1px);}
 
-@media (max-width:900px){
-  [data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
-    padding:6px !important;border-radius:13px;
-  }
-  [data-testid="stPageLink"] a{padding:8px 6px !important;font-size:.74rem !important;}
+@media (max-width:900px) and (min-width:821px){
+  %NAV% [data-testid="stHorizontalBlock"]{padding:6px !important;border-radius:13px !important;}
+  %NAV% [data-testid="stPageLink"] a{padding:8px 6px !important;font-size:.74rem !important;}
   .navwho{font-size:.64rem}
+}
+@media (max-width:900px){
   .stTabs [data-baseweb="tab"]{padding:6px 11px !important;font-size:.72rem !important;}
-}
-
-/* Content-sized nav columns. Streamlit gives every column an equal flex
-   basis, so adding a sixth link and the language switch squeezed the labels
-   until they were cropped mid-word -- worse in Spanish, where the same words
-   are longer. Each column takes the width it needs instead, and one marked
-   spacer absorbs what is left over. */
-[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"])
-  > [data-testid="stColumn"]{
-  flex:0 0 auto !important;width:auto !important;min-width:0 !important;
-}
-[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"])
-  > [data-testid="stColumn"]:has(.navspacer){flex:1 1 auto !important;}
-[data-testid="stPageLink"],
-[data-testid="stPageLink"] a{min-width:max-content !important;
-  overflow:visible !important;}
-[data-testid="stPageLink"] a p{
-  white-space:nowrap !important;overflow:visible !important;
-  text-overflow:clip !important;
-}
-[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"])
-  .stButton>button{white-space:nowrap !important;}
-
-/* The bar wraps onto a second line rather than shrinking the labels away --
-   at ANY width, not just a narrow one. The columns are content-sized and the
-   links are min-width:max-content, so the row cannot shrink to fit: without
-   wrapping it simply runs off the side of the window, taking the whole page
-   with it. That is what a seventh link did on a desktop window narrower than
-   the bar's natural width. */
-[data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
-  flex-wrap:wrap !important;row-gap:4px !important;max-width:100% !important;
 }
 
 /* A flex child defaults to min-width:auto, which means it refuses to go
@@ -241,17 +267,12 @@ CHROME_CSS = """
     overflow-x:auto !important;}
   h1{font-size:1.5rem !important;}
   h2{font-size:1.15rem !important;}
-  /* The nav bar keeps its own wrapping rule; just tighten it up here. */
-  [data-testid="stHorizontalBlock"]:has([data-testid="stPageLink"]){
-    padding:6px 7px !important;gap:1px !important;}
-  [data-testid="stPageLink"] a{padding:7px 8px !important;font-size:.78rem !important;}
-  .navwho{display:none !important;}
-}
-@media (max-width:430px){
-  [data-testid="stPageLink"] a{font-size:.74rem !important;padding:6px !important;}
 }
 </style>
 """
+#: The menu's own container, and the weight its rules carry (see the CSS).
+NAV_KEY = "bgvnav"
+CHROME_CSS = CHROME_CSS.replace("%NAV%", f":is(.st-key-{NAV_KEY},#{NAV_KEY})")
 
 #: Widths: one narrow slot per link, a spacer that soaks up the middle, then
 #: the person and the way out. Without the spacer the links spread across the
@@ -299,8 +320,16 @@ def topnav(active: str = "", hide_sidebar: bool = True):
     except Exception as _ex:
         print(f"[ui] free-plan tick: {_ex}")
     if hide_sidebar:
+        # On a computer the menu is one width on every page, whatever width the
+        # page itself chose (Profile is 760px wide, Dashboard 1200): centred on
+        # the page, 1050px or the window less a margin. Not on the Schedule
+        # page, whose sidebar takes part of the window.
         st.markdown('<style>section[data-testid="stSidebar"]{display:none !important;}'
-                    '[data-testid="stExpandSidebarButton"]{display:none !important;}</style>',
+                    '[data-testid="stExpandSidebarButton"]{display:none !important;}'
+                    '@media (min-width:821px){'
+                    f':is(.st-key-{NAV_KEY},#{NAV_KEY}){{width:min(1050px,calc(100vw - 48px)) !important;'
+                    'max-width:none !important;position:relative !important;left:50% !important;'
+                    'transform:translateX(-50%) !important;}}}</style>',
                     unsafe_allow_html=True)
 
     i18n.load_lang_for_user()
@@ -319,7 +348,9 @@ def topnav(active: str = "", hide_sidebar: bool = True):
     role = i18n.t(role_key) if role_key in i18n.STRINGS else \
         str(st.session_state.get("role", "")).title()
 
-    cols = st.columns(_weights(len(items)), vertical_alignment="center")
+    # Its own container, so its rules reach it and no page's rules do.
+    box = st.container(key=NAV_KEY)
+    cols = box.columns(_weights(len(items)), vertical_alignment="center")
     for col, (path, label, icon, _perm, tkey) in zip(cols, items):
         with col:
             if label == active:

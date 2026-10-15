@@ -14,6 +14,7 @@ import auth, db, clock, roster_import as ri
 import forecast
 import staffing
 import ui
+import fresh
 
 # After a deploy the server can still hold the previous roster_import in
 # sys.modules while serving the new page file. The first call to a helper added
@@ -104,6 +105,7 @@ section[data-testid="stSidebar"]{background:#fff!important;border-right:1px soli
 }
 </style>""", unsafe_allow_html=True)
 
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("Roster Import")
 def e(s): return _html.escape(str(s) if s is not None else "")
 

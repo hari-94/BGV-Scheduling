@@ -11,6 +11,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, roster_import as ri
 import ui
+import fresh
 
 # See 3_Roster_Import.py: a deploy can leave a stale roster_import in
 # sys.modules, so reload it rather than dying on a helper it does not have yet.
@@ -109,6 +110,7 @@ section[data-testid="stSidebar"]{background:#fff!important;border-right:1px soli
 }
 </style>""", unsafe_allow_html=True)
 
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("My Home")
 def e(s): return _html.escape(str(s) if s is not None else "")
 

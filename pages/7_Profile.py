@@ -13,12 +13,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, i18n
 import session as _session
 import ui
+import fresh
 
 st.set_page_config(page_title="Profile", page_icon="👤", layout="wide")
 st.markdown("<style>.block-container{max-width:min(760px,97%);}"
             "[data-testid='stSidebarNav']{display:none!important;}</style>",
             unsafe_allow_html=True)
 auth.require_login()
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("Profile")
 
 T = i18n.t

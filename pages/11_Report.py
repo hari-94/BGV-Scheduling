@@ -22,6 +22,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, clock, db, ui            # noqa: E402
+import fresh                        # noqa: E402
 import hotsos_sync as hs              # noqa: E402
 import report_data as rd              # noqa: E402
 import report_table                   # noqa: E402
@@ -137,6 +138,7 @@ details.rp-p.left .rp-fil{background:#b9c3cf}
 details.rp-p.left .rp-nc{background:#f0f2f5;color:#8a94a3}
 """
 auth.require_login()
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("Report")
 # Managers only, the same permission Stats uses: auth is an imported module and
 # a running app keeps its old copy after a deploy, so no new permission name.

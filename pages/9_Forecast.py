@@ -31,6 +31,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, clock, db, ui          # noqa: E402
+import fresh                        # noqa: E402
 import forecast as fcast            # noqa: E402
 import hotsos_sync as hs            # noqa: E402
 
@@ -62,6 +63,7 @@ st.markdown("""<style>
 .cram-red{color:#b42318;font-weight:700}
 </style>""", unsafe_allow_html=True)
 auth.require_login()
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("Forecast")
 if not auth.can("can_view_dashboard"):
     st.error("The forecast is for RQS and admins.")

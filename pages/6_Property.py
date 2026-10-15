@@ -18,6 +18,7 @@ import property_map as pmap
 import roomstatus as _rst
 import streamlit.components.v1 as components
 import ui
+import fresh
 
 st.set_page_config(page_title="Property", page_icon="🏔️", layout="wide")
 # Same width family as the rest of the app, and unconditional: the plan
@@ -26,6 +27,7 @@ st.set_page_config(page_title="Property", page_icon="🏔️", layout="wide")
 st.markdown("<style>.block-container{max-width:min(1200px,97%);}</style>",
             unsafe_allow_html=True)
 auth.require_login()
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("Property")
 
 T = i18n.t

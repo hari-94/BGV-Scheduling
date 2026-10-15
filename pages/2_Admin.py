@@ -7,6 +7,7 @@ import html as _html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import db, auth
 import ui
+import fresh
 
 st.set_page_config(page_title="Admin · Cleaning Schedule", page_icon="GC8", layout="wide")
 
@@ -167,6 +168,7 @@ section[data-testid="stSidebar"]{background:rgba(22,22,30,.55)!important;backdro
 cu = auth.current_user()
 
 # ── Manual sidebar navigation (replaces hidden auto-nav) ─────────────────────
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("Admin")
 st.markdown('<p class="pg-title"> Admin Panel</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">Logged in as <strong>{cu["username"]}</strong> · User management & system settings</p>',

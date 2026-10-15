@@ -14,6 +14,7 @@ import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
 import db, auth
 import ui
+import fresh
 import clock
 import daystart as _day
 import roomstatus as _rst
@@ -123,6 +124,7 @@ if _fg:
     except Exception:
         pass
 
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("Dashboard")
 TODAY = clock.today_iso()
 

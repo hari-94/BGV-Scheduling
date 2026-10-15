@@ -24,6 +24,7 @@ import rule23
 import fcsolve
 import property_map as pmap
 import ui
+import fresh
 
 # ── Hide Streamlit's auto-generated page navigation IMMEDIATELY ───────────────
 # This must be the first markdown call so the nav never flashes. We use every
@@ -5137,6 +5138,7 @@ _disp_name = _cu.get("display_name") or _cu.get("username","")
 _first_name = _disp_name.split()[0].title() if _disp_name else "there"
 _welcome_msg = auth.get_welcome_msg(_cu["role"])
 
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("Schedule", hide_sidebar=False)
 
 st.markdown(f'<p class="pg-title">Good morning, {_first_name}! </p>', unsafe_allow_html=True)

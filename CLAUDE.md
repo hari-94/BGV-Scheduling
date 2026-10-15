@@ -37,7 +37,8 @@ several of them read the *real* schedule to test against a real day.
 | `roster_import.py` | 1600 | the staff sheet parser — no Streamlit, so it is testable alone |
 | `db.py` | 710 | every Supabase read and write, 55 functions |
 | `i18n.py` + `i18n_es.py` | 830 | the language switch and ~340 Spanish phrases |
-| `ui.py` | 320 | the top navigation and shared chrome |
+| `ui.py` | 370 | the top navigation and shared chrome -- the menu in its own container, the same on every page |
+| `fresh.py` | 50 | reloads `i18n` and `ui` when their files change, so a deploy reaches a running app |
 | `staffing.py` | 200 | how many housekeepers and RQS a day needs |
 | `forecast.py` | 230 | reads a multi-day Housekeeping Dashboard export into per-day workload |
 | `session.py` | 150 | staying signed in across a refresh |
@@ -531,6 +532,22 @@ app. It happened to the dashboard. Rebooting fixes it; so does reaching the new
 function through `getattr(db, "name", None)` with a fallback, which is what
 `_stored_days` in `pages/1_Dashboard.py` does. Adding a `db` function and calling
 it from a page in the same commit is the shape to watch for.
+
+The menu is now kept fresh: every page calls `fresh.latest("i18n", "ui")` before
+`ui.topnav`, which reloads those two when their file changed since the process
+loaded them. That was the menu that went days without its Report link. Any other
+module a page needs at its newest belongs in that call (dependencies first), or
+gets a version check like `report_data.VERSION` in the Report page.
+
+**The menu has its own container, and its CSS outranks every page's.** Pages
+restyle rows and columns wholesale on a phone -- Dashboard, Admin and Roster
+Import stack every row; the Schedule page kept any row of buttons on one line,
+which ran the menu (it holds two buttons) out past its border. `ui.topnav` draws
+the menu inside `st.container(key="bgvnav")`, and every menu rule is scoped with
+`:is(.st-key-bgvnav,#bgvnav)` -- the id never matches; it gives the selector an
+id's weight. Below 820px the menu is a grid, three across on a phone; above, one
+1050px bar on every page but the Schedule page, whose sidebar takes part of the
+window. A page-wide rule for rows or columns can't reach it, and doesn't need to.
 
 **Test what a person does.** Two bugs survived a passing test because the test
 committed a value with a rerun before clicking, which nobody does.

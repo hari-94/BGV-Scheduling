@@ -22,6 +22,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, clock, db, ui          # noqa: E402
+import fresh                        # noqa: E402
 import hotsos_sync as hs            # noqa: E402
 
 st.set_page_config(page_title="Stats", page_icon="📊", layout="wide")
@@ -52,6 +53,7 @@ st.markdown("""<style>
 .hl-next{font-size:.82rem;color:#1f2733;line-height:1.8}
 </style>""", unsafe_allow_html=True)
 auth.require_login()
+fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
 ui.topnav("Stats")
 # Managers only (the admin role). can_manage_users rather than a new
 # permission: auth is an imported module, and a running app keeps its old copy
