@@ -48,6 +48,7 @@ several of them read the *real* schedule to test against a real day.
 | `pages/6_Property.py` | 300 | the property in 3-D, coloured by status — admin and RQS only |
 | `pages/11_Report.py` | 720 | rooms inspected and cleaned per person, beside their schedule days — managers only; its tables are drawn by `report_table.py` (a static component in `components/report_table/`: click a column name to sort) |
 | `report_data.py` | 870 | reads every GC8 Inspections day tab (office PC, 4 PM), matches typed names to people, counts — no Streamlit |
+| `pages/12_Questions.py` + `manager_questions.py` | 330 | the managers' questionnaire: the decisions the 5 AM run guesses today (who helps first when short, Daily Service, inspectors, call-outs, quiet days, auto-push). Managers only; each manager's answers are their own app_settings row `mq_<username>` |
 | `property_map.py` | 400 | where every room is and what it costs to walk between two |
 | `daystart.py` | 210 | what to clean first, and when each room is reached |
 | `weekend_duties.py` | 170 | the sheet's Carpet and Stripping columns from the staff schedule |
@@ -83,7 +84,7 @@ models, no-guest rooms — deliberately unassigned).
 `app_settings` — a TEXT key plus JSONB payload used for everything that has no table
 of its own: `roster`, `staffsched_*`, `lang_<user>`, `session_<hash>`,
 `noteseen_<user>`; for the Report, `report_sync`, `report_days_<YYYY-MM>`,
-`report_names` (its name fixes) and `staff_left` (people who no longer work here).
+`report_names` (its name fixes) and `staff_left` (people who no longer work here). The managers' answers to the Questions page are `mq_<username>`, one row each; a question's `key` in `manager_questions.py` never changes, since answers are stored under it.
 
 `room_status` columns, and there are no others: `date, room, status, group_label,
 housekeeper, inspector, started_at, cleaned_at, inspected_at, marked_clean_at, notes,

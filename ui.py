@@ -31,6 +31,7 @@ NAV_ITEMS = [
     ("pages/9_Forecast.py",      "Forecast",      ":material/trending_up:", "can_view_dashboard", "nav.forecast"),
     ("pages/10_Stats.py",        "Stats",         ":material/monitoring:",    "can_manage_users", "nav.health"),
     ("pages/11_Report.py",       "Report",        ":material/summarize:",     "can_manage_users", "nav.report"),
+    ("pages/12_Questions.py",    "Questions",     ":material/quiz:",          "can_manage_users", "nav.questions"),
     ("pages/8_HotSOS.py",        "HotSOS",        ":material/sync_alt:", "can_manage_users", "nav.hotsos"),
     ("pages/7_Profile.py",       "Profile",       ":material/account_circle:", None, "nav.profile"),
     ("pages/2_Admin.py",         "Admin",         ":material/admin_panel_settings:", "can_manage_users", "nav.admin"),
