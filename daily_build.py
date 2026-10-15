@@ -942,6 +942,13 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
     room_text, n_rooms, _sheet = excel_to_room_text(io.BytesIO(ssrs_xlsx))
     fg = generate(room_text, arrival_text, publish=publish, day=day)
     frame = assign_dust_n_vac(build_export_frame(fg))
+    # Weekends: the carpet person on each building's pet rooms, and who strips
+    # the linen where, from the staff schedule (weekend_duties).
+    try:
+        import weekend_duties
+        frame = weekend_duties.fill(frame, day.isoformat())
+    except Exception as ex:                   # never let it cost the morning's sheet
+        print(f"[build] carpets / stripping not filled: {ex}")
     # Whoever was pulled off another duty says so on their own rows, where the
     # RQS reading the sheet will see it.
     for name, role, duty in getattr(generate, "borrowed", []):

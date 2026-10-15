@@ -50,6 +50,7 @@ several of them read the *real* schedule to test against a real day.
 | `report_data.py` | 870 | reads every GC8 Inspections day tab (office PC, 4 PM), matches typed names to people, counts — no Streamlit |
 | `property_map.py` | 400 | where every room is and what it costs to walk between two |
 | `daystart.py` | 210 | what to clean first, and when each room is reached |
+| `weekend_duties.py` | 170 | the sheet's Carpet and Stripping columns from the staff schedule |
 | `clock.py` | 35 | property-local time |
 
 ### Inside `cleaning_scheduler.py`
@@ -151,6 +152,21 @@ Not fixable in code: **`DS_CAP` is 460 minutes against a 330-minute day.** The
 median DS chart is exactly 460 and 87% are over 330. Either those minutes are
 nominal and badly beaten, or DS is structurally overloaded — a staffing
 question, and not one the packer should paper over.
+
+**A Daily Service round is filled to the cap before anyone comes off Full
+Clean for it** (HP's rule, 15 October). `balance_light_charts` used to move
+rooms off any round over `LOW_MIN` to whoever was light, which on 15 October
+cut Lilliam's round to 330 and handed 125 minutes to Luis Urbina on Full Clean:
+three people on 770 minutes two cover. It now only hands *open* charts to the
+light. Don't reintroduce sharing a staffed round.
+
+**Weekends: carpets and stripping** (`weekend_duties.py`). The schedule names
+them: "CARPETS/BLD 3" (earlier "Cleaning carpets BLD 3") does that building's
+**pet** Full Cleans only -- Pet = X -- two on one building split it by area;
+"Stripping linen" strips the Full Cleans of every building with 25 or more
+(Saturday buildings 1 and 2, Sunday building 3, on every weekend Aug 15 - Oct
+11), one building each or a building split between two. The 5 AM build and the
+Schedule page's download both fill the sheet's Carpet and Stripping columns.
 
 ## Full Clean charts, and who inspects them
 
