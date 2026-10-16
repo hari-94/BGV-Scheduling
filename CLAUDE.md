@@ -30,7 +30,7 @@ several of them read the *real* schedule to test against a real day.
 | `pages/3_Roster_Import.py` | 1750 | the weekly staff sheet: upload, diff, week/month views, planning |
 | `pages/5_My_Rooms.py` | 800 | the phone page: a housekeeper's rooms, and an RQS's whole team |
 | `pages/1_Dashboard.py` | 340 | today's floor as a timeline, one bar per room |
-| `pages/2_Admin.py` | 410 | accounts and sign-in history |
+| `pages/2_Admin.py` | 520 | accounts, sign-in history, and Service Passwords (the agent PCs' logins, via `credentials.py`) |
 | `pages/7_Profile.py` | 90 | your own account: changing your password |
 | `pages/4_My_Home.py` | 370 | one person's own week, from the staff sheet |
 | `fcsolve.py` | 217 | the exact Full Clean solver (OR-Tools CP-SAT) — no Streamlit, testable alone |
@@ -48,6 +48,7 @@ several of them read the *real* schedule to test against a real day.
 | `pages/6_Property.py` | 300 | the property in 3-D, coloured by status — admin and RQS only |
 | `pages/11_Report.py` | 720 | rooms inspected and cleaned per person, beside their schedule days — managers only; its tables are drawn by `report_table.py` (a static component in `components/report_table/`: click a column name to sort) |
 | `report_data.py` | 870 | reads every GC8 Inspections day tab (office PC, 4 PM), matches typed names to people, counts — no Streamlit |
+| `credentials.py` | 270 | a service password changed on the Admin page reaches every agent PC sealed to that PC's own key; each PC signs in with it before keeping it — no Streamlit |
 | `pages/12_Questions.py` + `manager_questions.py` | 330 | the managers' questionnaire: the decisions the 5 AM run guesses today (who helps first when short, Daily Service, inspectors, call-outs, quiet days, auto-push). Managers only; each manager's answers are their own app_settings row `mq_<username>` |
 | `property_map.py` | 400 | where every room is and what it costs to walk between two |
 | `daystart.py` | 210 | what to clean first, and when each room is reached |
@@ -360,6 +361,24 @@ Push after 05:30 once the 5 AM build is done, skips it if somebody pushed
 first, and gives up at 9 AM. Its `days` list also carries a year of dates so
 an agent still running code from before the `daily` flag pushes too. Room
 changes after that are made by hand, in the app or in HotSOS.
+
+**A second PC stands in when the office PC is off.** `hotsos_agent.py backup`
+(Task Scheduler "BGV HotSOS Backup" on Hari's PC, `run_backup_agent.bat`)
+answers Preview and Push only while the office heartbeat is over three minutes
+old, writes the heartbeat under its own name while it does, and goes quiet on
+the office PC's first beat back. It never builds, forecasts or imports: SSRS is
+office-network only. HotSOS and SharePoint both answer from outside, so the
+backup needs only the HotSOS login and a Microsoft 365 sign-in in its own
+`~/.bgv-agent/pa-browser` profile (`signin_sharepoint.bat`). A press is run by
+one PC at most: the backup skips any request whose id is already in the result.
+
+**Service passwords are changed on the Admin page, not at each PC.** Each agent
+publishes a P-256 public key (`agent_pubkey_<host>`) and keeps the private key in
+Credential Manager; the page seals the new password to every PC's key, and the
+PC signs in with it *before* saving it, so a typo can't lock it out. Microsoft
+365 is a browser sign-in, not a stored password: the page can only Test it or
+open the sign-in window on that PC. A PC that has not run this code yet has no
+key, and the page cannot reach it.
 
 ## Forecasting a week from the bookings
 

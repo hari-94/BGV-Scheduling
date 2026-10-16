@@ -32,6 +32,8 @@ Commands:
   python hotsos_agent.py preview [--date 2026-10-08]
   python hotsos_agent.py push    [--date 2026-10-08] [--only-room 3346E]
   python hotsos_agent.py run          the loop (Task Scheduler starts this)
+  python hotsos_agent.py backup       on a second PC: Preview/Push only, and only
+                                      while the office PC's heartbeat is stale
 
 The HotSOS password lives in Windows Credential Manager (via `keyring`), never
 in a file. Supabase credentials come from .streamlit/secrets.toml as for the
@@ -970,7 +972,9 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
                 # that sheet is the day's, and a push ahead must not replace it.
                 # On every push, not only one that moved rooms: an RQS swap on
                 # the sheet changes nothing in HotSOS but does change this.
-                if not only_room:
+                if not only_room and cfg.get("backup"):
+                    res["eng_sheet"] = "not queued: sent by the backup PC, which has no synced SharePoint folder"
+                elif not only_room:
                     try:
                         import eng_sheet
                         f = eng_sheet.publish(Path(cfg["workbook"]).parent, day, rows)
@@ -1025,8 +1029,10 @@ def run_loop():
     last_rep = 0
     last_slot = None
     last_beat = 0
+    last_cred = _register("office")
     while True:
         try:
+            last_cred = _cred_poll(last_cred)
             if time.time() - last_beat > 60:
                 db._upsert_key(hs.HEARTBEAT_KEY, {"at": clock.stamp(),
                                                   "host": socket.gethostname()})
@@ -1174,10 +1180,117 @@ def run_loop():
         time.sleep(POLL_SECONDS)
 
 
+# ── passwords changed on the Admin page (credentials.py) ─────────────────────
+def _register(role):
+    try:
+        import credentials
+        credentials.register(role)
+    except Exception as ex:
+        log(f"credentials: could not publish this PC's key: {type(ex).__name__}: {ex}")
+    return 0
+
+
+def _cred_poll(last):
+    """Every 30 s; returns when it last ran."""
+    if time.time() - last < 30:
+        return last
+    try:
+        import credentials
+        credentials.agent_poll(CONFIG, KEYRING_SERVICE, log)
+    except Exception as ex:
+        log(f"credentials: {type(ex).__name__}: {ex}")
+    return time.time()
+
+
+# ── backup: a second PC that stands in for the office PC ─────────────────────
+STANDBY_SECONDS = 3 * 60     # the office PC's heartbeat older than this: stand in
+
+
+def _beat_age(beat):
+    try:
+        return (clock.now() - _dt.datetime.fromisoformat(beat["at"])).total_seconds()
+    except Exception:
+        return float("inf")
+
+
+def run_backup():
+    """Answer the HotSOS page's Preview and Push, but only while the office PC
+    is down. HotSOS and SharePoint are both reachable from outside the office;
+    SSRS is not, so the 5 AM build, the forecast, the roster import and the
+    rest of run_loop stay the office PC's alone.
+
+    Only one PC may answer a press, or a Push goes out twice. So this waits
+    for the office PC's heartbeat to go stale, and while it stands in it
+    writes the heartbeat under its own name (the page then reads "online").
+    The office PC's first beat on its return carries the other name, and this
+    goes quiet again. A press whose id is already in the result -- answered by
+    either PC -- is never run a second time."""
+    me = socket.gethostname()
+    log(f"backup agent up on {me}; standing by while the office PC is online")
+    done_req = (db._load_key(hs.RESULT_KEY) or {}).get("id")
+    active, last_beat = False, 0
+    last_cred = _register("backup")
+    while True:
+        try:
+            # Standing by or not: a password changed on the Admin page must
+            # reach this PC before it is needed, not when it takes over.
+            last_cred = _cred_poll(last_cred)
+            beat = db._load_key(hs.HEARTBEAT_KEY) or {}
+            age = _beat_age(beat)
+            if beat.get("host") != me and age <= STANDBY_SECONDS:
+                if active:
+                    log(f"office PC {beat.get('host')} is back; standing by")
+                    active = False
+                time.sleep(30)
+                continue
+            if not active:
+                log(f"office PC {beat.get('host') or '?'} silent "
+                    f"{'since ever' if age == float('inf') else f'{age / 60:.0f} min'}; "
+                    "standing in for HotSOS")
+                active, last_beat = True, 0
+            if time.time() - last_beat > 60:
+                db._upsert_key(hs.HEARTBEAT_KEY, {"at": clock.stamp(), "host": me,
+                                                  "backup": True})
+                last_beat = time.time()
+
+            req = db._load_key(hs.REQUEST_KEY) or {}
+            if not req.get("id") or req["id"] == done_req:
+                time.sleep(POLL_SECONDS)
+                continue
+            done_req = req["id"]
+            if (db._load_key(hs.RESULT_KEY) or {}).get("id") == req["id"]:
+                continue                            # the office PC answered it
+            fail = None
+            if _beat_age(req) > REQUEST_MAX_AGE:
+                fail = (f"Not run: the backup PC got this {int(_beat_age(req) // 60)} minutes "
+                        "after it was pressed. Press it again.")
+            elif req.get("mode") == "build":
+                fail = ("The office PC is offline, and building the sheet needs SSRS, which "
+                        "only the office network reaches. Preview and Push still work.")
+            cfg = load_config(required=False)
+            if not fail and not cfg.get("workbook"):
+                fail = "The backup PC isn't set up -- run 'python hotsos_agent.py setup' on it."
+            if fail:
+                log(f"{req.get('mode')} from {req.get('at')}: {fail}")
+                db._upsert_key(hs.RESULT_KEY, {
+                    "id": req["id"], "date": req.get("date"), "mode": req.get("mode"),
+                    "by": req.get("by", ""), "status": "error",
+                    "finished_at": clock.stamp(), "error": fail})
+                continue
+            log(f"{req.get('mode')} for {req.get('date')} requested by {req.get('by')} (backup)")
+            import importlib
+            importlib.reload(hs)
+            run_push(dict(cfg, backup=True), _dt.date.fromisoformat(req["date"]),
+                     req.get("mode", "preview"), req_id=req["id"], by=req.get("by", ""))
+        except Exception as ex:          # never let one bad pass end the loop
+            log(f"backup loop error: {ex}")
+            time.sleep(POLL_SECONDS)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["setup", "forecast", "roster", "staff", "build",
-                                    "preview", "push", "run", "report"])
+                                    "preview", "push", "run", "report", "backup"])
     ap.add_argument("--date", default=None)
     ap.add_argument("--only-room", default=None)
     a = ap.parse_args()
@@ -1205,14 +1318,14 @@ def main():
     if a.cmd == "roster":
         print(sync_roster(load_config()["staff_workbook"], force=True))
         return
-    if a.cmd == "run":
+    if a.cmd in ("run", "backup"):
         # Under pythonw (how Task Scheduler starts it, so no window sits on the
         # desk all day) there is no console; write the log to a file instead.
         if sys.stdout is None or Path(sys.executable).stem.lower() == "pythonw":
             CONFIG.parent.mkdir(parents=True, exist_ok=True)
             sys.stdout = sys.stderr = open(CONFIG.parent / "agent.log", "a",
                                            encoding="utf-8", buffering=1)
-        return run_loop()
+        return run_loop() if a.cmd == "run" else run_backup()
     day = _dt.date.fromisoformat(a.date) if a.date else clock.today()
     _print_plan(run_push(load_config(), day, a.cmd, only_room=a.only_room, by="console"))
 

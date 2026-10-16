@@ -10,3 +10,5 @@ streamlit-sortables>=0.3.1
 # The exact Full Clean solver (fcsolve.py). Without it the app still runs and
 # keeps the heuristic's groups -- _fc_exact catches the ImportError.
 ortools>=9.10
+# credentials.py: service passwords sealed to each agent PC's key (Admin page).
+cryptography>=42

@@ -174,8 +174,8 @@ st.markdown('<p class="pg-title"> Admin Panel</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">Logged in as <strong>{cu["username"]}</strong> · User management & system settings</p>',
             unsafe_allow_html=True)
 
-tab_users, tab_create, tab_pw, tab_activity = st.tabs(
-    ["All Users", "Create User", "Reset Password", "Activity"])
+tab_users, tab_create, tab_pw, tab_activity, tab_svc = st.tabs(
+    ["All Users", "Create User", "Reset Password", "Activity", "Service Passwords"])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ALL USERS
@@ -414,3 +414,106 @@ with tab_activity:
                      f'<span style="color:#5b6675">{_fmt_mtn(e.get("ts",""))}</span></div>')
         st.markdown(f'<div style="background:#ffffff;border:1px solid #e2e5ea;'
                     f'border-radius:10px;padding:8px 14px">{feed}</div>', unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERVICE PASSWORDS — the logins the agent PCs use (credentials.py)
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_svc:
+    import credentials as _cr
+    import clock as _clock
+    from datetime import datetime as _dtm
+
+    def _when(ts):
+        try:
+            return _dtm.fromisoformat(str(ts)).astimezone(_clock.MTN).strftime("%b %d · %I:%M %p")
+        except Exception:
+            return "—"
+
+    def _pill(ok, text):
+        col, bg = ("#0f766e", "#ecfdf5") if ok else ("#b42318", "#fef3f2")
+        return (f'<span style="background:{bg};color:{col};border-radius:999px;'
+                f'padding:2px 10px;font-size:.74rem;font-weight:600">{_html.escape(text)}</span>')
+
+    st.markdown('<p class="sec">Service Passwords</p>', unsafe_allow_html=True)
+    st.caption("When a service password changes, set it here. Each PC that runs the agent "
+               "tries the new password first and keeps it only if the service accepts it. "
+               "The password is encrypted for each PC; nobody can read it back, here or in "
+               "the database.")
+
+    try:
+        _agents, _stat, _pend = _cr.agents(), _cr.statuses(), _cr.pending()
+    except Exception as _ex:
+        st.error(f"Couldn't load the agent PCs: {_ex}")
+        _agents, _stat, _pend = [], {}, {}
+
+    if not _agents:
+        st.info("No agent PC has registered yet. A PC registers itself the first time "
+                "its agent starts with this version (office PC: run_agent.bat; backup PC: "
+                "run_backup_agent.bat).")
+
+    _ROLE = {"office": "Office PC", "backup": "Backup PC"}
+    for _svc, _meta in _cr.SERVICES.items():
+        with st.container(border=True):
+            st.markdown(f"**{_meta['label']}** · <span style='color:#8a93a1;font-size:.8rem'>"
+                        f"{_html.escape(_meta['used_for'])}</span>", unsafe_allow_html=True)
+            # One line per PC: what it last reported, and anything still waiting.
+            for _a in _agents:
+                _h = _a["host"]
+                _s, _p = _stat.get((_h, _svc)), _pend.get((_h, _svc))
+                _bits = [f"<b>{_html.escape(_ROLE.get(_a.get('role'), _a.get('role') or 'PC'))}</b> "
+                         f"<span style='color:#8a93a1'>{_html.escape(_h)}</span>"]
+                if _p:
+                    _bits.append(_pill(True, f"waiting for this PC · {_p.get('action')} "
+                                             f"asked {_when(_p.get('at'))}"))
+                if _s:
+                    _who = f" as {_s['username']}" if _s.get("username") else ""
+                    _bits.append(_pill(bool(_s.get("ok")), f"{_s.get('action')}{_who}: {_s.get('msg')}"))
+                    _bits.append(f"<span style='color:#8a93a1;font-size:.74rem'>{_when(_s.get('at'))}"
+                                 f" · by {_html.escape(str(_s.get('by') or '—'))}</span>")
+                elif not _p:
+                    _bits.append("<span style='color:#8a93a1;font-size:.74rem'>nothing reported yet</span>")
+                st.markdown(" &nbsp; ".join(_bits), unsafe_allow_html=True)
+                _c1, _c2, _ = st.columns([1, 1, 3])
+                if _c1.button("Test", key=f"svc_test_{_svc}_{_h}", use_container_width=True):
+                    _cr.request_action(_h, _svc, "test", cu["username"])
+                    st.toast(f"Asked {_h} to test its {_meta['label']} sign-in.")
+                    st.rerun()
+                if _meta["kind"] == "signin" and _c2.button(
+                        "Open sign-in", key=f"svc_signin_{_svc}_{_h}", use_container_width=True,
+                        help="Opens the Microsoft 365 sign-in window on that PC; someone "
+                             "there signs in, closes the window, then you press Test."):
+                    _cr.request_action(_h, _svc, "signin", cu["username"])
+                    st.toast(f"Asked {_h} to open the sign-in window.")
+                    st.rerun()
+
+            if _meta["kind"] == "password" and _agents:
+                with st.form(f"svc_pw_{_svc}", clear_on_submit=True):
+                    _known = next((s.get("username") for (h, sv), s in _stat.items()
+                                   if sv == _svc and s.get("username")), "")
+                    _u = st.text_input(f"{_meta['label']} username", value=_known)
+                    _p1 = st.text_input("New password", type="password")
+                    _p2 = st.text_input("Confirm new password", type="password")
+                    if st.form_submit_button(f"Update on all agent PCs", type="primary"):
+                        if not _u.strip() or not _p1:
+                            st.error("Username and password are both needed.")
+                        elif _p1 != _p2:
+                            st.error("Passwords don't match.")
+                        else:
+                            _sent = _cr.request_password(_svc, _u.strip(), _p1, cu["username"])
+                            st.success(f"Sent to {', '.join(_sent)}. Each PC signs in with it "
+                                       "within a minute; refresh to see the result.")
+            elif _meta["kind"] == "signin":
+                st.caption("Microsoft 365 isn't a stored password: SharePoint is read through a "
+                           "browser sign-in on each PC (usually with a phone approval). After a "
+                           "password change, press Open sign-in for that PC and have someone "
+                           "there sign in.")
+
+    with st.expander("Not set here"):
+        for _name, _where in _cr.NOT_HERE:
+            st.markdown(f"**{_name}** — {_html.escape(_where)}")
+        if _agents:
+            _gone = st.selectbox("Forget a PC that no longer runs the agent",
+                                 ["—"] + [a["host"] for a in _agents], key="svc_forget_sel")
+            if _gone != "—" and st.button(f"Forget {_gone}", key="svc_forget_btn"):
+                _cr.forget_agent(_gone)
+                st.rerun()
