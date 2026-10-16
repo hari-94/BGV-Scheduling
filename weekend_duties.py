@@ -7,8 +7,10 @@ Both come from the staff schedule, the way the team writes them on weekends:
 
   * Carpets: a houseperson (or RQS) on "CARPETS/BLD 3" -- earlier "Rollaways
     8-9am and then, Cleaning carpets BLD 3" -- does that building's pet rooms.
-    Only the rooms with an X under Pet get a name (HP, 15 Oct), and only the
-    Full Cleans: carpets are done when the guest has gone. Saturdays are
+    Every Full Clean with an X under Pet gets a name (HP, 15 and 16 Oct),
+    including one nobody is on yet; a Daily Service never does -- the guest is
+    still there. A building nobody is on goes to the carpet person of the nearest
+    building that has one (building 1 touches both others). Saturdays are
     usually one person on BLD 1 and one on BLD 2; Sundays two on BLD 3, who
     split it by area, the 30xx rooms to one and the floors above to the other
     -- as on Aug 16, Sep 6, Sep 13, Oct 4 and Oct 11.
@@ -22,11 +24,12 @@ Both come from the staff schedule, the way the team writes them on weekends:
     buildings take one each; two on one building split it; one person takes
     the lot (Gerardo, 97 rooms of building 3, Oct 4).
 
-A room left for the RQS to check (no housekeeper on it) gets neither. Days
+A room left for the RQS to check (no housekeeper on it) gets no stripper. Days
 without such cells -- weekdays, as the schedule is written now -- are left
 as they are. No Streamlit here: the 5 AM build and the Schedule page's
 download both call `fill`.
 """
+import collections
 import re
 
 STRIP_MIN_ROOMS = 25          # a building with fewer Full Cleans isn't stripped
@@ -96,11 +99,29 @@ def plan(rows, duty) -> tuple:
     for b in by_bld:
         by_bld[b].sort()                  # floor by floor, the corridor in order
 
-    with_pet = {str(r["Room"]).strip().upper() for r in work
-                if str(r.get("Pet") or "").strip().upper() == "X"}
+    # Every Full Clean with an X under Pet gets a carpet person (HP, 16 October:
+    # "all the x marks should have an assigned person"; Daily Service never --
+    # the guest is still there), including one nobody is on yet. A building with nobody
+    # on its carpets goes to the carpet person of the nearest building that has
+    # one, the lightest if there are two: building 1 touches both others, and
+    # 2 and 3 don't touch each other.
+    pets_by_bld = {}
+    for r in rows:
+        room = str(r.get("Room") or "").strip().upper()
+        if (str(r.get("Pet") or "").strip().upper() == "X" and _full_clean(r.get("Service"))
+                and re.match(r"^\d{4}[A-I]$", room)):
+            pets_by_bld.setdefault(int(room[0]), set()).add(room)
+    crews = {b: list(n) for b, n in (duty.get("carpets") or {}).items() if n}
     carpet = {}
-    for b, names in (duty.get("carpets") or {}).items():
-        pets = [r for r in by_bld.get(b, []) if r in with_pet]
+    for b in sorted(pets_by_bld, key=lambda b: b not in crews):     # own crews first
+        pets = sorted(pets_by_bld[b])
+        names = crews.get(b)
+        if not names:
+            near = next(([x] for x in {1: (2, 3), 2: (1, 3), 3: (1, 2)}.get(b, ()) if crews.get(x)), None)
+            if not near:
+                continue                  # nobody on carpets today at all
+            load = collections.Counter(carpet.values())
+            names = [min(crews[near[0]], key=lambda n: load[n])]
         for name, part in zip(names, _chunks(pets, len(names))):
             for room in part:
                 carpet[room] = name

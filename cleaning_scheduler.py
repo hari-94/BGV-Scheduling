@@ -7483,6 +7483,7 @@ td{{transition:background .15s ease}}
     # the linen where -- from the staff schedule, as the 5 AM build's sheet.
     try:
         import weekend_duties
+        fresh.latest("weekend_duties")      # its rules change; a deploy doesn't reload it
         export_df = weekend_duties.fill(export_df, st.session_state.get("sched_day")
                                         or _today_iso())
     except Exception as _ex:
