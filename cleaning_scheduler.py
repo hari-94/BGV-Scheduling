@@ -1584,6 +1584,18 @@ def _borrow_short(need_hk, need_rqs):
     except Exception as _ex:
         print(f"[app] borrowable failed: {_ex}")
         cands = []
+    # A manager can keep a role off-limits for a day: app_settings
+    # "borrow_off" = {"<date>": {"groups": ["hk"], "why": ...}}. Their charts
+    # then go out as "No housekeeper available" for an RQS to place, rather
+    # than pulling the next person off their duty (HP, 17 October: keep the
+    # shadowing housekeepers on their training).
+    try:
+        _rule = (db._load_key("borrow_off") or {}).get(iso) or {}
+    except Exception:
+        _rule = {}
+    _off = set(_rule.get("groups") or [])
+    _off_names = {_ri.norm_name(n) for n in _rule.get("names") or []}
+    cands = [c for c in cands if c[1] not in _off and _ri.norm_name(c[0]) not in _off_names]
     for name, group, duty in cands:
         if group == "hk" and need_hk > 0:
             key = by_hk.get(_ri.norm_name(name))
@@ -4281,6 +4293,41 @@ def fill_from_unstaffed(groups, roster):
     return out
 
 
+def overflow_to_rqs12(groups, inspectors, rqs1, rqs2):
+    """Inspections nobody could take ("Inspector 3") go to RQS 1 and RQS 2,
+    split between them -- a manager's call for the day (borrow_off
+    "inspect_overflow": "rqs12"), as on 18 October, when Miguel Castor stayed
+    on the carpets instead of being pulled to inspect. Charts go in walking
+    order, each to whichever of the two has fewer Full Clean rooms so far.
+    Returns (groups, inspectors)."""
+    who = [n for n in (rqs1, rqs2) if n]
+    holes = {e.get("name") for e in inspectors if str(e.get("name", "")).startswith("Inspector ")}
+    if not who or not holes:
+        return groups, inspectors
+    load = {n: sum(len(g.get("rooms") or []) for g in groups
+                   if g.get("inspector") == n and g.get("service_type") == SVC_FC) for n in who}
+    moved = {n: [] for n in who}
+    for g in sorted((g for g in groups if g.get("inspector") in holes), key=_chart_place):
+        n = min(who, key=lambda x: load[x])
+        g["inspector"] = n
+        load[n] += len(g.get("rooms") or [])
+        moved[n].append(g)
+    inspectors = [e for e in inspectors if e.get("name") not in holes]
+    for n, gs in moved.items():
+        if not gs:
+            continue
+        mine = next((e for e in inspectors if e.get("name") == n and e.get("role") == "FC"), None)
+        if mine:
+            mine["groups"] = list(mine.get("groups") or []) + [g["label"] for g in gs]
+            mine["buildings"] = sorted(set(mine.get("buildings") or []) | {b for g in gs for b in g["blds"]})
+        else:
+            inspectors.append({"id": len(inspectors) + 1, "name": n, "role": "FC",
+                               "groups": [g["label"] for g in gs],
+                               "buildings": sorted({b for g in gs for b in g["blds"]}),
+                               "travel_warning": False, "heavy_warning": False, "complexity": 0})
+    return groups, inspectors
+
+
 def release_borrowed(groups, names, roster):
     """Give back anyone pulled off another duty whom the day turns out not to need.
 
@@ -5611,6 +5658,15 @@ if run:
                                                                 if n in _released]
                                 _taken = [t for t in _taken if t[0] not in _released]
                             st.session_state["borrowed"] = _taken
+                    # Still an inspection nobody has, and the manager's call for
+                    # the day is RQS 1 and 2 (borrow_off "inspect_overflow").
+                    try:
+                        _day_rule = (db._load_key("borrow_off") or {}).get(
+                            st.session_state.get("sched_day") or _today_iso()) or {}
+                    except Exception:
+                        _day_rule = {}
+                    if _day_rule.get("inspect_overflow") == "rqs12":
+                        fg, inspectors = overflow_to_rqs12(fg, inspectors, rqs1, rqs2)
                     # Report only the picks that still hold Daily Service once
                     # everything is staffed: a 40-minute leftover round is given
                     # up for a bigger chart by staff_biggest_first.
