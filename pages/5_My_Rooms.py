@@ -460,7 +460,11 @@ role = st.session_state.get("role", "")
 # team to show.
 _insp_names = sorted({g.get("inspector", "") for g in charts
                       if g.get("inspector")})
-my_insp = assignments.match_name(_insp_names, me_display, me_user)
+# A housekeeper sees their own rooms and nobody else's (HP, 16 October), so a
+# housekeeper account is never treated as an inspector with a team, whatever
+# its name happens to match.
+my_insp = (None if role == "housekeeper"
+           else assignments.match_name(_insp_names, me_display, me_user))
 
 # A manager who is also on the floor today -- inspecting a team, or with rooms
 # of their own -- comes here for that, like anybody else on the floor. The
@@ -473,11 +477,11 @@ if can_browse and not browse_aside:
     mine = st.selectbox(
         T("rooms.whose"), hk_names,
         index=hk_names.index(mine) if mine in hk_names else 0, key="mr_person")
-elif mine is None and role == "housekeeper":
-    # Her name is on the schedule in some other spelling; let her find it
-    # rather than telling her she has no work.
-    mine = st.selectbox(T("rooms.not_matched"), hk_names, key="mr_person")
 elif mine is None and not my_insp:
+    # A housekeeper sees only their own rooms (HP, 16 October). This used to
+    # offer the whole list of housekeepers to pick from when the sign-in name
+    # didn't match -- which let anybody open anybody's rooms. An account that
+    # doesn't match is fixed by its display name, not by a picker.
     st.markdown(f'<div class="mrcard"><div class="mrroom">'
                 f'{e(T("rooms.none_today"))}</div>'
                 f'<div class="mrmeta">{e(T("rooms.none_body"))}</div></div>',
