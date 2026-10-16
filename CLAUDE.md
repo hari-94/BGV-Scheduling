@@ -465,6 +465,17 @@ the key carries a token derived from the parsed file.
 
 ## Traps — each of these has already bitten
 
+**Never name a module after an installed package.** The agent's alert checker
+was `watchdog.py`. Streamlit installs the `watchdog` package and its file
+watcher does `from watchdog import events`; the repo root is first on
+sys.path, so it got ours, every session failed to start, and the app sat on
+its loading skeleton with nothing in the page to say why. It hid for five days
+because Streamlit Cloud only restarts the process on a requirements change --
+the first one after it landed (15 Oct) took the app down. It is
+`agent_watch.py` now. A rename alone does not heal a running server, which
+holds the wrong module in `sys.modules`: reboot the app (or change
+requirements.txt, which does).
+
 **The front desk's report changes shape, and an empty parse looks like a quiet
 day.** `parse_email_notes` required a heading to begin with a letter and end
 with a colon. The desk started writing `-Room Moves:` instead of `Room Moves:`,

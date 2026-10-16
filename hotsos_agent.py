@@ -1168,8 +1168,8 @@ def run_loop():
             if time.time() - last_watch > 600:
                 last_watch = time.time()
                 try:
-                    import watchdog
-                    sent = watchdog.run(cfg)
+                    import agent_watch
+                    sent = agent_watch.run(cfg)
                     if sent:
                         log("alert sent: " + " | ".join(x[:80] for x in sent))
                 except Exception as ex:

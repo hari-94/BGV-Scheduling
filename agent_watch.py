@@ -1,5 +1,11 @@
 """
-watchdog.py — the office PC watches its own jobs and raises the alarm.
+agent_watch.py — the office PC watches its own jobs and raises the alarm.
+
+It was watchdog.py until 15 Oct. That name is also the pip package Streamlit's
+file watcher imports (`from watchdog import events`), and the repo root comes
+first on sys.path -- so the app imported this file instead, every session
+failed to start, and the page sat on its loading skeleton. Never name a
+module here after an installed package.
 
 Overnight checks used to run inside a Claude session on this PC. On 10 Oct
 that session was signed out, the checks queued up unanswered, and an Arrival

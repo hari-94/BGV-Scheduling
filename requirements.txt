@@ -2,6 +2,8 @@
 # whatever was newest while development sat on an old copy, so the app being
 # tested was never the app being served.
 streamlit==1.62.0
+# streamlit installs `watchdog` and its file watcher imports it: no module in
+# this repo may be called watchdog.py (it was, until 15 Oct -- see agent_watch.py).
 pandas>=2.0.0
 supabase>=2.3.0
 plotly>=5.18.0
