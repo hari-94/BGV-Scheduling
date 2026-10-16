@@ -367,6 +367,87 @@ hk_names = assignments.housekeepers(charts)
 # then the username.
 mine = assignments.match_name(hk_names, me_display, me_user)
 
+# ── carpet and stripping: the housepersons' own rooms (duties) ───────────────
+# A houseperson on carpets or stripping is on no chart, and the housekeeper
+# flow below would ask them to pick a name off the housekeepers' list. Their
+# rooms come first, with Done and Reset; nothing here touches a room's
+# cleaning status, HotSOS or the inspections. RQS and managers see the list
+# read-only under the header.
+import duties as _duties                                  # noqa: E402
+fresh.latest("duties")
+_dday = today.isoformat()
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def _duty_rooms(day_iso, _tick=0):
+    return _duties.assigned(day_iso)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _housepersons(day_iso):
+    return _duties.housepersons(day_iso)
+
+
+_drooms = _duty_rooms(_dday, st.session_state.get("duty_tick", 0))
+_dme = assignments.match_name(_duties.people(_drooms), me_display, me_user) if _drooms else None
+
+
+def _duty_label(duty):
+    return T("duty.carpet") if duty == "carpet" else T("duty.stripping")
+
+
+def _duty_hhmm(stamp):
+    try:
+        return datetime.datetime.fromisoformat(stamp).strftime("%I:%M %p").lstrip("0")
+    except Exception:
+        return ""
+
+
+if _dme:
+    _mine_d = _duties.mine(_drooms, _dme)
+    _done_d = _duties.done_by(_dday, me_user)
+    _n_done = sum(1 for room, duty in _mine_d if f"{room}|{duty}" in _done_d)
+    _pct_d = int(round(100 * _n_done / len(_mine_d))) if _mine_d else 0
+    st.markdown(
+        f'<div class="mrhero"><h1>{e(T("rooms.hello", name=str(me_display or _dme).split()[0].title()))}</h1>'
+        f'<p>{e(T("duty.subtitle"))} · {e(today.strftime("%A, %d %B %Y"))}</p>'
+        f'<div class="mrbar"><i style="width:{_pct_d}%"></i></div>'
+        f'<div class="mrcount">{e(T("duty.progress", done=_n_done, total=len(_mine_d)))}</div></div>',
+        unsafe_allow_html=True)
+    for _room, _duty in _mine_d:
+        _k = f"{_room}|{_duty}"
+        _when = _done_d.get(_k)
+        _c1, _c2 = st.columns([3, 1], vertical_alignment="center")
+        with _c1:
+            _state = (f'<span style="color:#11692f;font-weight:700">✓ {e(T("duty.done_at", time=_duty_hhmm(_when)))}</span>'
+                      if _when else f'<span style="color:#7a4b00;font-weight:600">○ {e(T("duty.not_started"))}</span>')
+            st.markdown(f'<div class="mrcard"><div class="mrroom">{e(_room)}</div>'
+                        f'<div class="mrmeta">{e(_duty_label(_duty))} · {e(T("duty.building", n=_room[0]))}'
+                        f' · {_state}</div></div>', unsafe_allow_html=True)
+        with _c2:
+            if not _when:
+                _go = st.button("✓ " + T("duty.mark"), key=f"duty_done_{_k}", type="primary",
+                                use_container_width=True)
+            else:
+                _go = st.button("↺ " + T("duty.reset"), key=f"duty_reset_{_k}", use_container_width=True)
+            if _go:
+                try:
+                    _duties.mark(_dday, me_user, me_display or _dme, _room, _duty, done=not _when)
+                except Exception as _ex:
+                    st.error(f"{_ex}")
+                else:
+                    st.session_state["duty_tick"] = st.session_state.get("duty_tick", 0) + 1
+                    st.rerun()
+    if mine is None:
+        st.stop()
+elif mine is None and st.session_state.get("role", "") == "housekeeper" \
+        and assignments.match_name(_housepersons(_dday), me_display, me_user):
+    # A houseperson with no carpet or stripping today: say so, rather than
+    # asking them to pick a housekeeper's name.
+    st.markdown(f'<div class="mrcard"><div class="mrroom">{e(T("duty.none"))}</div>'
+                f'<div class="mrmeta">{e(T("duty.none_body"))}</div></div>', unsafe_allow_html=True)
+    st.stop()
+
 # Only a manager looks after everyone, so only a manager may browse. An RQS is
 # here for their own rooms if they are carrying any, and for nothing else --
 # the boards on the Schedule page are where they look after the team.
@@ -439,6 +520,23 @@ st.markdown(
     f'<div class="mrbar"><i style="width:{pct}%"></i></div>'
     f'<div class="mrcount">{e(T("rooms.progress", done=done_n, total=total_n))}'
     f'</div></div>', unsafe_allow_html=True)
+
+# Carpet and stripping, read-only, for the RQS and managers (duties).
+if _drooms and st.session_state.get("role", "") in ("rqs", "admin"):
+    _alld = _duties.all_done(_dday)
+    _items = sorted(((who, duty, room) for room, r in _drooms.items() for duty, who in r.items()))
+    _nd = sum(1 for _w, duty, room in _items if (room, duty) in _alld)
+    with st.expander(f"🧹 {T('duty.overview')} · {T('duty.progress', done=_nd, total=len(_items))}"):
+        _rows = []
+        for _w, _du, _rm in _items:
+            _got = _alld.get((_rm, _du))
+            _stt = (f'<span style="color:#11692f;font-weight:700">✓ {e(_duty_hhmm(_got[1]))}</span>' if _got
+                    else f'<span style="color:#7a4b00">{e(T("duty.not_started"))}</span>')
+            _rows.append(f'<tr><td style="padding:3px 8px 3px 0"><b>{e(_rm)}</b></td>'
+                         f'<td style="padding:3px 8px">{e(_duty_label(_du))}</td>'
+                         f'<td style="padding:3px 8px">{e(_w)}</td><td style="padding:3px 0">{_stt}</td></tr>')
+        st.markdown('<table style="width:100%;font-size:.88rem;border-collapse:collapse">'
+                    + "".join(_rows) + "</table>", unsafe_allow_html=True)
 
 def _t(key, fallback):
     """T, with English to fall back on. i18n is an imported module, so a

@@ -954,6 +954,15 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
         frame = weekend_duties.fill(frame, day.isoformat())
     except Exception as ex:                   # never let it cost the morning's sheet
         print(f"[build] carpets / stripping not filled: {ex}")
+    # The same rooms for the housepersons' own page (duties): what they see on
+    # My Rooms and mark done. Only for the day being published -- a preview
+    # leaves the stored day alone.
+    if publish:
+        try:
+            import duties
+            duties.save(day.isoformat(), frame)
+        except Exception as ex:
+            print(f"[build] carpet / stripping rooms not kept for My Rooms: {ex}")
     # Whoever was pulled off another duty says so on their own rows, where the
     # RQS reading the sheet will see it.
     for name, role, duty in getattr(generate, "borrowed", []):
