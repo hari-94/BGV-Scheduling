@@ -64,6 +64,47 @@ def fetch(file_name, timeout_ms=60000):
         _ONE_AT_A_TIME.release()
 
 
+_LIST_JS = """async (url) => {
+  const r = await fetch(url, {headers: {Accept: "application/json;odata=nometadata"},
+                              credentials: "include", cache: "no-store"});
+  if (!r.ok) return {error: "SharePoint answered " + r.status};
+  return await r.json();
+}"""
+
+
+def list_folder(sub, top=20):
+    """[(name, modified ISO)] newest first, in a folder under GC8 Inspections
+    (e.g. "Arrival Reports") -- for a PC that has no synced copy of it."""
+    if not _ONE_AT_A_TIME.acquire(timeout=150):
+        return []
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            hidden = None
+            try:
+                browser = p.chromium.connect_over_cdp(CDP, timeout=3000)
+                ctx = browser.contexts[0] if browser.contexts else browser.new_context()
+            except Exception:
+                hidden = ctx = p.chromium.launch_persistent_context(
+                    PROFILE, channel="chrome", headless=True)
+            page = ctx.new_page()
+            try:
+                page.goto(SITE, timeout=60000)
+                path = f"{FOLDER}/{sub}".replace("'", "''")
+                out = page.evaluate(_LIST_JS, f"{SITE}/_api/web/GetFolderByServerRelativeUrl"
+                                    f"('{path}')/Files?$select=Name,TimeLastModified"
+                                    f"&$orderby=TimeLastModified desc&$top={int(top)}")
+            finally:
+                page.close()
+                if hidden is not None:
+                    hidden.close()
+    except Exception:
+        return []
+    finally:
+        _ONE_AT_A_TIME.release()
+    return [(f["Name"], f["TimeLastModified"]) for f in (out or {}).get("value", [])]
+
+
 def _fetch(file_name, timeout_ms):
     try:
         from playwright.sync_api import sync_playwright

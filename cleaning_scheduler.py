@@ -1787,34 +1787,11 @@ def expand_rooms(raw_list: list) -> list:
 # previous section rather than letting its contents be filed under it, which is
 # the failure that turns a format change into wrong data instead of missing data.
 
-_NOTE_SECTIONS = {
-    "vip inspections": "VIP", "vip inspection": "VIP", "vips": "VIP",
-    "room moves": "Room Move", "room move": "Room Move", "moves": "Room Move",
-    "stayovers": "Stayover", "stayover": "Stayover", "stay overs": "Stayover",
-    "robes": "Robes", "robe": "Robes",
-    "pack n play": "Pack n Play", "pack and play": "Pack n Play",
-    "packnplay": "Pack n Play", "pnp": "Pack n Play",
-    "cribs": "Pack n Play", "crib": "Pack n Play",
-    "highchairs": "Highchair", "highchair": "Highchair",
-    "high chairs": "Highchair", "high chair": "Highchair",
-    "rollaway": "Rollaway", "rollaways": "Rollaway", "roll away": "Rollaway",
-    "special requests": "Special Request", "special request": "Special Request",
-    "requests": "Special Request",
-    "dogs arriving": "Dog arriving", "dog arriving": "Dog arriving",
-    "dogs": "Dog arriving", "pets": "Dog arriving", "pets arriving": "Dog arriving",
-    "celebrations": "Celebration", "celebration": "Celebration",
-    "early ins": "Early In", "early in": "Early In", "early arrivals": "Early In",
-    "early check ins": "Early In", "early checkins": "Early In",
-    "late arrival": "Late Arrival", "late arrivals": "Late Arrival",
-}
-_LATE_SECTIONS = {"late checkouts", "late checkout", "late check outs",
-                  "late check out", "late outs", "late out", "late c o",
-                  "late cos", "late co"}
-# Headings that carry no per-room information. They are named so their contents
-# cannot leak into whichever section came before them.
-_SKIP_SECTIONS = {"check ins", "check in", "checkins", "arrivals",
-                  "check outs", "check out", "checkouts", "departures",
-                  "notes", "reminders", "general notes"}
+# The heading names live in arrival_sections.py, shared with the morning Teams
+# messages (teams_notes.py); a new spelling from the desk goes there.
+from arrival_sections import (NOTE_SECTIONS as _NOTE_SECTIONS,  # noqa: E402
+                              LATE_SECTIONS as _LATE_SECTIONS,
+                              SKIP_SECTIONS as _SKIP_SECTIONS)
 
 _ROOM_RE = re.compile(r'\b([1-9]\d{3}[A-Z]{1,4})\b')
 _TIME_RE = re.compile(r'\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', re.IGNORECASE)

@@ -49,6 +49,7 @@ several of them read the *real* schedule to test against a real day.
 | `pages/11_Report.py` | 720 | rooms inspected and cleaned per person, beside their schedule days — managers only; its tables are drawn by `report_table.py` (a static component in `components/report_table/`: click a column name to sort) |
 | `report_data.py` | 870 | reads every GC8 Inspections day tab (office PC, 4 PM), matches typed names to people, counts — no Streamlit |
 | `credentials.py` | 270 | a service password changed on the Admin page reaches every agent PC sealed to that PC's own key; each PC signs in with it before keeping it — no Streamlit |
+| `teams_notes.py` + `arrival_sections.py` | 330 | 7:30 AM: the Arrival Report's notes to the two Teams chats, the housekeeping one with each room's HK and RQS from the sheet; the heading names are shared with the Schedule page |
 | `pages/12_Questions.py` + `manager_questions.py` | 330 | the managers' questionnaire: the decisions the 5 AM run guesses today (who helps first when short, Daily Service, inspectors, call-outs, quiet days, auto-push). Managers only; each manager's answers are their own app_settings row `mq_<username>` |
 | `property_map.py` | 400 | where every room is and what it costs to walk between two |
 | `daystart.py` | 210 | what to clean first, and when each room is reached |
@@ -379,6 +380,19 @@ PC signs in with it *before* saving it, so a typo can't lock it out. Microsoft
 365 is a browser sign-in, not a stored password: the page can only Test it or
 open the sign-in window on that PC. A PC that has not run this code yet has no
 key, and the page cannot reach it.
+
+**At 7:30 the Arrival Report goes to Teams, cut two ways.** "GC8 AM Houseperson
+7am -3pm" gets room moves, cribs, highchairs, rollaways, special requests and
+dogs -- room numbers only, they know where the rooms are (Hari, 15 October).
+"GC8 - Housekeeping" gets VIPs, moves, stayovers, robes, celebrations, early
+ins, late arrivals and late checkouts, each room with its HK and RQS from the
+day's tab, read live. Each chat has a Power Automate flow from the "Send webhook
+alerts to a chat" template ("BGV Teams notes - ..." in Hari's flows); their URLs
+are `teams_webhooks` in app_settings, with a `test` one that posts to Hari alone
+(`python hotsos_agent.py teams --test`). The send is retried every five minutes
+until 11, never repeats a chat that already took it, and `teams_notes_sent`
+records what happened. No report or no tab by 11: nothing is sent, and the
+record says why.
 
 ## Forecasting a week from the bookings
 

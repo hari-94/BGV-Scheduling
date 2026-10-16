@@ -34,6 +34,7 @@ Commands:
   python hotsos_agent.py run          the loop (Task Scheduler starts this)
   python hotsos_agent.py backup       on a second PC: Preview/Push only, and only
                                       while the office PC's heartbeat is stale
+  python hotsos_agent.py teams [--test] [--date ...]   the 7:30 Teams notes now
 
 The HotSOS password lives in Windows Credential Manager (via `keyring`), never
 in a file. Supabase credentials come from .streamlit/secrets.toml as for the
@@ -1030,6 +1031,7 @@ def run_loop():
     last_slot = None
     last_beat = 0
     last_cred = _register("office")
+    last_teams = 0
     while True:
         try:
             last_cred = _cred_poll(last_cred)
@@ -1112,6 +1114,13 @@ def run_loop():
                 _auto_push()
             except Exception as ex:
                 log(f"auto-push: {type(ex).__name__}: {ex}")
+
+            # 7:30: the Arrival Report's notes to the two Teams chats.
+            try:
+                last_teams = _teams_tick(cfg, last_teams)
+            except Exception as ex:
+                last_teams = time.time()
+                log(f"teams notes: {type(ex).__name__}: {ex}")
 
             # The room-status mirror runs on its own thread (start_mirror).
             start_mirror()
@@ -1202,6 +1211,59 @@ def _cred_poll(last):
     return time.time()
 
 
+# ── 7:30 AM: the Arrival Report's notes to the two Teams chats (teams_notes) ──
+def teams_morning(cfg, day=None, test=False, by="7:30 AM"):
+    """Send (or finish sending) the day's two Teams messages. Returns the record."""
+    import teams_notes as tn
+    day = day or clock.today()
+    _, arr = daily_paths(cfg) if cfg.get("workbook") else (None, None)
+    before = {} if test else (db._load_key(tn.SENT_KEY) or {})
+    if before.get("date") != str(day):
+        before = {}
+    rec = tn.run_morning(day, lambda d: read_day(cfg, d), arr, test=test, already=before, log=log)
+    rec.update(at=clock.stamp(), host=socket.gethostname(), by=by)
+    if not test:
+        db._upsert_key(tn.SENT_KEY, rec)
+    return rec
+
+
+def _teams_tick(cfg, last):
+    """From the loop, every 5 minutes between 7:30 and 11: send if not sent.
+    One PC sends: whichever finds the day's record not yet 'sent' -- the
+    backup only ever runs this while it is standing in."""
+    if time.time() - last < 300:
+        return last
+    import teams_notes as tn
+    now = clock.now()
+    today = str(now.date())
+    if (now.hour, now.minute) < tn.SEND_AT or not cfg.get("workbook"):
+        return time.time()
+    st = _state()
+    if st.get("teams_day") == today:
+        return time.time()
+    sent = db._load_key(tn.SENT_KEY) or {}
+    if sent.get("date") == today and sent.get("status") in ("sent", "gave up"):
+        st["teams_day"] = today
+        STATE.write_text(json.dumps(st))
+        return time.time()
+    if now.hour >= tn.GIVE_UP_HOUR:
+        db._upsert_key(tn.SENT_KEY, dict(sent if sent.get("date") == today else {"date": today},
+                                         status="gave up", at=clock.stamp(),
+                                         host=socket.gethostname()))
+        log(f"teams notes {today}: not sent by {tn.GIVE_UP_HOUR}:00 -- {sent.get('why') or sent.get('results')}")
+        st["teams_day"] = today
+        STATE.write_text(json.dumps(st))
+        return time.time()
+    rec = teams_morning(cfg)
+    if rec["status"] == "sent":
+        st["teams_day"] = today
+        STATE.write_text(json.dumps(st))
+        log(f"teams notes {today}: sent ({rec.get('report')}, {rec.get('tab')})")
+    elif rec["status"] == "waiting":
+        log(f"teams notes {today}: waiting -- {rec.get('why')}")
+    return time.time()
+
+
 # ── backup: a second PC that stands in for the office PC ─────────────────────
 STANDBY_SECONDS = 3 * 60     # the office PC's heartbeat older than this: stand in
 
@@ -1228,7 +1290,7 @@ def run_backup():
     me = socket.gethostname()
     log(f"backup agent up on {me}; standing by while the office PC is online")
     done_req = (db._load_key(hs.RESULT_KEY) or {}).get("id")
-    active, last_beat = False, 0
+    active, last_beat, last_teams = False, 0, 0
     last_cred = _register("backup")
     while True:
         try:
@@ -1252,6 +1314,13 @@ def run_backup():
                 db._upsert_key(hs.HEARTBEAT_KEY, {"at": clock.stamp(), "host": me,
                                                   "backup": True})
                 last_beat = time.time()
+
+            # Standing in, so the 7:30 Teams notes are this PC's too.
+            try:
+                last_teams = _teams_tick(load_config(required=False), last_teams)
+            except Exception as ex:
+                last_teams = time.time()
+                log(f"teams notes: {type(ex).__name__}: {ex}")
 
             req = db._load_key(hs.REQUEST_KEY) or {}
             if not req.get("id") or req["id"] == done_req:
@@ -1290,10 +1359,17 @@ def run_backup():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["setup", "forecast", "roster", "staff", "build",
-                                    "preview", "push", "run", "report", "backup"])
+                                    "preview", "push", "run", "report", "backup", "teams"])
     ap.add_argument("--date", default=None)
     ap.add_argument("--only-room", default=None)
+    ap.add_argument("--test", action="store_true",
+                    help="teams: send both messages to the test chat only")
     a = ap.parse_args()
+    if a.cmd == "teams":
+        rec = teams_morning(load_config(), _dt.date.fromisoformat(a.date) if a.date else None,
+                            test=a.test, by="console")
+        print({k: rec.get(k) for k in ("status", "why", "report", "tab", "results")})
+        return
     if a.cmd == "setup":
         return setup()
     if a.cmd == "forecast":
