@@ -233,6 +233,7 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         iso = (day or clock.today()).isoformat()
         at.session_state["sched_day"] = iso          # weekend rules follow the day built
         generate.borrowed = []
+        generate.released = []
         generate.roles = {}
         generate.ds_auto = {}
 
@@ -255,6 +256,10 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         # read back for the sheet's notes.
         generate.borrowed = [tuple(x) for x in (at.session_state["borrowed"]
                                                 if "borrowed" in at.session_state else [])]
+        # Borrowed, then not needed: their rooms fit the others' charts
+        # (release_borrowed), so they stayed on their own duty.
+        generate.released = [tuple(x) for x in (at.session_state["released"]
+                                                if "released" in at.session_state else [])]
         generate.ds_auto = dict(at.session_state["ds_auto"]
                                 if "ds_auto" in at.session_state else {})
         generate.roles = {k: (at.session_state[k] if k in at.session_state else "")
@@ -1007,6 +1012,7 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
             "tab": tab_name(day), "outcome": outcome, "dv_unassigned": dv_blank,
             "borrowed": [f"{n} ({duty})" for n, _, duty in borrowed],
             "borrowed_roles": [r for _, r, _ in borrowed],
+            "released": [f"{n} ({duty})" for n, duty in getattr(generate, "released", [])],
             "stretched": stretched, "vacant_charts": int(vacant),
             "rooms_without_rqs": int(no_rqs), "big_tab": big,
             "rqs_on_fc": [f"{label} ({name}) {len(rooms)} Full Clean rooms"

@@ -294,6 +294,17 @@ person's home building), trades apartments with `_fc_tighten` to win the
 floors back, and re-packs what is left so the unstaffed charts count the
 people still needed.
 
+**Somebody borrowed who turns out not to be needed goes back to their duty**
+(`release_borrowed`, HP's call on 16 October). Borrowing counts how many are
+missing from the first staffing and then staffs the day again from the top,
+which hands each borrowed person a chart of their own however small -- that
+morning Luis Urbina came off touch-ups for one 70-minute room while Maricruz
+stood at 260. Each borrowed housekeeper, lightest first, is now tried without:
+their charts go back to unstaffed and `fill_from_unstaffed` /
+`balance_light_charts` deal them out under the same rules. Nothing more left
+unstaffed than before means they stay off rooms (`released` in the session and
+the build's record); otherwise the day is kept exactly as it was.
+
 Inspectors are batched the same way: a building at a time, its trailing
 part-batch left alone until there are not enough inspectors, then merged
 cheapest-bridge-first. RQS rounds crossing a building 245 → 192.

@@ -4280,6 +4280,52 @@ def fill_from_unstaffed(groups, roster):
         g["label"] = lbl
     return out
 
+
+def release_borrowed(groups, names, roster):
+    """Give back anyone pulled off another duty whom the day turns out not to need.
+
+    Borrowing (_borrow_short) decides how many people are missing from the
+    first staffing, and then the day is staffed again from the top -- which
+    hands each borrowed person a chart of their own, however small. On
+    16 October Luis Urbina came off touch-ups for one 70-minute room, 1424F,
+    while Maricruz Peralta stood at 260 minutes next door; HP's call was to
+    give her the room and leave Luis on touch-ups.
+
+    So each borrowed housekeeper, lightest first, is tried without: their
+    charts go back to "No HK available", and the short-day passes deal them to
+    the people already on -- fill_from_unstaffed, then balance_light_charts,
+    the same rules as ever (under the cap, apartments whole, never buildings 2
+    and 3). If that leaves nothing more unstaffed than before, the day doesn't
+    need them and they stay on their own duty; if it does, the day is kept
+    exactly as it was. Returns (groups, [released names]).
+    """
+    import copy as _copy
+
+    def load(gs, p):
+        return sum(g["time"] for g in gs if g.get("housekeeper") == p)
+
+    def unstaffed(gs):
+        return sum(1 for g in gs if g.get("rooms") and not g.get("verify_group")
+                   and not g.get("dv_rqs2") and is_unassigned_hk(g.get("housekeeper")))
+
+    released = []
+    before = unstaffed(groups)
+    for name in sorted(names, key=lambda p: load(groups, p)):
+        if not any(g.get("housekeeper") == name for g in groups):
+            released.append(name)              # given nothing at all
+            continue
+        trial = _copy.deepcopy(groups)
+        n = 0
+        for g in trial:
+            if g.get("housekeeper") == name:
+                n += 1
+                g["housekeeper"] = f"{NO_HK_LABEL} {n}"
+        trial = balance_light_charts(fill_from_unstaffed(trial, roster))
+        if unstaffed(trial) <= before and not any(g.get("housekeeper") == name for g in trial):
+            groups = trial
+            released.append(name)
+    return groups, released
+
 #: West to east, the order somebody actually walks the property. Sorting charts
 #: by building *number* puts 3 next to 2 — the only two that do not touch — so
 #: an inspector handed consecutive charts across that seam gets the most
@@ -5501,7 +5547,7 @@ if run:
                         except Exception as _ex:
                             print(f"[app] Daily Service pick failed: {_ex}")
 
-                    def _staff(fg, present_hk, present_insp):
+                    def _staff(fg, present_hk, present_insp, release=()):
                         hk_asgn, used_hk_set = assign_hk_building_aware(
                             fg, present_hk, roster, ds_team=_ds_team)
                         for g in fg: g["housekeeper"] = hk_asgn.get(g["label"],"")
@@ -5510,16 +5556,20 @@ if run:
                         fg = fill_from_unstaffed(fg, roster)
                         fg = staff_biggest_first(fg)
                         fg = balance_light_charts(fg)
+                        # Anyone borrowed whose rooms the others can take goes
+                        # back to their own duty (release_borrowed).
+                        fg, released = release_borrowed(fg, release, roster) if release else (fg, [])
                         inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
-                        return fg, inspectors, used_hk_set
+                        return fg, inspectors, used_hk_set, released
 
-                    fg, inspectors, used_hk_set = _staff(fg, present_hk, present_insp)
+                    fg, inspectors, used_hk_set, _ = _staff(fg, present_hk, present_insp)
                     # Still short: people on Dust and Vac, then projects and
                     # other non-room duties that day, are counted as working --
                     # the manager's rule, and the same one the 5 AM build used
                     # to apply on its own, which is why a Generate here and the
                     # morning's sheet came out differently.
                     st.session_state["borrowed"] = []
+                    st.session_state["released"] = []
                     _need_hk = sum(1 for g in fg if not g.get("verify_group")
                                    and not g.get("dv_rqs2")
                                    and str(g.get("housekeeper") or "").startswith(
@@ -5529,10 +5579,23 @@ if run:
                     if _need_hk or _need_rqs:
                         _taken = _borrow_short(_need_hk, _need_rqs)
                         if _taken:
-                            present_hk = present_hk + [n for n, r, _ in _taken if r == "Housekeeper"]
+                            _hk_taken = [n for n, r, _ in _taken if r == "Housekeeper"]
+                            present_hk = present_hk + _hk_taken
                             present_insp = present_insp + [n for n, r, _ in _taken if r == "RQS"]
-                            fg, inspectors, used_hk_set = _staff(
-                                _copy.deepcopy(_fg_packed), present_hk, present_insp)
+                            fg, inspectors, used_hk_set, _released = _staff(
+                                _copy.deepcopy(_fg_packed), present_hk, present_insp,
+                                release=_hk_taken)
+                            if _released:
+                                # Back on their own duty: not on rooms today.
+                                _hkr = st.session_state["hk_roster"]
+                                for _n in _released:
+                                    if _n in _hkr:
+                                        _hkr[_n] = dict(_hkr[_n], present=False)
+                                used_hk_set = {n for n in used_hk_set if n not in _released}
+                                st.session_state["_att_gen"] = st.session_state.get("_att_gen", 0) + 1
+                                st.session_state["released"] = [(n, d) for n, r, d in _taken
+                                                                if n in _released]
+                                _taken = [t for t in _taken if t[0] not in _released]
                             st.session_state["borrowed"] = _taken
                     # Report only the picks that still hold Daily Service once
                     # everything is staffed: a 40-minute leftover round is given
@@ -5578,6 +5641,10 @@ if run:
                     if _bw:
                         st.info("Short of people — moved onto rooms from other duties: "
                                 + "; ".join(f"**{n}** ({r}, was {d})" for n, r, d in _bw))
+                    _rl = st.session_state.get("released") or []
+                    if _rl:
+                        st.info("Not needed after all — their rooms fit the others' charts, so they stay on their own duty: "
+                                + "; ".join(f"**{n}** ({d})" for n, d in _rl))
                     # Ideally RQS 1 and 2 inspect no Full Clean; say so when they must.
                     _r12 = [(lbl, nm) for lbl, nm in (("RQS 1", rqs1), ("RQS 2", rqs2)) if nm]
                     for _lbl, _nm in _r12:
