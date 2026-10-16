@@ -1236,8 +1236,13 @@ def _teams_tick(cfg, last):
     import teams_notes as tn
     now = clock.now()
     today = str(now.date())
-    if (now.hour, now.minute) < tn.SEND_AT or not cfg.get("workbook"):
+    if not cfg.get("workbook"):
         return time.time()
+    if (now.hour, now.minute) < tn.SEND_AT:
+        # Look again in 30 s, not 5 minutes: a five-minute step from wherever
+        # the agent happened to start could land at 7:29 and send at 7:34
+        # (16 October, after a 7:19 restart).
+        return time.time() - 270
     st = _state()
     if st.get("teams_day") == today:
         return time.time()
