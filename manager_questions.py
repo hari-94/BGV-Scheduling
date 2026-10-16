@@ -103,13 +103,9 @@ PARTS = [
              fields=[("one", "choice", "Your answer",
                       [KEEP, "Give every housekeeper fewer rooms", "Offer early leave (VTO) to housekeepers",
                        "Send the extra housekeepers to projects"])]),
-        dict(key="auto_push",
-             q="Should the lists go to HotSOS by themselves, without an inspector (RQS) or manager pressing Push?",
-             now="Only on days a manager picks.",
-             fields=[("one", "choice", "Your answer",
-                      [KEEP, "Every day", "Weekends only",
-                       "Only if no inspector (RQS) or manager has pressed Push by a set time"]),
-                     ("text", "time", "If by a set time, what time?")]),
+        # "auto_push" was question 12 until Hari settled it on 15 Oct: the lists
+        # go to HotSOS every morning (hotsos_agent, {"daily": true}). Answers
+        # already saved under that key are kept in their rows, just not shown.
     ]),
 ]
 
@@ -258,15 +254,6 @@ ES = {
     "Give every housekeeper fewer rooms": "Dar menos cuartos a cada camarista",
     "Offer early leave (VTO) to housekeepers": "Ofrecer salida temprano (VTO) a las camaristas",
     "Send the extra housekeepers to projects": "Mandar a proyectos a las camaristas que sobran",
-    # 12
-    "Should the lists go to HotSOS by themselves, without an inspector (RQS) or manager pressing Push?":
-        "¿Deben pasar las listas a HotSOS solas, sin que un inspector (RQS) o gerente presione Push?",
-    "Only on days a manager picks.": "Solo los días que elige un gerente.",
-    "Every day": "Todos los días",
-    "Weekends only": "Solo los fines de semana",
-    "Only if no inspector (RQS) or manager has pressed Push by a set time":
-        "Solo si ningún inspector (RQS) o gerente ha presionado Push a cierta hora",
-    "If by a set time, what time?": "Si es a cierta hora, ¿a qué hora?",
     # the page
     "Manager questions": "Preguntas para gerentes",
     "{n} quick questions about days that don't go to plan. Your answers teach the 5 AM run to do what you would do.":

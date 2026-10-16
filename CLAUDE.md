@@ -353,6 +353,14 @@ only "somebody is checking in here today". Dust n Vac rooms carry **no minutes a
 all**; `UNTIMED_MINUTES` is a stated guess and `summary()["untimed"]` counts the
 rooms it was applied to so the page can say the finish time is an estimate.
 
+**The morning's sheet goes to HotSOS by itself, every day** (Hari, 15 October:
+"if they want changes they can manually do it later"). `hotsos_auto_push` in
+app_settings holds `{"daily": true}`; `hotsos_agent.auto_push_due` queues one
+Push after 05:30 once the 5 AM build is done, skips it if somebody pushed
+first, and gives up at 9 AM. Its `days` list also carries a year of dates so
+an agent still running code from before the `daily` flag pushes too. Room
+changes after that are made by hand, in the app or in HotSOS.
+
 ## Forecasting a week from the bookings
 
 **Plan a week** used to seed its three numbers — labour minutes, checkouts,
