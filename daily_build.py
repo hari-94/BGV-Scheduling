@@ -234,6 +234,7 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         at.session_state["sched_day"] = iso          # weekend rules follow the day built
         generate.borrowed = []
         generate.released = []
+        generate.blocked, generate.blocked_kept = [], []
         generate.roles = {}
         generate.ds_auto = {}
 
@@ -256,6 +257,12 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         # read back for the sheet's notes.
         generate.borrowed = [tuple(x) for x in (at.session_state["borrowed"]
                                                 if "borrowed" in at.session_state else [])]
+        # Out of service (blocked_rooms): left off the plan, or kept because
+        # a guest arrives -- said on the sheet.
+        generate.blocked = [tuple(x) for x in (at.session_state["blocked"]
+                                               if "blocked" in at.session_state else [])]
+        generate.blocked_kept = [tuple(x) for x in (at.session_state["blocked_kept"]
+                                                    if "blocked_kept" in at.session_state else [])]
         # Borrowed, then not needed: their rooms fit the others' charts
         # (release_borrowed), so they stayed on their own duty.
         generate.released = [tuple(x) for x in (at.session_state["released"]
@@ -997,6 +1004,12 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
                 for n in frame.loc[mask, "Notes"]]
     note = ("Arrival Report included" if (arrival_text or "").strip()
             else "no Arrival Report yet")
+    _gone, _kept = getattr(generate, "blocked", []), getattr(generate, "blocked_kept", [])
+    if _gone:
+        import blocked_rooms
+        note += f" · out of service, not on this sheet: {blocked_rooms.describe(_gone)}"
+    if _kept:
+        note += " · blocked but a guest arrives, so on the sheet: " + ", ".join(r for r, _ in _kept)
     borrowed = getattr(generate, "borrowed", [])
     ds_auto = getattr(generate, "ds_auto", {}) or {}
     outcome = write_tab(workbook_path, day, frame, state, note=note, borrowed=borrowed,
@@ -1022,6 +1035,7 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
             "borrowed": [f"{n} ({duty})" for n, _, duty in borrowed],
             "borrowed_roles": [r for _, r, _ in borrowed],
             "released": [f"{n} ({duty})" for n, duty in getattr(generate, "released", [])],
+            "blocked": len(getattr(generate, "blocked", [])),
             "stretched": stretched, "vacant_charts": int(vacant),
             "rooms_without_rqs": int(no_rqs), "big_tab": big,
             "rqs_on_fc": [f"{label} ({name}) {len(rooms)} Full Clean rooms"

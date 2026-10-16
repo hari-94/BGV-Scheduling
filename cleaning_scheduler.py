@@ -5437,6 +5437,20 @@ if run:
         if True:
             try:
                 df = parse_rooms(raw_input)
+                # Rooms out of service (blocked_rooms: a deep-clean floor) come
+                # off before anything is planned -- no housekeeper, no inspector,
+                # no carpet or stripping, and never pushed to HotSOS. A blocked
+                # room with a guest arriving today stays on, and says so.
+                st.session_state["blocked"], st.session_state["blocked_kept"] = [], []
+                try:
+                    import blocked_rooms as _blk
+                    fresh.latest("blocked_rooms")
+                    df, _gone, _kept = _blk.drop(
+                        df, st.session_state.get("sched_day") or _today_iso(),
+                        arriving=lambda r: bool(str(r.get("ArrivingGuest", "") or "").strip()))
+                    st.session_state["blocked"], st.session_state["blocked_kept"] = _gone, _kept
+                except Exception as _ex:
+                    print(f"[app] blocked rooms not applied: {_ex}")
                 if df.empty:
                     _loader.empty()
                     st.error("No valid rows — check tab-separated data with a header row.")
@@ -5641,6 +5655,15 @@ if run:
                     if _bw:
                         st.info("Short of people — moved onto rooms from other duties: "
                                 + "; ".join(f"**{n}** ({r}, was {d})" for n, r, d in _bw))
+                    _bg = st.session_state.get("blocked") or []
+                    if _bg:
+                        import blocked_rooms as _blk
+                        st.info(f"Out of service, left off the plan (nobody cleans or inspects them): "
+                                f"{_blk.describe(_bg)} — " + ", ".join(r for r, _ in _bg))
+                    _bk = st.session_state.get("blocked_kept") or []
+                    if _bk:
+                        st.warning("Blocked, but a guest arrives today, so kept on the plan: "
+                                   + ", ".join(r for r, _ in _bk))
                     _rl = st.session_state.get("released") or []
                     if _rl:
                         st.info("Not needed after all — their rooms fit the others' charts, so they stay on their own duty: "
