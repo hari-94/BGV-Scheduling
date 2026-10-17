@@ -386,6 +386,15 @@ first, and gives up at 9 AM. Its `days` list also carries a year of dates so
 an agent still running code from before the `daily` flag pushes too. Room
 changes after that are made by hand, in the app or in HotSOS.
 
+**The app's charts follow HotSOS, but a room never changes service by
+moving** (`app_sync`, 17 October). Every two minutes the mirror reads who holds
+each room in HotSOS and moves the room to a chart of that person's. It used
+to fall back to *any* chart of theirs: HotSOS gave 1423A and 1524F, Full Cleans
+of 120 and 70, to David Serrano, whose only chart was RQS 2's Dust n Vac round,
+and the app showed them as Dust n Vac all day. A room now joins a chart of its
+own kind or gets a new one, and a non-Dust n Vac room found in the round is
+taken back out.
+
 **A second PC stands in when the office PC is off.** `hotsos_agent.py backup`
 (Task Scheduler "BGV HotSOS Backup" on Hari's PC, `run_backup_agent.bat`)
 answers Preview and Push only while the office heartbeat is over three minutes

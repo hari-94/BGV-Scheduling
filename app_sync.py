@@ -7,8 +7,9 @@ final sheet to HotSOS. Without this the phones (My Rooms) would still show
 the 5 AM charts. So the pushed plan is applied to today's stored schedule:
 
   * a chart whose rooms all went to one other person changes housekeeper;
-  * rooms that went somewhere else join a chart of that person (same service
-    first), or a new chart for them;
+  * rooms that went somewhere else join a chart of that person of the same
+    service, or a new chart for them -- never a chart of another service, so
+    a room keeps its Full Clean / Daily Service / Dust n Vac;
   * a chart left empty is dropped;
   * minutes, buildings and floors are recounted, and the inspectors list is
     rebuilt from the charts, as the Schedule page's own _save_reassignment does.
@@ -37,22 +38,41 @@ def from_hotsos(save=True):
     Every room HotSOS has a holder for is in the plan, the unchanged ones too:
     `apply` renames a chart only when all of its rooms went to one person, and
     a plan listing just the moved rooms would read as the whole chart moving.
-    The Dust n Vac round is RQS 2's and left alone."""
+    The Dust n Vac round is RQS 2's and its own rooms are left alone; a room
+    of another service that got into it (see `_kind`) is in the plan, so it
+    can come back out."""
     sched = db.load_full_schedule() or {}
     statuses = db.get_room_statuses() or {}
     plan = []
     for g in sched.get("groups_data") or []:
-        if g.get("dv_rqs2"):
-            continue
         for r in g.get("rooms") or []:
+            stray = _kind(g, r) != _kind(g)
+            if g.get("dv_rqs2") and not stray:
+                continue
             who = str((statuses.get(str(r.get("room", ""))) or {}).get("housekeeper") or "")
             if not who:
                 continue
             plan.append({"room": r.get("room"), "hotsos_name": who,
-                         "action": hs.ALREADY if who == g.get("housekeeper") else hs.MOVE})
+                         "action": hs.ALREADY if who == g.get("housekeeper") and not stray
+                         else hs.MOVE})
     if not any(l["action"] == hs.MOVE for l in plan):
         return {"changed": False, "renamed": [], "moved": [], "inspectors": []}
     return apply(plan, save=save)
+
+
+_SHORT = {"Full Clean": "FC", "Full Clean (IH)": "IH", "Daily Service": "DS", "Dust n Vac": "DV"}
+
+
+def _kind(g, r=None):
+    """The kind of chart a room belongs in: (service, Dust n Vac round,
+    set aside). Without `r`, the chart's own kind. RQS 2's Dust n Vac round
+    is built from the Dust n Vac rooms alone, so any other room in it was put
+    there by a move and belongs in a chart of its own service -- 1423A and
+    1524F, two Full Cleans, sat in it on 17 Oct."""
+    own = (g.get("service_type"), bool(g.get("dv_rqs2")), bool(g.get("verify_group")))
+    if r is not None and g.get("dv_rqs2") and r.get("service") and r.get("service") != g.get("service_type"):
+        return (r.get("service"), False, False)
+    return own
 
 
 def _recount(g):
@@ -61,6 +81,8 @@ def _recount(g):
     g["blds"] = sorted({r.get("bld") for r in rooms if r.get("bld") is not None})
     g["floors"] = sorted({r.get("floor") for r in rooms if r.get("floor") is not None})
     g["cross_bld"] = len(g["blds"]) > 1
+    g["c140"] = sum(1 for r in rooms if int(float(r.get("time") or 0)) == 140)
+    g["c120"] = sum(1 for r in rooms if int(float(r.get("time") or 0)) == 120)
 
 
 def apply(plan, save=True):
@@ -76,29 +98,44 @@ def apply(plan, save=True):
     fg = copy.deepcopy(sched["groups_data"])
 
     renamed, moved = [], []
-    # 1. A chart that went whole to one other person just changes hands.
+    # 1. A chart that went whole to one other person just changes hands --
+    #    judged on its own rooms, so a stray Full Clean in the Dust n Vac
+    #    round can't carry the round off to that room's housekeeper.
     for g in fg:
-        people = {target.get(r.get("room")) for r in g.get("rooms") or []} - {None}
+        people = {target.get(r.get("room")) for r in g.get("rooms") or []
+                  if _kind(g, r) == _kind(g)} - {None}
         if len(people) == 1:
             p = people.pop()
             if p != g.get("housekeeper"):
                 renamed.append((g["label"], g.get("housekeeper", ""), p))
                 g["housekeeper"] = p
     # 2. Rooms whose person differs from their chart's move to that person.
+    labels = {g.get("label") for g in fg}
     for g in fg:
         keep = []
         for r in g.get("rooms") or []:
             p = target.get(r.get("room"))
-            if not p or p == g.get("housekeeper"):
+            kind = _kind(g, r)
+            if not p or (p == g.get("housekeeper") and kind == _kind(g)):
                 keep.append(r)
                 continue
-            dest = next((x for x in fg if x.get("housekeeper") == p
-                         and x.get("service_type") == g.get("service_type")), None) \
-                or next((x for x in fg if x.get("housekeeper") == p), None)
+            # Only into a chart of the room's own kind. Falling back to any
+            # chart of theirs put 1423A and 1524F, Full Cleans of 120 and 70,
+            # into the Dust n Vac round on 17 Oct when HotSOS gave them to
+            # David Serrano (RQS 2, whose only chart that was), and the app
+            # showed them as Dust n Vac. Nothing of that kind -> a new chart.
+            dest = next((x for x in fg if x.get("housekeeper") == p and _kind(x) == kind), None)
             if dest is None:
-                dest = {k: v for k, v in g.items() if k not in ("rooms", "label")}
-                dest.update(label=f"{g.get('label', 'X')}·{p.split()[0]}", rooms=[],
-                            housekeeper=p,
+                if kind == _kind(g):
+                    dest = {k: v for k, v in g.items() if k not in ("rooms", "label")}
+                    label = f"{g.get('label', 'X')}·{p.split()[0]}"
+                else:                      # out of the Dust n Vac round
+                    dest = {"service_type": kind[0], "c140": 0, "c120": 0}
+                    label = f"{_SHORT.get(kind[0], 'X')}·{p.split()[0]}"
+                while label in labels:
+                    label += "'"
+                labels.add(label)
+                dest.update(label=label, rooms=[], housekeeper=p,
                             inspector=rqs_for.get(r.get("room")) or g.get("inspector", ""))
                 fg.append(dest)
             dest.setdefault("rooms", []).append(r)
