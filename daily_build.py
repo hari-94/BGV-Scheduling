@@ -238,6 +238,7 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         generate.roles = {}
         generate.ds_auto = {}
         generate.leftover = []
+        generate.swapped = []
 
         def run_generate():
             at.text_area(key="room_input").set_value(room_text)
@@ -273,6 +274,8 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         # Open rooms a manager gave to someone for the day (leftover_to).
         generate.leftover = [tuple(x) for x in (at.session_state["leftover_given"]
                                                 if "leftover_given" in at.session_state else [])]
+        generate.swapped = [tuple(x) for x in (at.session_state["swapped_insp"]
+                                               if "swapped_insp" in at.session_state else [])]
         generate.roles = {k: (at.session_state[k] if k in at.session_state else "")
                           for k in ("rqs1", "rqs2")}
         return fg
@@ -1014,6 +1017,8 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
         note += f" · out of service, not on this sheet: {blocked_rooms.describe(_gone)}"
     if _kept:
         note += " · blocked but a guest arrives, so on the sheet: " + ", ".join(r for r, _ in _kept)
+    for _a, _b in getattr(generate, "swapped", []):
+        note += f" · inspections swapped (manager's call): {_a} ⇄ {_b}"
     for _n, _rs in getattr(generate, "leftover", []):
         note += f" · left over, to {_n} (manager's call): {', '.join(_rs)}"
     borrowed = getattr(generate, "borrowed", [])

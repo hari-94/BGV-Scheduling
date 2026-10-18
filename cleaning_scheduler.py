@@ -4328,6 +4328,35 @@ def overflow_to_rqs12(groups, inspectors, rqs1, rqs2):
     return groups, inspectors
 
 
+def swap_inspectors(groups, inspectors, pairs):
+    """Two inspectors trade their Full Clean rounds for the day (borrow_off
+    "swap_inspectors"), as on 18 October: Mayra Benalcazar, RQS 1, had the 7
+    rooms nobody could inspect and Ana Caisa had 3 -- "swap those rooms
+    between Ana and Mayra". Only Full Clean rounds trade; anything else
+    either of them carries (RQS 2's round) stays. Both must have a Full
+    Clean round that day, or that pair is left alone. Returns (groups,
+    inspectors, [(a, b)] swapped)."""
+    done = []
+    for a, b in pairs:
+        ea = [e for e in inspectors if e.get("name") == a and e.get("role") == "FC"]
+        eb = [e for e in inspectors if e.get("name") == b and e.get("role") == "FC"]
+        if not ea or not eb:
+            continue
+        la = {l for e in ea for l in e.get("groups") or []}
+        lb = {l for e in eb for l in e.get("groups") or []}
+        for g in groups:
+            if g.get("label") in la and g.get("inspector") == a:
+                g["inspector"] = b
+            elif g.get("label") in lb and g.get("inspector") == b:
+                g["inspector"] = a
+        for e in ea:
+            e["name"] = b
+        for e in eb:
+            e["name"] = a
+        done.append((a, b))
+    return groups, inspectors, done
+
+
 def leftover_to(groups, names, cap=DS_CAP_WEEKEND):
     """Charts nobody could staff go to the people a manager named for the day
     (borrow_off "leftover_to"), as on 18 October: "the left over studio room
@@ -5692,6 +5721,11 @@ if run:
                         _day_rule = {}
                     if _day_rule.get("inspect_overflow") == "rqs12":
                         fg, inspectors = overflow_to_rqs12(fg, inspectors, rqs1, rqs2)
+                    # Two inspectors trade rounds (the manager's call for the day).
+                    st.session_state["swapped_insp"] = []
+                    if _day_rule.get("swap_inspectors"):
+                        fg, inspectors, st.session_state["swapped_insp"] = swap_inspectors(
+                            fg, inspectors, [tuple(p) for p in _day_rule["swap_inspectors"]])
                     # Rooms still open, and the manager named who takes them.
                     st.session_state["leftover_given"] = []
                     if _day_rule.get("leftover_to"):
@@ -5742,6 +5776,9 @@ if run:
                     if _bw:
                         st.info("Short of people — moved onto rooms from other duties: "
                                 + "; ".join(f"**{n}** ({r}, was {d})" for n, r, d in _bw))
+                    for _a, _b in st.session_state.get("swapped_insp") or []:
+                        st.info(f"Inspections swapped (the manager's call for the day): "
+                                f"**{_a}** ⇄ **{_b}**")
                     for _n, _rs in st.session_state.get("leftover_given") or []:
                         st.info(f"Left over, given to **{_n}** (the manager's call for the day): "
                                 + ", ".join(_rs))
