@@ -237,6 +237,341 @@ def _built(sync_token, roster_token, names_token, _weeks, _ov, _fixes, _aliases)
     return res
 
 
+# ── Timing: when each room was marked in HotSOS (report_timing) ──────────────
+# Its own tab, HP 18 Oct: "so we know if someone is not marking in timely
+# manner". It reads the HotSOS mirror, not the sheet, so it needs no sync.
+import report_timing as rtm           # noqa: E402
+if getattr(rtm, "VERSION", 0) < 1:
+    import importlib
+    rtm = importlib.reload(rtm)
+
+TM_INK, TM_BLUE, TM_AMBER, TM_RED, TM_GREEN, TM_GREY = (
+    "#16202e", "#3b82d6", "#d97706", "#c2452f", "#2f855a", "#9aa5b4")
+
+
+@st.cache_data(ttl=120, max_entries=12, show_spinner="Reading the HotSOS marks…")
+def _tm_marks(start_iso, end_iso):
+    return rtm.load(db, _dt.date.fromisoformat(start_iso), _dt.date.fromisoformat(end_iso))
+
+
+def _tm_axis(fig, lo, hi, now_min=None):
+    """A time-of-day x axis, an hour a tick, with 10:00 and 3:30 marked."""
+    ticks = list(range(int(lo // 60) * 60, int(hi) + 60, 60))
+    for m in (600, 930):                  # carts roll; the floor done
+        if lo <= m <= hi:
+            fig.add_vline(x=m, line_dash="dash", line_color=TM_GREY, line_width=1.2)
+    if now_min is not None and lo <= now_min <= hi:
+        fig.add_vline(x=now_min, line_color=TM_RED, line_width=1.6, annotation_text="now",
+                      annotation_position="top", annotation_font=dict(size=10, color=TM_RED))
+    fig.update_xaxes(range=[lo, hi], tickvals=ticks, side="top",
+                     ticktext=[rtm._clock(t) for t in ticks],
+                     showgrid=True, gridcolor="rgba(128,138,150,.20)", zeroline=False)
+
+
+def _tm_layout(fig, n_rows):
+    fig.update_layout(
+        barmode="overlay", bargap=.35, height=max(260, n_rows * 30 + 110),
+        margin=dict(l=0, r=16, t=40, b=8),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="DM Sans", size=11, color=TM_INK),
+        legend=dict(orientation="h", yanchor="top", y=-0.02, xanchor="left", x=0,
+                    font=dict(size=11)),
+        hoverlabel=dict(bgcolor=TM_INK, font_color="#fff", bordercolor=TM_INK))
+    fig.update_yaxes(autorange="reversed", showgrid=False, ticklen=0, automargin=True,
+                     tickfont=dict(family="DM Sans", size=13, color=TM_INK))
+
+
+def _tm_hk_chart(recs, people, now):
+    """One row per housekeeper: a bar from each room's start to its done."""
+    import plotly.graph_objects as go
+    order = [p["name"] for p in sorted(people, key=lambda p: (p["first"] is None, p["first"] or now))]
+    xs = [x for x in recs if x["hk"] in order]
+    today = now.date().isoformat()
+    m = rtm._mins
+
+    def bars(sel, name, colour, end_of=lambda x: m(x["done"])):
+        sel = [x for x in sel if x["start"]]
+        if not sel:
+            return
+        fig.add_trace(go.Bar(
+            y=[x["hk"] for x in sel], x=[max(end_of(x) - m(x["start"]), 1) for x in sel],
+            base=[m(x["start"]) for x in sel], orientation="h", name=name,
+            marker=dict(color=colour, line=dict(color="#ffffff", width=1)),
+            text=[x["room"] for x in sel], textposition="inside", insidetextanchor="middle",
+            textfont=dict(size=9, color="#ffffff"), constraintext="inside",
+            customdata=[[x["room"], x["service"] or "?", x["std"], rtm._hhmm(x["start"]),
+                         rtm._hhmm(x["done"]) or "not yet", x["dur"] if x["dur"] is not None else "–",
+                         x["rqs"] or "–", rtm._hhmm(x["inspected"]) or "not yet"] for x in sel],
+            hovertemplate="<b>%{customdata[0]}</b> · %{customdata[1]} · %{customdata[2]} min<br>"
+                          "started %{customdata[3]} · done %{customdata[4]} "
+                          "(%{customdata[5]} min)<br>RQS %{customdata[6]} · inspected "
+                          "%{customdata[7]}<extra></extra>"))
+
+    fig = go.Figure()
+    bars([x for x in xs if x["done"] and not x["together"] and not x["left_open"]],
+         "Cleaning: start → done", TM_BLUE)
+    bars([x for x in xs if x["left_open"]], "Left open: done tapped long after", TM_AMBER)
+    bars([x for x in xs if x["start"] and not x["done"] and not x["inspected"]
+          and x["date"] == today], "In progress", "#a9c8ee", end_of=lambda x: m(now))
+    tog = [x for x in xs if x["together"]]
+    if tog:
+        fig.add_trace(go.Scatter(
+            y=[x["hk"] for x in tog], x=[m(x["done"]) for x in tog], mode="markers",
+            name="Marked together: start and done at once",
+            marker=dict(symbol="x-thin", size=12, color=TM_RED, line=dict(width=2.4, color=TM_RED)),
+            customdata=[[x["room"], x["service"] or "?", x["std"], rtm._hhmm(x["done"])] for x in tog],
+            hovertemplate="<b>%{customdata[0]}</b> · %{customdata[1]} · %{customdata[2]} min<br>"
+                          "start and done both at %{customdata[3]}<extra></extra>"))
+    nod = [x for x in xs if x["no_done"]]
+    if nod:
+        fig.add_trace(go.Scatter(
+            y=[x["hk"] for x in nod], x=[m(x["inspected"]) for x in nod], mode="markers",
+            name="Inspected with no done mark",
+            marker=dict(symbol="circle-open", size=10, color=TM_INK, line=dict(width=2)),
+            customdata=[[x["room"], rtm._hhmm(x["inspected"]), x["rqs"] or "–"] for x in nod],
+            hovertemplate="<b>%{customdata[0]}</b> · never marked done<br>inspected "
+                          "%{customdata[1]} by %{customdata[2]}<extra></extra>"))
+    # The housekeepers' own marks set the span; an inspection at 7pm would
+    # squash their day into the left half.
+    times = [m(t) for x in xs for t in (x["start"], x["done"]) if t] +             [m(x["inspected"]) for x in nod]
+    if not times:
+        return None
+    now_min = m(now) if any(x["date"] == today for x in xs) else None
+    hi = max(times + ([now_min] if now_min else []))
+    _tm_axis(fig, min(times + [600]) - 15, hi + 15, now_min)
+    fig.update_yaxes(categoryorder="array", categoryarray=order)
+    _tm_layout(fig, len(order))
+    return fig
+
+
+def _tm_rqs_chart(recs, people):
+    """One row per RQS: a dot per room at how long it waited, done to inspected."""
+    import plotly.graph_objects as go
+    order = [p["name"] for p in people]
+    xs = [x for x in recs if x["rqs"] in order]
+    fig = go.Figure()
+    for lo, hi, name, colour in ((None, rtm.WAIT_SOON, f"Within {rtm.WAIT_SOON} min", TM_GREEN),
+                                 (rtm.WAIT_SOON, rtm.WAIT_LATE,
+                                  f"{rtm.WAIT_SOON}–{rtm.WAIT_LATE} min", TM_AMBER),
+                                 (rtm.WAIT_LATE, None, f"Over {rtm.WAIT_LATE} min", TM_RED)):
+        sel = [x for x in xs if x["wait"] is not None and (lo is None or x["wait"] > lo)
+               and (hi is None or x["wait"] <= hi)]
+        if not sel:
+            continue
+        fig.add_trace(go.Scatter(
+            y=[x["rqs"] for x in sel], x=[x["wait"] for x in sel], mode="markers", name=name,
+            marker=dict(size=10, color=colour, opacity=.85, line=dict(color="#ffffff", width=1.5)),
+            customdata=[[x["room"], x["hk"] or "–", rtm._hhmm(x["done"]), rtm._hhmm(x["inspected"]),
+                         x["wait"], x["date"]] for x in sel],
+            hovertemplate="<b>%{customdata[0]}</b> · %{customdata[5]}<br>%{customdata[1]} done "
+                          "%{customdata[2]} · inspected %{customdata[3]}<br>"
+                          "<b>waited %{customdata[4]} min</b><extra></extra>"))
+    still = [x for x in xs if x["waiting"] is not None]
+    if still:
+        fig.add_trace(go.Scatter(
+            y=[x["rqs"] for x in still], x=[x["waiting"] for x in still], mode="markers",
+            name="Done, still waiting now",
+            marker=dict(symbol="circle-open", size=11, color=TM_RED, line=dict(width=2.2)),
+            customdata=[[x["room"], x["hk"] or "–", rtm._hhmm(x["done"]), x["waiting"]] for x in still],
+            hovertemplate="<b>%{customdata[0]}</b> · %{customdata[1]} done %{customdata[2]}<br>"
+                          "<b>waiting %{customdata[3]} min so far</b><extra></extra>"))
+    med = [p for p in people if p["median"] is not None]
+    if med:
+        fig.add_trace(go.Scatter(
+            y=[p["name"] for p in med], x=[p["median"] for p in med], mode="markers",
+            name="Median wait", marker=dict(symbol="line-ns", size=22, color=TM_INK,
+                                            line=dict(width=3, color=TM_INK)),
+            hovertemplate="%{y}: median %{x} min<extra></extra>"))
+    waits = [x["wait"] for x in xs if x["wait"] is not None] + [x["waiting"] for x in still]
+    if not waits:
+        return None
+    for v in (rtm.WAIT_SOON, rtm.WAIT_LATE):
+        fig.add_vline(x=v, line_dash="dash", line_color=TM_GREY, line_width=1.2)
+    fig.update_xaxes(range=[-5, max(waits + [rtm.WAIT_LATE]) + 10], side="top", dtick=30,
+                     title=dict(text="minutes from done to inspected", font=dict(size=11)),
+                     showgrid=True, gridcolor="rgba(128,138,150,.20)", zeroline=False)
+    fig.update_yaxes(categoryorder="array", categoryarray=order)
+    _tm_layout(fig, len(order))
+    return fig
+
+
+TM_CSS = """<style>
+.tm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin:12px 0 10px}
+.tm-k{background:#f7f9fc;border:1px solid #e6e9ee;border-radius:12px;padding:9px 12px}
+.tm-k .kt{font-size:.68rem;font-weight:700;color:#5b6675;text-transform:uppercase;letter-spacing:.05em}
+.tm-k .kv{font-size:1.3rem;font-weight:800;color:#16202e;margin:2px 0;font-variant-numeric:tabular-nums}
+.tm-k .kv small{font-size:.72rem;font-weight:600;color:#5b6675;margin-left:5px}
+.tm-k .kl{font-size:.74rem;color:#3b4554;line-height:1.45}
+.tm-note{font-size:.76rem;color:#5b6675;margin:-6px 2px 10px}
+</style>"""
+
+
+def timing_tab():
+    st.markdown(TM_CSS, unsafe_allow_html=True)
+    st.markdown('<div class="rp-h1">⏱️ Timing</div><div class="rp-src">When each room was '
+                'started, marked done and inspected, from <b>HotSOS</b> — the app copies its '
+                'marks every two minutes, from 9 October · the RQS is the one on the app\'s '
+                'chart</div>', unsafe_allow_html=True)
+    today = clock.today()
+    c1, c2, c3 = st.columns([2.3, 2.2, 2.2], vertical_alignment="bottom")
+    with c1:
+        mode = st.segmented_control("Period", ["Day", "Last 7 days", "Date range"],
+                                    default="Day", key="tm_mode") or "Day"
+    with c2:
+        if mode == "Day":
+            start = end = st.date_input("Day", value=today, min_value=rtm.SINCE,
+                                        max_value=today, key="tm_day", format="MM/DD/YYYY")
+        elif mode == "Last 7 days":
+            start, end = today - _dt.timedelta(days=6), today
+            st.markdown(f'<div class="rp-src">{start:%b} {start.day} – {end:%b} {end.day}</div>',
+                        unsafe_allow_html=True)
+        else:
+            rng = st.date_input("From – to", value=(today - _dt.timedelta(days=6), today),
+                                min_value=rtm.SINCE, max_value=today, key="tm_rng",
+                                format="MM/DD/YYYY")
+            rng = rng if isinstance(rng, (list, tuple)) else (rng,)
+            start, end = (rng[0], rng[-1]) if rng else (today, today)
+    with c3:
+        who = st.segmented_control("Show", ["Both", "RQS", "Housekeepers"], default="Both",
+                                   key="tm_team") or "Both"
+    rows, plan = _tm_marks(start.isoformat(), end.isoformat())
+    now = clock.now()
+    recs = rtm.rooms(rows, plan, now)
+    one = start == end
+    span = f"{start:%a %b} {start.day}" if one else f"{start:%b} {start.day} – {end:%b} {end.day}"
+    if not recs:
+        st.info(f"No HotSOS marks for {span}.")
+        return
+    hks, rqs = rtm.housekeepers(recs), rtm.inspectors(recs)
+
+    timed = [x for x in recs if x["std"] > 0 and "dust" not in x["service"].lower()]
+    n_tog = sum(1 for x in recs if x["together"])
+    waits = [x["wait"] for x in recs if x["wait"] is not None]
+    still = [x for x in recs if x["waiting"] is not None]
+    firsts = [p["first_avg"] for p in hks if p["first_avg"] is not None]
+    late_firsts = sum(p["late_starts"] for p in hks)
+    import statistics as _stats
+    cards = [
+        ("Rooms marked done", f"{sum(1 for x in recs if x['done'] or x['inspected'])}"
+                              f"<small>of {len(recs)}</small>", span),
+        ("First start", rtm._clock(_stats.median(firsts)) if firsts else "–",
+         f"median housekeeper · {late_firsts} after {rtm._hhmm(_dt.datetime.combine(today, rtm.FIRST_START_LATE))}"),
+        ("Marked together", f"{n_tog}<small>{round(100 * n_tog / len(timed)) if timed else 0}%</small>",
+         f"start and done within {rtm.TOGETHER_MIN} min — marked after the fact"),
+        ("Wait for RQS", f"{round(_stats.median(waits)) if waits else '–'}<small>min median</small>",
+         f"{sum(1 for w in waits if w > rtm.WAIT_LATE)} rooms waited over {rtm.WAIT_LATE} min"),
+    ]
+    if still:
+        cards.append(("Waiting now", f"{len(still)}<small>rooms</small>",
+                      f"done, not inspected · longest {max(x['waiting'] for x in still)} min"))
+    st.markdown('<div class="tm-cards">' + "".join(
+        f'<div class="tm-k"><div class="kt">{e(t)}</div><div class="kv">{v}</div>'
+        f'<div class="kl">{e(s)}</div></div>' for t, v, s in cards) + "</div>",
+        unsafe_allow_html=True)
+
+    import pandas as pd
+    if who in ("Both", "Housekeepers"):
+        st.markdown(f"#### 🧹 Housekeepers · {span}")
+        if one:
+            fig = _tm_hk_chart(recs, hks, now)
+            if fig is not None:
+                st.plotly_chart(fig, width="stretch", config={"displayModeBar": False},
+                                key="tm_hk_fig")
+                st.markdown('<div class="tm-note">Dashed lines: carts roll at 10:00, the floor '
+                            'done by 3:30. Hover a bar or a mark for the room.</div>',
+                            unsafe_allow_html=True)
+        hk_df = pd.DataFrame([{
+            "Housekeeper": p["name"],
+            **({"Days": p["days"]} if not one else {}),
+            "Rooms": p["rooms"], "Done": p["done"],
+            "First start": (rtm._hhmm(p["first"]) if one else rtm._clock(p["first_avg"]))
+                           + (" ⚠" if p["late_starts"] else ""),
+            **({"Late starts": p["late_starts"]} if not one else {"Last done": rtm._hhmm(p["last"])}),
+            "Marked together": p["together"],
+            "Together %": round(100 * p["together"] / p["timed"]) if p["timed"] else 0,
+            "Left open": p["left_open"], "No done mark": p["no_done"],
+            "Pace": round(100 * p["pace"]) if p["pace"] is not None else None,
+        } for p in hks])
+        st.dataframe(hk_df, hide_index=True, width="stretch", key="tm_hk_tab",
+                     column_config={
+                         "Together %": st.column_config.ProgressColumn(
+                             "Together %", min_value=0, max_value=100, format="%d%%",
+                             help="Share of their timed rooms marked start and done at once"),
+                         "Pace": st.column_config.NumberColumn(
+                             "Pace", format="%d%%",
+                             help="Median minutes from start to done as a share of the room's "
+                                  "minutes on the sheet (marked-together rooms left out)"),
+                         "First start": st.column_config.TextColumn(
+                             help=f"⚠ = after {rtm._hhmm(_dt.datetime.combine(today, rtm.FIRST_START_LATE))}"
+                                  + ("" if one else " on at least one day; the time is their average")),
+                         "Left open": st.column_config.NumberColumn(
+                             help=f"Done pressed more than {rtm.LONG_OPEN:g}× the room's minutes "
+                                  "after start"),
+                         "No done mark": st.column_config.NumberColumn(
+                             help="Inspected, but never marked done in HotSOS"),
+                     })
+    if who in ("Both", "RQS"):
+        st.markdown(f"#### 🔍 RQS · {span}")
+        fig = _tm_rqs_chart(recs, rqs)
+        if fig is not None:
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False},
+                            key="tm_rqs_fig")
+        rq_df = pd.DataFrame([{
+            "RQS": p["name"], **({"Days": p["days"]} if not one else {}),
+            "Rooms done": p["ready"], "Inspected": p["inspected"],
+            "Median wait": p["median"], "Longest": p["longest"],
+            f"Over {rtm.WAIT_LATE} min": p["late"],
+            **({"Waiting now": p["waiting"]} if still else {}),
+            **({"Last inspection": rtm._hhmm(p["last"])} if one else {}),
+        } for p in rqs])
+        st.dataframe(rq_df, hide_index=True, width="stretch", key="tm_rq_tab",
+                     column_config={
+                         "Median wait": st.column_config.NumberColumn(
+                             format="%d min", help="Minutes from the housekeeper's done to inspected"),
+                         "Longest": st.column_config.NumberColumn(format="%d min"),
+                         "Rooms done": st.column_config.NumberColumn(
+                             help="Their rooms marked done (or inspected) by a housekeeper"),
+                     })
+
+    with st.expander(f"Every room · {span} ({len(recs)})"):
+        flags = lambda x: " · ".join(f for f, on in (
+            ("marked together", x["together"]), ("left open", x["left_open"]),
+            ("no done mark", x["no_done"]),
+            (f"waited {x['wait']} min", x["wait"] is not None and x["wait"] > rtm.WAIT_LATE),
+            (f"waiting {x['waiting']} min", x["waiting"] is not None)) if on)
+        st.dataframe(pd.DataFrame([{
+            "Day": x["date"], "Room": x["room"], "Service": x["service"], "Minutes": x["std"] or None,
+            "Housekeeper": x["hk"], "Started": rtm._hhmm(x["start"]), "Done": rtm._hhmm(x["done"]),
+            "Took": x["dur"], "RQS": x["rqs"], "Inspected": rtm._hhmm(x["inspected"]),
+            "Waited": x["wait"], "Flags": flags(x)} for x in sorted(
+                recs, key=lambda x: (x["date"], x["hk"], x["start"] or now))]),
+            hide_index=True, width="stretch", key="tm_all_tab",
+            column_config={"Took": st.column_config.NumberColumn(format="%d min"),
+                           "Waited": st.column_config.NumberColumn(format="%d min")})
+    with st.expander("How these are measured"):
+        st.markdown(
+            f"- **Started / done** are HotSOS's own times, off each housekeeper's timeline.\n"
+            f"- **Inspected** is when the app first saw the room inspected in HotSOS — HotSOS "
+            f"keeps no time for it — so it is right to about two minutes.\n"
+            f"- **Marked together**: start and done pressed within {rtm.TOGETHER_MIN} minutes of "
+            f"each other on a room with minutes on the sheet. The room was cleaned, then marked, "
+            f"so its real start and finish aren't known.\n"
+            f"- **Left open**: done pressed more than {rtm.LONG_OPEN:g} times the room's minutes "
+            f"after its start — usually the done tap came late.\n"
+            f"- **First start ⚠**: the day's first room started after "
+            f"{rtm._hhmm(_dt.datetime.combine(today, rtm.FIRST_START_LATE))} (carts roll at 10).\n"
+            f"- **Wait for RQS**: from the housekeeper's done to inspected. The RQS is the one on "
+            f"the app's chart; HotSOS doesn't record who inspected.\n"
+            f"- Dust n Vac rooms have no minutes, so they aren't judged for marking. Only rooms on "
+            f"the app's charts are copied from HotSOS, and a day the office PC was off has gaps.")
+
+
+view = st.segmented_control("View", ["📋 Rooms", "⏱️ Timing"], default="📋 Rooms",
+                            key="rp_view", label_visibility="collapsed")
+if view == "⏱️ Timing":
+    timing_tab()
+    st.stop()
+
 sync = db._load_key(rd.SYNC_KEY) or {}
 req = db._load_key(rd.REQUEST_KEY) or {}
 fixes = db._load_key(rd.NAMES_KEY) or {}
