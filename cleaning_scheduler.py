@@ -4328,6 +4328,31 @@ def overflow_to_rqs12(groups, inspectors, rqs1, rqs2):
     return groups, inspectors
 
 
+def leftover_to(groups, names, cap=DS_CAP_WEEKEND):
+    """Charts nobody could staff go to the people a manager named for the day
+    (borrow_off "leftover_to"), as on 18 October: "the left over studio room
+    can be assigned to Adrian" -- 2432B, 70 minutes, beside his Daily Service.
+    Smallest open chart first, each to whichever named person is lightest, as
+    long as their day stays within `cap`; what doesn't fit stays open. Only
+    someone already on rooms that day takes any. Returns (groups, [(name,
+    [rooms])])."""
+    def day(n):
+        return sum(int(g.get("time") or 0) for g in groups
+                   if g.get("housekeeper") == n and not g.get("verify_group"))
+    who = [n for n in names if any(g.get("housekeeper") == n for g in groups)]
+    given = []
+    open_ = [g for g in groups if not g.get("verify_group") and not g.get("dv_rqs2")
+             and str(g.get("housekeeper") or "").startswith((NO_HK_LABEL, NEED_HK_PREFIX))]
+    for g in sorted(open_, key=lambda g: int(g.get("time") or 0)):
+        fits = [n for n in who if day(n) + int(g.get("time") or 0) <= cap]
+        if not fits:
+            continue
+        n = min(fits, key=day)
+        g["housekeeper"] = n
+        given.append((n, [str(r.get("room")) for r in g.get("rooms") or []]))
+    return groups, given
+
+
 def release_borrowed(groups, names, roster):
     """Give back anyone pulled off another duty whom the day turns out not to need.
 
@@ -5667,6 +5692,12 @@ if run:
                         _day_rule = {}
                     if _day_rule.get("inspect_overflow") == "rqs12":
                         fg, inspectors = overflow_to_rqs12(fg, inspectors, rqs1, rqs2)
+                    # Rooms still open, and the manager named who takes them.
+                    st.session_state["leftover_given"] = []
+                    if _day_rule.get("leftover_to"):
+                        fg, st.session_state["leftover_given"] = leftover_to(
+                            fg, list(_day_rule["leftover_to"]))
+                        used_hk_set = set(used_hk_set) | {n for n, _ in st.session_state["leftover_given"]}
                     # Report only the picks that still hold Daily Service once
                     # everything is staffed: a 40-minute leftover round is given
                     # up for a bigger chart by staff_biggest_first.
@@ -5711,6 +5742,9 @@ if run:
                     if _bw:
                         st.info("Short of people — moved onto rooms from other duties: "
                                 + "; ".join(f"**{n}** ({r}, was {d})" for n, r, d in _bw))
+                    for _n, _rs in st.session_state.get("leftover_given") or []:
+                        st.info(f"Left over, given to **{_n}** (the manager's call for the day): "
+                                + ", ".join(_rs))
                     _bg = st.session_state.get("blocked") or []
                     if _bg:
                         import blocked_rooms as _blk
