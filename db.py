@@ -633,7 +633,7 @@ def login_summary(limit: int = 1000) -> list:
 # ════════════════════════════════════════════════════════════════════════════
 #  USER MANAGEMENT
 # ════════════════════════════════════════════════════════════════════════════
-ROLES = ["admin", "rqs", "housekeeper"]
+ROLES = ["admin", "rqs", "housekeeper", "houseperson"]
 
 def _hash_pw(password: str, salt: str = "") -> str:
     if not salt:

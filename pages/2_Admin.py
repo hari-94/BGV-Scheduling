@@ -197,8 +197,8 @@ with tab_users:
             _t_txt="#e2e8f0"; _t_txt2="#94a3b8"; _t_th_bg="rgba(99,102,241,.06)"; _t_th_tx="#475569"
             _t_card_bg="rgba(13,13,26,.9)"; _t_card_br="rgba(99,102,241,.18)"; _t_row_br="rgba(99,102,241,.08)"
             _t_sh="0 8px 32px rgba(0,0,0,.35)"
-        ROLE_COL = {"admin":"#a78bfa","rqs":"#5eead4","housekeeper":"#93c5fd"} if not _THEME.endswith("light") else {"admin":"#7C3AED","rqs":"#0D9488","housekeeper":"#2563EB"}
-        ROLE_BG  = {"admin":"rgba(167,139,250,.15)","rqs":"rgba(20,184,166,.15)","housekeeper":"rgba(37,99,235,.15)"} if not _THEME.endswith("light") else {"admin":"#F5F3FF","rqs":"#ECFDF5","housekeeper":"#EFF6FF"}
+        ROLE_COL = {"admin":"#a78bfa","rqs":"#5eead4","housekeeper":"#93c5fd","houseperson":"#fcd34d"} if not _THEME.endswith("light") else {"admin":"#7C3AED","rqs":"#0D9488","housekeeper":"#2563EB","houseperson":"#B45309"}
+        ROLE_BG  = {"admin":"rgba(167,139,250,.15)","rqs":"rgba(20,184,166,.15)","housekeeper":"rgba(37,99,235,.15)","houseperson":"rgba(245,158,11,.15)"} if not _THEME.endswith("light") else {"admin":"#F5F3FF","rqs":"#ECFDF5","housekeeper":"#EFF6FF","houseperson":"#FFFBEB"}
         rows_html = ""
         for u in users:
             role = u.get("role","")
@@ -383,7 +383,7 @@ with tab_activity:
         _last = summary[0]["last_ts"] if summary else ""
         c3.metric("Most recent", _ago(_last) or "—")
 
-        ROLE_LBL = {"admin":"Admin","rqs":"RQS","housekeeper":"Housekeeper"}
+        ROLE_LBL = {"admin":"Admin","rqs":"RQS","housekeeper":"Housekeeper","houseperson":"Houseperson"}
 
         # Per-user rollup
         st.markdown('<p class="sec"style="margin-top:1.2rem">By Person</p>', unsafe_allow_html=True)

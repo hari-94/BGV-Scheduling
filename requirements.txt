@@ -4,6 +4,7 @@
 streamlit==1.62.0
 # A change here restarts the Cloud app. db.py changes reach a running app only
 # on a restart (CLAUDE.md: a deploy does not reload an imported module).
+# Last bumped 21 Oct for the houseperson role (auth.py, db.ROLES).
 # streamlit installs `watchdog` and its file watcher imports it: no module in
 # this repo may be called watchdog.py (it was, until 15 Oct -- see agent_watch.py).
 pandas>=2.0.0

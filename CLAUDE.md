@@ -175,9 +175,10 @@ Schedule page's download both fill the sheet's Carpet and Stripping columns.
 
 **The housepersons mark their own carpet and stripping rooms** (`duties.py`,
 HP 16 October). The 5 AM build keeps the same Carpet / Stripping assignment as
-`duties_<date>` (published days only, never a preview). A houseperson -- an
-ordinary housekeeper-role account, e.g. `josez`, display name "Jose Zendejas"
--- opens My Rooms and sees only those rooms, each Not started / Done, with
+`duties_<date>` (published days only, never a preview). A houseperson -- a
+`houseperson`-role account (HP 21 Oct; housekeeper-role until then), e.g.
+`josez`, display name "Jose Zendejas", with a housekeeper's permissions and
+`auth.is_housekeeper()` true -- opens My Rooms and sees only those rooms, each Not started / Done, with
 Reset to take a tap back; each person's marks are their own row,
 `dutydone_<date>_<username>`. RQS and managers get a read-only list under the
 My Rooms header. A houseperson with nothing that day is told so instead of

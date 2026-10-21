@@ -26,6 +26,7 @@ STRINGS = {
     "role.admin":         ("Admin", "Administrador"),
     "role.rqs":           ("RQS", "RQS"),
     "role.housekeeper":   ("Housekeeper", "Camarista"),
+    "role.houseperson":   ("Houseperson", "Houseperson"),
 
     # ── My Rooms ─────────────────────────────────────────────────────────
     "rooms.title":        ("My Rooms", "Mis Cuartos"),

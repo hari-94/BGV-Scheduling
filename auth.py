@@ -5,6 +5,9 @@ Roles:
   admin       → full access: generate, manage users, view all
   rqs         → generate schedules, view all groups/HKs/inspectors
   housekeeper → view-only: sees ONLY their own group assignments
+  houseperson → the same phone-only access as a housekeeper; My Rooms shows
+                their carpet and stripping rooms (duties.py). Its own role so
+                the Admin page and the menu say what they are (HP, 21 Oct)
 """
 import streamlit as st
 
@@ -43,11 +46,14 @@ ROLE_PERMISSIONS = {
         "can_delete_data":   False,
     },
 }
+# A houseperson sees what a housekeeper sees: their own day, nothing to edit.
+ROLE_PERMISSIONS["houseperson"] = dict(ROLE_PERMISSIONS["housekeeper"])
 
 ROLE_COLORS = {
     "admin":        ("#7C3AED", "#F5F3FF"),
     "rqs":          ("#0D9488", "#ECFDF5"),
     "housekeeper":  ("#2563EB", "#EFF6FF"),
+    "houseperson":  ("#B45309", "#FFFBEB"),
 }
 
 # Positive welcome messages per role
@@ -68,6 +74,11 @@ WELCOME_MESSAGES = {
         "Every room you touch is a gift to our guests! ✨",
         "You make BGV Peak 8 shine — have a great day! 🌞",
         "Your dedication makes the difference — we see you! 🙌",
+    ],
+    "houseperson": [
+        "Fresh carpets and ready rooms start with you! 🌟",
+        "You keep the whole floor moving — thank you! 💪",
+        "Every room you prepare makes the day easier for everyone! ✨",
     ],
 }
 
@@ -141,7 +152,11 @@ def require_login():
         st.stop()
 
 def is_housekeeper() -> bool:
-    return st.session_state.get("role","") == "housekeeper"
+    """The phone-only view: housekeepers, and housepersons, who see the same."""
+    return st.session_state.get("role","") in ("housekeeper", "houseperson")
+
+def is_houseperson() -> bool:
+    return st.session_state.get("role","") == "houseperson"
 
 def my_display_name() -> str:
     return st.session_state.get("display_name","") or st.session_state.get("username","")

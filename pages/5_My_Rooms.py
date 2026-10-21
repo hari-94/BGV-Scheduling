@@ -440,8 +440,9 @@ if _dme:
                     st.rerun()
     if mine is None:
         st.stop()
-elif mine is None and st.session_state.get("role", "") == "housekeeper" \
-        and assignments.match_name(_housepersons(_dday), me_display, me_user):
+elif mine is None and (st.session_state.get("role", "") == "houseperson"
+                       or (st.session_state.get("role", "") == "housekeeper"
+                           and assignments.match_name(_housepersons(_dday), me_display, me_user))):
     # A houseperson with no carpet or stripping today: say so, rather than
     # asking them to pick a housekeeper's name.
     st.markdown(f'<div class="mrcard"><div class="mrroom">{e(T("duty.none"))}</div>'
@@ -463,7 +464,7 @@ _insp_names = sorted({g.get("inspector", "") for g in charts
 # A housekeeper sees their own rooms and nobody else's (HP, 16 October), so a
 # housekeeper account is never treated as an inspector with a team, whatever
 # its name happens to match.
-my_insp = (None if role == "housekeeper"
+my_insp = (None if role in ("housekeeper", "houseperson")
            else assignments.match_name(_insp_names, me_display, me_user))
 
 # A manager who is also on the floor today -- inspecting a team, or with rooms

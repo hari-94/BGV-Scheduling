@@ -295,7 +295,7 @@ def _visible(perm) -> bool:
     if perm != "_my_rooms":
         return auth.can(perm)
     role = st.session_state.get("role", "")
-    if role in ("housekeeper", "admin"):
+    if role in ("housekeeper", "houseperson", "admin"):
         return True
     try:
         import assignments
