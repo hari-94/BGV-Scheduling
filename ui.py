@@ -343,6 +343,15 @@ def topnav(active: str = "", hide_sidebar: bool = True):
             session.ensure_cookie()
         except Exception as ex:
             print(f"[ui] could not refresh the session cookie: {ex}")
+    # The Android app draws its own tabs: no menu, phone margins, and only the
+    # pages it has a tab for (appmode.py).
+    import appmode
+    if appmode.active():
+        appmode.chrome()
+        appmode.links()
+        appmode.guard(active)
+        return
+
     items = [it for it in NAV_ITEMS if _visible(it[3])]
     who = st.session_state.get("display_name") or st.session_state.get("username", "")
     role_key = f'role.{st.session_state.get("role", "")}'

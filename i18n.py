@@ -97,6 +97,8 @@ STRINGS = {
     "nav.report":         ("Report", "Informe"),
     "nav.questions":      ("Questions", "Preguntas"),
     "nav.profile":        ("Profile", "Mi perfil"),
+    "app.website_only":   ("This page is on the website. The app has My Home, My Rooms and Profile.",
+                           "Esta página está en el sitio web. La app tiene Mi Inicio, Mis Cuartos y Mi perfil."),
     "profile.hello":      ("Signed in as", "Sesión iniciada como"),
     "profile.change_pw":  ("Change your password", "Cambia tu contraseña"),
     "profile.rule":       ("At least {n} characters. Only you can change it — "

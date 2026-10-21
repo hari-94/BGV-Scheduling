@@ -1372,6 +1372,14 @@ auth.init_auth()
 if st.session_state.get("logged_in"):
     _auto_apply_today()
 
+# The Android app has no Schedule tab: its sign-in page gets the phone chrome,
+# and a signed-in visit to the entry page goes to My Home (appmode.py).
+import appmode as _appmode
+if _appmode.active():
+    _appmode.chrome()
+    if st.session_state.get("logged_in"):
+        st.switch_page("pages/4_My_Home.py")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # LOGIN GATE
 # ══════════════════════════════════════════════════════════════════════════════

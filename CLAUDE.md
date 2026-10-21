@@ -56,6 +56,7 @@ several of them read the *real* schedule to test against a real day.
 | `daystart.py` | 210 | what to clean first, and when each room is reached |
 | `weekend_duties.py` | 170 | the sheet's Carpet and Stripping columns from the staff schedule |
 | `clock.py` | 35 | property-local time |
+| `appmode.py` | 130 | the Android app's view (BGVSchedulingApp, a WebView, recognised by its user agent or `?app=1`): no menu, phone margins, only My Home / My Rooms / Profile -- other pages say they are on the website; hidden page links the app's bottom tabs click; language + sign out on Profile. Browsers see no change |
 
 ### Inside `cleaning_scheduler.py`
 

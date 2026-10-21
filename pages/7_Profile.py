@@ -87,3 +87,8 @@ if go:
 
 st.markdown("---")
 st.caption(T("profile.help"))
+
+# The app has no top menu, so language and sign out live here.
+import appmode
+if appmode.active():
+    appmode.account_buttons()
