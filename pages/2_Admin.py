@@ -501,7 +501,7 @@ with tab_svc:
                         else:
                             _sent = _cr.request_password(_svc, _u.strip(), _p1, cu["username"])
                             st.success(f"Sent to {', '.join(_sent)}. Each PC signs in with it "
-                                       "within a minute; refresh to see the result.")
+                                       "within five minutes; refresh to see the result.")
             elif _meta["kind"] == "signin":
                 st.caption("Microsoft 365 isn't a stored password: SharePoint is read through a "
                            "browser sign-in on each PC (usually with a phone approval). After a "

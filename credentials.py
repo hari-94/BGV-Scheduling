@@ -12,7 +12,8 @@ Admin page does it:
     (agent_pubkey_<host>) when the agent starts;
   * the page encrypts the new password once per PC with that PC's public key
     (P-256 ECDH + AES-GCM) and leaves it as a request (cred_req_<host>_<svc>);
-  * the agent picks it up within half a minute, decrypts it, *signs in with it
+  * the agent picks it up within two minutes (five, on a backup PC standing
+    by), decrypts it, *signs in with it
     first*, and only saves it if the service accepted it -- a typo on the page
     must not lock the PC out of HotSOS. Then it deletes the request and writes
     what happened (cred_status_<host>_<svc>), which the page shows.

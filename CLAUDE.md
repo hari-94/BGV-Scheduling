@@ -406,6 +406,10 @@ office-network only. HotSOS and SharePoint both answer from outside, so the
 backup needs only the HotSOS login and a Microsoft 365 sign-in in its own
 `~/.bgv-agent/pa-browser` profile (`signin_sharepoint.bat`). A press is run by
 one PC at most: the backup skips any request whose id is already in the result.
+The office PC beats from a thread of its own (`start_beat`), as long as its
+loop came round in the last 15 minutes: when the loop wrote the beat, the 5 AM
+build -- three or four minutes of nothing else -- read as an outage and the
+backup stood in (19 and 20 Oct).
 
 **Service passwords are changed on the Admin page, not at each PC.** Each agent
 publishes a P-256 public key (`agent_pubkey_<host>`) and keeps the private key in
@@ -619,6 +623,22 @@ batched now: `_weeks_all` reads every week in one query and the writers empty it
 and the workbook's name and date live under their own small key. Measured: 190
 settings reads to 15, and the page from 19.7s to 6.6s cold. Reach for
 `_like_keys` before a loop of `_load_key`.
+
+**Read only what changed -- and a write must drop its copy.** `db.load_full_schedule`,
+`get_room_statuses` and `_load_key` (for the records in `CACHED_KEYS`) ask for
+`updated_at` first and download only when it moved; staff weeks download only the
+weeks whose stamp changed. October's data sent was on pace for 2.1 GB of the free
+5 GB, and most of it was the office agent re-reading things that had not changed
+(the status mirror read the staff directory once per room, every two minutes:
+a quarter of the total on its own). Measured 20 Oct: a mirror pass 102 KB to
+1.6 KB, a My Rooms refresh 20 KB to 0.6 KB, a staff-week change 608 KB to 7 KB.
+It rests on two things. The `updated_at` triggers (`supabase_setup.sql` for
+`schedule_full` and `app_settings`; `room_status`'s checked against its own rows,
+and re-read in full every five minutes anyway). And every write path in `db.py`
+dropping its cached copy (`_SCHED_CACHE`, `_STATUS_CACHE`, `_KEY_CACHE`): a new
+write function that skips that shows the process that wrote it its old data.
+The office agent also reads all four request keys in one call (`_load_keys`),
+every 30 s overnight instead of 5.
 
 **Test the page, not the function.** `group_card_html` had been dead for a
 while, and a "minutes of walking" badge was added to it, verified by calling the

@@ -92,6 +92,7 @@ def save_full_schedule(data: dict):
     """
     today = clock.today_iso()
     payload = json.dumps(data, default=str)
+    _SCHED_CACHE.pop(today, None)
     try:
         _client().table("schedule_full").upsert(
             {"date": today, "payload": payload},
@@ -159,6 +160,7 @@ def _upsert_key(key: str, obj) -> None:
     NOT schedule_full — that table's `date` column is a real DATE, so a text
     key like "roster" or "staffweek_2026-08-23" is rejected outright.
     """
+    _KEY_CACHE.pop(key, None)
     try:
         _client().table(SETTINGS_TABLE).upsert(
             {"key": key, "payload": json.dumps(obj, default=str)},
@@ -169,7 +171,7 @@ def _upsert_key(key: str, obj) -> None:
             raise SettingsTableMissing(SETUP_HINT) from ex
         raise
 
-def _load_key(key: str):
+def _load_key_raw(key: str):
     try:
         r = (_client().table(SETTINGS_TABLE).select("*")
              .eq("key", key).limit(1).execute())
@@ -206,6 +208,7 @@ def _like_keys(prefix: str, with_payload: bool = False):
         raise
 
 def _delete_key(key: str) -> None:
+    _KEY_CACHE.pop(key, None)
     try:
         _client().table(SETTINGS_TABLE).delete().eq("key", key).execute()
     except Exception as ex:
@@ -293,21 +296,30 @@ def _weeks_all(force: bool = False) -> dict:
     if not force and _WEEKS["rows"] is not None and v and v == _WEEKS.get("v"):
         _WEEKS["at"] = _time.time()
         return _WEEKS["rows"]
-    out = {}
+    # Something changed. Ask which weeks (key and stamp only, a few KB), then
+    # fetch just those: a save touches one or two of the ~90 weeks, and
+    # downloading all of them each time (2.4 MB, ~600 KB on the wire) was
+    # 15% of the month's data sent (Oct 2026).
     try:
-        for row in _like_keys(STAFF_WEEK_PREFIX, with_payload=True):
-            payload = row["payload"]
-            out[row["key"][len(STAFF_WEEK_PREFIX):]] = (
-                json.loads(payload) if isinstance(payload, str) else payload)
+        stamps = _week_stamps()
+        old = _WEEKS.get("stamps") or {}
+        have = _WEEKS["rows"] or {}
+        changed = [k for k, t in stamps.items() if old.get(k) != t or k[len(STAFF_WEEK_PREFIX):] not in have]
+        out = {wk: have[wk] for wk in (k[len(STAFF_WEEK_PREFIX):] for k in stamps) if wk in have}
+        for i in range(0, len(changed), 40):
+            for key, payload in _load_keys(changed[i:i + 40]).items():
+                out[key[len(STAFF_WEEK_PREFIX):]] = payload
     except Exception as ex:
         print(f"[db] could not read the weeks: {ex}")
         return _WEEKS["rows"] or {}
-    _WEEKS["rows"], _WEEKS["at"], _WEEKS["v"] = out, _time.time(), v
+    _WEEKS["rows"], _WEEKS["at"], _WEEKS["v"], _WEEKS["stamps"] = out, _time.time(), v, stamps
     return out
 
 
 def _weeks_forget() -> None:
-    _WEEKS["rows"] = None
+    # Check again on the next read; the delta read then fetches only the
+    # weeks whose rows changed (or drops the ones that were deleted).
+    _WEEKS["at"], _WEEKS["v"] = 0.0, None
 
 
 def load_staff_week(week_key: str) -> dict | None:
@@ -512,7 +524,7 @@ def save_autoapply(info: dict) -> None:
     except Exception as ex:
         print(f"[db] save_autoapply error: {ex}")
 
-def load_full_schedule(date_str: str = None) -> dict | None:
+def _load_full_schedule_raw(date_str: str = None) -> dict | None:
     """
     Load the full schedule for a given date (defaults to today).
     Returns None if no schedule exists for that date.
@@ -799,7 +811,7 @@ def ensure_admin_exists():
 # ════════════════════════════════════════════════════════════════════════════
 #  ROOM STATUS  (live tracking — cleaning/inspection progress per room)
 # ════════════════════════════════════════════════════════════════════════════
-def get_room_statuses(date_str: str = None) -> dict:
+def _get_room_statuses_raw(date_str: str = None) -> dict:
     """
     Load all room statuses for a given date.
     Returns dict keyed by room number: {room: status_record}
@@ -878,6 +890,7 @@ def upsert_room_status(room: str, fields: dict, date_str: str = None):
     if date_str is None:
         date_str = clock.today_iso()
     record = {"date": date_str, "room": room, **fields}
+    _STATUS_CACHE.pop(date_str, None)
     try:
         _client().table("room_status").upsert(
             record, on_conflict="date,room"
@@ -894,6 +907,7 @@ def bulk_upsert_room_statuses(records: list, date_str: str = None):
     if date_str is None:
         date_str = clock.today_iso()
     rows = [{"date": date_str, **r} for r in records]
+    _STATUS_CACHE.pop(date_str, None)
     try:
         _client().table("room_status").upsert(
             rows, on_conflict="date,room"
@@ -901,6 +915,137 @@ def bulk_upsert_room_statuses(records: list, date_str: str = None):
     except Exception as ex:
         print(f"[db] bulk_upsert_room_statuses error: {ex}")
         raise
+
+
+# ── read only what changed ─────────────────────────────────────────────────────
+# The free plan counts every byte Supabase sends (5 GB a month). Most of it went
+# on re-reading things that had not changed: the office agent's status mirror
+# downloaded the whole day's schedule and every room's status every two
+# minutes, and pages that poll did the same every few seconds. All three
+# tables stamp updated_at on every write (a trigger -- supabase_setup.sql for
+# schedule_full and app_settings; room_status checked against its own rows,
+# 39 of 40), so a read first asks for the stamp -- a few bytes -- and
+# downloads only when it moved. A write from this process drops its copy, so
+# whoever saved sees the save at once.
+import copy as _copy
+
+_SCHED_CACHE = {}    # date -> (stamp, schedule)
+_STATUS_CACHE = {}   # date -> (stamp, statuses, fetched at)
+_KEY_CACHE = {}      # key -> (stamp, payload)
+#: room_status is re-read in full at least this often whatever the stamp says,
+#: so a write path that ever skipped the trigger could not hide a change for
+#: longer than this.
+STATUS_RECHECK_SECONDS = 300
+#: Days kept per cache. The Report page's Timing tab and the Daily Service
+#: picker read past days one by one; a year of them must not pile up in the
+#: app's 690 MB.
+CACHE_DAYS = 8
+
+
+def _keep(cache, key, value):
+    cache.pop(key, None)
+    cache[key] = value                  # most recently used last
+    while len(cache) > CACHE_DAYS:
+        cache.pop(next(iter(cache)))
+
+
+#: Settings records large enough, and read often enough, to be worth a stamp
+#: check first. Small records are cheaper to just read.
+CACHED_KEYS = {"hotsos_last_result", "hotsos_push_result", "ssrs_forecast",
+               "hotsos_attendants", "staffsched_file", "roster", "staff_overrides"}
+
+
+def _stamp_schedule(date_str):
+    r = _client().table("schedule_full").select("updated_at").eq("date", date_str).limit(1).execute()
+    return (r.data or [{}])[0].get("updated_at") if r.data else None
+
+
+def _stamp_room_status(date_str):
+    r = (_client().table("room_status").select("updated_at", count="exact")
+         .eq("date", date_str).order("updated_at", desc=True).limit(1).execute())
+    return [r.count, (r.data[0].get("updated_at") if r.data else None)]
+
+
+def _stamp_key(key: str):
+    r = _client().table(SETTINGS_TABLE).select("updated_at").eq("key", key).limit(1).execute()
+    return r.data[0].get("updated_at") if r.data else None
+
+
+def _week_stamps() -> dict:
+    """{staffweek_<date>: updated_at} for every stored week -- no payloads."""
+    r = (_client().table(SETTINGS_TABLE).select("key,updated_at")
+         .like("key", STAFF_WEEK_PREFIX + "*").execute())
+    return {row["key"]: row.get("updated_at") for row in (r.data or [])
+            if str(row.get("key", "")).startswith(STAFF_WEEK_PREFIX)}
+
+
+def _load_keys(keys) -> dict:
+    """{key: payload} for several settings records in one round trip."""
+    keys = [k for k in dict.fromkeys(keys) if k]
+    if not keys:
+        return {}
+    r = _client().table(SETTINGS_TABLE).select("key,payload").in_("key", keys).execute()
+    out = {}
+    for row in r.data or []:
+        p = row.get("payload")
+        out[row["key"]] = json.loads(p) if isinstance(p, str) else p
+    return out
+
+
+def load_full_schedule(date_str: str = None) -> dict | None:
+    """The day's schedule (today by default), downloaded only when it changed."""
+    date_str = date_str or clock.today_iso()
+    try:
+        stamp = _stamp_schedule(date_str)
+    except Exception as ex:
+        print(f"[db] schedule stamp error: {ex}")
+        return _load_full_schedule_raw(date_str)
+    if stamp is None:
+        _SCHED_CACHE.pop(date_str, None)
+        return None
+    hit = _SCHED_CACHE.get(date_str)
+    if hit and hit[0] == stamp:
+        return _copy.deepcopy(hit[1])
+    data = _load_full_schedule_raw(date_str)
+    if data is not None:
+        _keep(_SCHED_CACHE, date_str, (stamp, data))
+    return _copy.deepcopy(data)
+
+
+def get_room_statuses(date_str: str = None) -> dict:
+    """Every room's status for a day, downloaded only when a row changed."""
+    date_str = date_str or clock.today_iso()
+    try:
+        stamp = _stamp_room_status(date_str)
+    except Exception as ex:
+        print(f"[db] room status stamp error: {ex}")
+        return _get_room_statuses_raw(date_str)
+    hit = _STATUS_CACHE.get(date_str)
+    if hit and hit[0] == stamp and _time.time() - hit[2] < STATUS_RECHECK_SECONDS:
+        return _copy.deepcopy(hit[1])
+    data = _get_room_statuses_raw(date_str)
+    _keep(_STATUS_CACHE, date_str, (stamp, data, _time.time()))
+    return _copy.deepcopy(data)
+
+
+def _load_key(key: str):
+    if key not in CACHED_KEYS:
+        return _load_key_raw(key)
+    try:
+        stamp = _stamp_key(key)
+    except Exception as ex:
+        if _is_missing_table(ex):
+            raise SettingsTableMissing(SETUP_HINT) from ex
+        return _load_key_raw(key)
+    if stamp is None:
+        _KEY_CACHE.pop(key, None)
+        return None
+    hit = _KEY_CACHE.get(key)
+    if hit and hit[0] == stamp:
+        return _copy.deepcopy(hit[1])
+    val = _load_key_raw(key)
+    _KEY_CACHE[key] = (stamp, val)
+    return _copy.deepcopy(val)
 
 
 # ── one retry for a dropped connection ─────────────────────────────────────────
@@ -947,8 +1092,14 @@ def _metered(fn):
         try:
             import freetier
             # The key too, for settings reads: which record is read most.
-            name = fn.__name__ + (f":{str(a[0])[:24]}" if a and fn.__name__ in
-                                  ("_load_key", "_like_keys") else "")
+            # Same names as before the stamp checks, so the Stats page's
+            # history lines up: _load_key_raw counts as _load_key, and so on.
+            base = fn.__name__.removesuffix("_raw").replace("_get_room", "get_room")                 .replace("_load_full", "load_full")
+            arg = a[0] if a else None
+            if isinstance(arg, (list, tuple)):
+                arg = arg[0] if arg else ""
+            name = base + (f":{str(arg)[:24]}" if arg is not None and base in
+                           ("_load_key", "_like_keys", "_stamp_key", "_load_keys") else "")
             freetier.count(out, name)
         except Exception:
             pass
@@ -956,8 +1107,9 @@ def _metered(fn):
     return run
 
 
-for _name in ("_load_key", "_like_keys", "all_known_rooms", "get_room_statuses", "get_user",
-              "load_full_schedule", "load_log", "load_login_events", "load_schedule_history",
-              "load_users"):
+for _name in ("_load_key_raw", "_like_keys", "all_known_rooms", "_get_room_statuses_raw",
+              "get_user", "_load_full_schedule_raw", "load_log", "load_login_events",
+              "load_schedule_history", "load_users", "_stamp_schedule", "_stamp_room_status",
+              "_stamp_key", "_week_stamps", "_load_keys"):
     globals()[_name] = _metered(globals()[_name])
 del _name

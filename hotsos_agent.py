@@ -67,6 +67,7 @@ SITE_ID = 8                         # Grand Colorado on Peak 8
 FORECAST_DAYS = 21
 FORECAST_HOURS = set(range(8, 21, 2))           # 08, 10 ... 20, property time
 POLL_SECONDS = 5           # a Preview, Push or "Load this day" waits at most this
+NIGHT_POLL_SECONDS = 30    # 22:00-04:30, when nobody presses anything: a sixth of the reads
 REQUEST_MAX_AGE = 10 * 60   # a press older than this is not run -- see run_loop
 
 
@@ -400,6 +401,9 @@ def sync_room_status(cfg):
     when = {str(x["room"]).upper(): x for a in tl for x in (a.get("assignments") or [])
             if x.get("room") and not x.get("isBreak")}
     current = db.get_room_statuses() or {}
+    # Once per pass: looked up per room, the directory was read ~380,000
+    # times in October -- a quarter of everything the free plan counted.
+    names = staff_names.aliases()
     rows, counts, unknown = [], collections.Counter(), set()
     for r in board:
         code = str(_pick(r, _ROOM_CODE, "room number")).upper().strip()
@@ -427,7 +431,7 @@ def sync_room_status(cfg):
                 inspected = None
         # HotSOS's labels carry stray spaces ("David  Serrano"); one spelling
         # per person, the app's.
-        hk = staff_names.full(" ".join(str(r.get("assignedTo") or "").split())) or hk_chart
+        hk = staff_names.full(" ".join(str(r.get("assignedTo") or "").split()), names) or hk_chart
         row = {"room": key, "status": st, "started_at": started, "cleaned_at": cleaned,
                "inspected_at": inspected, "housekeeper": hk,
                "swapped_from": hk_chart if hk != hk_chart else None,
@@ -1032,19 +1036,24 @@ def run_loop():
     last_beat = 0
     last_cred = _register("office")
     last_teams = 0
+    _LOOP_PASS[0] = time.time()
+    start_beat()
     while True:
         try:
-            last_cred = _cred_poll(last_cred)
+            _LOOP_PASS[0] = time.time()
+            last_cred = _cred_poll(last_cred, every=120)
             if time.time() - last_beat > 60:
-                db._upsert_key(hs.HEARTBEAT_KEY, {"at": clock.stamp(),
-                                                  "host": socket.gethostname()})
                 last_beat = time.time()
                 try:
                     report_health(load_config(required=False), started_at)
                 except Exception as ex:
                     print(f"health report failed: {ex}", flush=True)
 
-            req = db._load_key(hs.REQUEST_KEY) or {}
+            # Every button the pages can press, in one read: these were four
+            # separate reads every 5 s -- 15% of October's data sent.
+            asks = db._load_keys([hs.REQUEST_KEY, hs.DAYLOAD_REQUEST_KEY,
+                                  hs.FORECAST_REQUEST_KEY, rdm.REQUEST_KEY])
+            req = asks.get(hs.REQUEST_KEY) or {}
             if req.get("id") and req["id"] != done_req:
                 done_req = req["id"]
                 # A Push must happen when it was pressed or not at all: after
@@ -1085,7 +1094,7 @@ def run_loop():
                 run_push(cfg, _dt.date.fromisoformat(req["date"]), req.get("mode", "preview"),
                          req_id=req["id"], by=req.get("by", ""))
 
-            dreq = db._load_key(hs.DAYLOAD_REQUEST_KEY) or {}
+            dreq = asks.get(hs.DAYLOAD_REQUEST_KEY) or {}
             if dreq.get("id") and dreq["id"] != done_day:
                 done_day = dreq["id"]
                 try:
@@ -1149,7 +1158,7 @@ def run_loop():
             if time.time() - last_rep > 30 and cfg.get("workbook"):
                 last_rep = time.time()
                 try:
-                    rreq = db._load_key(rdm.REQUEST_KEY) or {}
+                    rreq = asks.get(rdm.REQUEST_KEY) or {}
                     asked = rreq.get("id") and rreq["id"] != done_rep
                     due = now.hour == rdm.SYNC_HOUR and _state().get("report_day") != str(now.date())
                     if (asked or due) and start_report(
@@ -1176,7 +1185,7 @@ def run_loop():
                     log(f"watchdog: {type(ex).__name__}: {ex}")
 
             slot = (now.date(), now.hour)
-            freq = db._load_key(hs.FORECAST_REQUEST_KEY) or {}
+            freq = asks.get(hs.FORECAST_REQUEST_KEY) or {}
             asked = freq.get("id") and freq["id"] != done_fc
             if asked or (now.hour in FORECAST_HOURS and slot != last_slot):
                 done_fc, last_slot = freq.get("id"), slot
@@ -1186,7 +1195,46 @@ def run_loop():
                     log(f"forecast failed to start: {ex}")
         except Exception as ex:          # never let one bad pass end the loop
             log(f"loop error: {ex}")
-        time.sleep(POLL_SECONDS)
+        time.sleep(_poll_seconds())
+
+
+def _poll_seconds(now=None):
+    """How long the loop sleeps: 5 s by day, 30 s overnight. The 5 AM build
+    and every timed job key off the clock, not this pace."""
+    now = now or clock.now()
+    hm = (now.hour, now.minute)
+    return NIGHT_POLL_SECONDS if hm >= (22, 0) or hm < (4, 30) else POLL_SECONDS
+
+
+# ── the heartbeat, on a thread of its own ────────────────────────────────────
+# It used to be written by the loop, so a 5 AM build -- three or four minutes
+# of the loop doing nothing else -- read as the office PC going silent, and the
+# backup PC stood in for two minutes on 19 and 20 Oct. The beat now comes from
+# its own thread, as long as the loop has come round in the last 15 minutes:
+# a build doesn't stop it, a loop that is truly stuck still does.
+BEAT_SECONDS = 60
+LOOP_STUCK_SECONDS = 15 * 60
+_LOOP_PASS = [0.0]
+_BEAT = None
+
+
+def _beat_loop():
+    while True:
+        try:
+            if time.time() - _LOOP_PASS[0] < LOOP_STUCK_SECONDS:
+                db._upsert_key(hs.HEARTBEAT_KEY, {"at": clock.stamp(),
+                                                  "host": socket.gethostname()})
+        except Exception as ex:
+            print(f"heartbeat failed: {ex}", flush=True)
+        time.sleep(BEAT_SECONDS)
+
+
+def start_beat():
+    global _BEAT
+    if _BEAT is None or not _BEAT.is_alive():
+        import threading
+        _BEAT = threading.Thread(target=_beat_loop, name="heartbeat", daemon=True)
+        _BEAT.start()
 
 
 # ── passwords changed on the Admin page (credentials.py) ─────────────────────
@@ -1199,9 +1247,10 @@ def _register(role):
     return 0
 
 
-def _cred_poll(last):
-    """Every 30 s; returns when it last ran."""
-    if time.time() - last < 30:
+def _cred_poll(last, every=120):
+    """Look for a password change from the Admin page every `every` seconds;
+    returns when it last ran."""
+    if time.time() - last < every:
         return last
     try:
         import credentials
@@ -1271,6 +1320,7 @@ def _teams_tick(cfg, last):
 
 # ── backup: a second PC that stands in for the office PC ─────────────────────
 STANDBY_SECONDS = 3 * 60     # the office PC's heartbeat older than this: stand in
+STANDBY_POLL_SECONDS = 60    # how often a standing-by backup looks at the heartbeat
 
 
 def _beat_age(beat):
@@ -1299,16 +1349,25 @@ def run_backup():
     last_cred = _register("backup")
     while True:
         try:
+            # This PC's reads count against the same free plan; it used to be
+            # the one process the meter didn't see.
+            try:
+                import freetier
+                freetier.flush("backup")
+            except Exception:
+                pass
             # Standing by or not: a password changed on the Admin page must
             # reach this PC before it is needed, not when it takes over.
-            last_cred = _cred_poll(last_cred)
-            beat = db._load_key(hs.HEARTBEAT_KEY) or {}
+            last_cred = _cred_poll(last_cred, every=60 if active else 300)
+            # The heartbeat and the latest press in one read.
+            got = db._load_keys([hs.HEARTBEAT_KEY, hs.REQUEST_KEY])
+            beat = got.get(hs.HEARTBEAT_KEY) or {}
             age = _beat_age(beat)
             if beat.get("host") != me and age <= STANDBY_SECONDS:
                 if active:
                     log(f"office PC {beat.get('host')} is back; standing by")
                     active = False
-                time.sleep(30)
+                time.sleep(STANDBY_POLL_SECONDS)
                 continue
             if not active:
                 log(f"office PC {beat.get('host') or '?'} silent "
@@ -1327,7 +1386,7 @@ def run_backup():
                 last_teams = time.time()
                 log(f"teams notes: {type(ex).__name__}: {ex}")
 
-            req = db._load_key(hs.REQUEST_KEY) or {}
+            req = got.get(hs.REQUEST_KEY) or {}
             if not req.get("id") or req["id"] == done_req:
                 time.sleep(POLL_SECONDS)
                 continue
