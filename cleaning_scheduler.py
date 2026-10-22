@@ -4054,6 +4054,15 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
             else:
                 need_n += 1
                 assignment[g["label"]] = f"{NEED_HK_PREFIX} {need_n}"
+        # Somebody scheduled for Daily Service whom the rounds don't need goes
+        # to the open Full Clean charts like anybody else. A round is filled
+        # to the cap before the next person starts one (HP, 21 Oct), so on
+        # 22 October 340 minutes of Daily Service was Adrian's alone, and
+        # Amalia -- also down for Daily Service -- sat free beside two Full
+        # Clean charts with nobody on them.
+        for b in [1, 2, 3]:
+            available[b].extend(ds_available[b])
+            ds_available[b] = []
     # Everyone else — assign the most CONSTRAINED groups first so they get the
     # scarce building-specific housekeepers. Order: Full Clean (strict building
     # rule) Dust n Vac Daily Service (flexible, can take any HK).
@@ -5165,8 +5174,9 @@ with st.sidebar:
 
         st.markdown("---")
         st.markdown("### Daily Service Team")
-        st.caption("HKs dedicated to Daily Service today. Only they get DS charts — "
-                   "and they are held back from Full Clean / Dust n Vac.")
+        st.caption("HKs dedicated to Daily Service today. Only they get DS charts, each "
+                   "filled before the next starts; anyone the rounds don't need goes "
+                   "to Full Clean.")
         if "ds_team" not in st.session_state: st.session_state["ds_team"] = []
         saved_ds_team = [n for n in st.session_state["ds_team"] if n in present_hk]
         if saved_ds_team != st.session_state["ds_team"]: st.session_state["ds_team"] = saved_ds_team

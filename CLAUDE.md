@@ -165,6 +165,14 @@ cut Lilliam's round to 330 and handed 125 minutes to Luis Urbina on Full Clean:
 three people on 770 minutes two cover. It now only hands *open* charts to the
 light. Don't reintroduce sharing a staffed round.
 
+**Somebody down for Daily Service whom the rounds don't need does Full
+Clean** (HP, 21 Oct). The Daily Service team is held apart so only Daily
+Service charts draw from it, and each round is filled to the cap before the
+next starts. On 22 October 340 minutes made one round, for Adrian, and
+Amalia -- also down for Daily Service -- sat free beside 560 minutes of Full
+Clean with nobody on it. `assign_hk_building_aware` now hands whoever is
+left of the team back to the general pool once every round has its person.
+
 **Weekends: carpets and stripping** (`weekend_duties.py`). The schedule names
 them: "CARPETS/BLD 3" (earlier "Cleaning carpets BLD 3") does that building's
 **pet** Full Cleans only -- Pet = X -- two on one building split it by area;
