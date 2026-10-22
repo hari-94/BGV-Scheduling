@@ -423,6 +423,18 @@ and the app showed them as Dust n Vac all day. A room now joins a chart of its
 own kind or gets a new one, and a non-Dust n Vac room found in the round is
 taken back out.
 
+**The sheet's later edits reach the app** (`app_sync.from_sheet`, HP 22
+Oct). After the push the team keeps working in GC8 Inspections: on 22 October
+the RQS changed on 18 rooms after 8 and 7 rooms were typed in by hand, and
+the app -- phones, Live board, the Report's Timing tab -- kept the 5 AM
+picture. Every ten minutes after the push, on the mirror's thread (so it and
+the HotSOS reconcile never write the charts at once), the office PC reads the
+day's tab from the synced copy when it has changed and carries over the RQS
+on each room (a chart whose rooms now name two RQS is split, one chart per
+RQS) and rooms added under a housekeeper `staff_names.resolve` recognises.
+Who cleans a room still follows HotSOS. The Timing tab takes the RQS the 4
+PM Report sync read off the sheet for every synced day.
+
 **A second PC stands in when the office PC is off.** `hotsos_agent.py backup`
 (Task Scheduler "BGV HotSOS Backup" on Hari's PC, `run_backup_agent.bat`)
 answers Preview and Push only while the office heartbeat is over three minutes
