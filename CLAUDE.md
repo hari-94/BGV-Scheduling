@@ -165,6 +165,23 @@ cut Lilliam's round to 330 and handed 125 minutes to Luis Urbina on Full Clean:
 three people on 770 minutes two cover. It now only hands *open* charts to the
 light. Don't reintroduce sharing a staffed round.
 
+**Daily Service is filled one housekeeper at a time** (`_ds_fill`, HP 21
+Oct: "only pick the next housekeeper if the previous one is filled with 460
+or near"). Cutting a walk wherever the cap fell left each round 5-25 minutes
+short, and on 21 October those shortfalls made a sixth person with 55
+minutes. `_ds_fill` asks CP-SAT for exactly ceil(total/cap) rounds, every one
+but the last as full as the rooms allow, then the fewest buildings and levels
+(weights `DS_W_*`; filling outranks walking). Over the 40 stored days to 21
+October it never needs a person more than the old packer and saves one on
+21 October; a few rounds touch a building more, and the last round is often
+small -- that person is then free for other work. Big days take 10-20 s. No
+solver, or no answer in time: the old building-first packing below.
+
+**Spare Daily Service time takes open Full Clean rooms** (`ds_take_open`).
+A Daily Service housekeeper under the cap takes the nearest open apartments
+whole, onto a Full Clean chart of their own (a chart never mixes services),
+within fcpack's rules and the Daily Service cap for their day.
+
 **Somebody down for Daily Service whom the rounds don't need does Full
 Clean** (HP, 21 Oct). The Daily Service team is held apart so only Daily
 Service charts draw from it, and each round is filled to the cap before the

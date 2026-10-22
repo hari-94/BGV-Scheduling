@@ -3045,6 +3045,73 @@ def _ds_pooled(rooms, cap):
     return charts
 
 
+#: Daily Service, filled one housekeeper at a time (_ds_fill). A minute a
+#: round falls short of the cap costs DS_W_FILL; each building and each level
+#: a round touches costs DS_W_BLD and DS_W_LEVEL. Filling outranks walking --
+#: the manager's order -- but five short minutes won't buy a second building.
+DS_W_FILL, DS_W_BLD, DS_W_LEVEL = 4, 8, 2
+
+
+def _ds_fill(rooms, cap):
+    """Daily Service rounds, each housekeeper filled to the cap before the next
+    starts (HP, 21 Oct: "if we pick one housekeeper let them have full 460 ...
+    only pick the next housekeeper if the previous one is filled"), with as
+    few buildings and levels each as that allows. None when there is no
+    solver or no answer in time; the caller then packs the old way.
+
+    Cutting a walk wherever the cap falls leaves each round 5-25 minutes
+    short, and on 21 October the shortfalls added up to a sixth person with
+    55 minutes (2432A/B) beside five rounds of 435-460. This asks for exactly
+    ceil(total / cap) rounds, every one but the last as full as the rooms
+    allow, then the fewest buildings and levels."""
+    import math
+    try:
+        from ortools.sat.python import cp_model
+    except Exception:
+        return None
+    walk = sorted(rooms, key=lambda r: ({3: 0, 1: 1, 2: 2}.get(_bld(r), 1), _flr(r), _rnum(r)))
+    mins = [int(float(r.get("time") or 0)) for r in walk]
+    total = sum(mins)
+    if not walk or max(mins) > cap:
+        return None
+    n = max(1, math.ceil(total / cap))
+    if n == 1:
+        return [walk]
+
+    def level(r):
+        loc = pmap.parse(str(r.get("room", "")).strip().upper())
+        return (_bld(r), loc.level if loc else _flr(r))
+
+    m = cp_model.CpModel()
+    x = [[m.NewBoolVar(f"x{i}_{k}") for k in range(n)] for i in range(len(walk))]
+    for i in range(len(walk)):
+        m.AddExactlyOne(x[i])
+    load = [sum(mins[i] * x[i][k] for i in range(len(walk))) for k in range(n)]
+    for k in range(n):
+        m.Add(load[k] <= cap)
+    for k in range(n - 1):
+        m.Add(load[k] >= load[k + 1])            # fullest first
+    m.Add(x[0][0] == 1)                          # symmetry: the walk starts round 1
+    cost = [DS_W_FILL * (cap * (n - 1) - sum(load[:-1]))]
+    for key_of, w in ((_bld, DS_W_BLD), (level, DS_W_LEVEL)):
+        for v in {key_of(r) for r in walk}:
+            members = [i for i, r in enumerate(walk) if key_of(r) == v]
+            for k in range(n):
+                y = m.NewBoolVar("")
+                for i in members:
+                    m.AddImplication(x[i][k], y)
+                cost.append(w * y)
+    m.Minimize(sum(cost))
+    sv = cp_model.CpSolver()
+    sv.parameters.num_workers = 8
+    sv.parameters.max_deterministic_time = 8
+    sv.parameters.max_time_in_seconds = 20
+    if sv.Solve(m) not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return None
+    charts = [[r for i, r in enumerate(walk) if sv.Value(x[i][k])] for k in range(n)]
+    return [c for c in charts if c]
+
+
 def _ds_by_building(rooms, cap):
     """Fill each building's own charts; hand back its trailing part-chart."""
     by_bld = {}
@@ -3097,6 +3164,17 @@ def split_daily_service(ds_rooms, extra_rooms=None, cap=DS_CAP, one_building=Non
     import math
     rooms = list(ds_rooms) + list(extra_rooms or [])
     if not rooms: return []
+    # One housekeeper filled before the next, fewest buildings and levels
+    # after that (_ds_fill). What follows is the packing it replaced, kept for
+    # a machine without the solver or a day it can't answer in time.
+    try:
+        filled = _ds_fill(rooms, cap)
+    except Exception as ex:
+        print(f"[ds] fill-to-cap packing failed, packing the old way: {ex}")
+        filled = None
+    if filled and sorted(str(r.get("room")) for c in filled for r in c) \
+            == sorted(str(r.get("room")) for r in rooms):
+        return filled
     if pooled:
         return _ds_pooled(rooms, cap)
     n_min = max(1, math.ceil(sum(r["time"] for r in rooms) / cap))
@@ -4343,6 +4421,81 @@ def overflow_to_rqs12(groups, inspectors, rqs1, rqs2):
                                "buildings": sorted({b for g in gs for b in g["blds"]}),
                                "travel_warning": False, "heavy_warning": False, "complexity": 0})
     return groups, inspectors
+
+
+def ds_take_open(groups, cap=DS_CAP):
+    """Open Full Clean rooms to a Daily Service housekeeper with time to spare
+    under the Daily Service cap, nearest first (HP, 21 Oct: on 22 October
+    Adrian's one round was 340 minutes beside three Full Clean rooms with
+    nobody on them). A guest's apartment moves whole, and the rooms go on a
+    Full Clean chart of that person's own -- never into the Daily Service
+    round, so each chart keeps one service -- which must pass fcpack's rules
+    like any other. Returns the groups."""
+    def unstaffed(g):
+        return str(g.get("housekeeper") or "").startswith((NO_HK_LABEL, NEED_HK_PREFIX))
+
+    def day(p):
+        return sum(int(g.get("time") or 0) for g in groups
+                   if g.get("housekeeper") == p and not g.get("verify_group"))
+
+    def where(r):
+        loc = pmap.parse(str(r.get("room", "")).strip().upper())
+        return (_bld(r), pmap.LEVELS.index(loc.level) if loc and loc.level in pmap.LEVELS else _flr(r))
+
+    open_fc = [g for g in groups if g.get("service_type") in (SVC_FC, SVC_IH)
+               and not g.get("verify_group") and not g.get("unalloc_group") and unstaffed(g)]
+    if not open_fc:
+        return groups
+    units = {}
+    for g in open_fc:
+        for r in g.get("rooms") or []:
+            units.setdefault(fcpack._unit_key(r) or ("solo", str(r.get("room"))), []).append((g, r))
+    ds_people = sorted({g["housekeeper"] for g in groups if g.get("service_type") == SVC_DS
+                        and g.get("housekeeper") and not unstaffed(g)}, key=day)
+    for p in ds_people:
+        mine = [r for g in groups if g.get("housekeeper") == p for r in g.get("rooms") or []]
+        home = {where(r) for r in mine}
+        fc_chart = None
+        while units:
+            room_cap = cap - day(p)
+
+            def near(item):
+                # Same building first, then the fewest levels away, then the
+                # smallest -- the most rooms placed.
+                rs = [r for _, r in item[1]]
+                dist = [abs(where(r)[1] - h[1]) for r in rs for h in home if h[0] == where(r)[0]]
+                return (0 if dist else 1, min(dist) if dist else 9,
+                        sum(int(r.get("time") or 0) for r in rs))
+            pick = None
+            for key, items in sorted(units.items(), key=near):
+                rs = [r for _, r in items]
+                t = sum(int(r.get("time") or 0) for r in rs)
+                if t > room_cap:
+                    continue
+                trial = (fc_chart["rooms"] if fc_chart else []) + rs
+                if not fcpack.legal_rooms(trial, {_bld(r) for r in trial}, MAX_FC):
+                    continue
+                pick = key
+                break
+            if pick is None:
+                break
+            items = units.pop(pick)
+            for g, r in items:
+                g["rooms"] = [x for x in g["rooms"] if x is not r]
+            if fc_chart is None:
+                src = items[0][0]
+                fc_chart = {k: v for k, v in src.items() if k not in ("rooms", "label", "housekeeper")}
+                fc_chart.update(label=f"{src.get('label', 'FC')}·{p.split()[0]}", housekeeper=p, rooms=[])
+                groups.append(fc_chart)
+            fc_chart["rooms"].extend(r for _, r in items)
+            for g in [fc_chart] + [g for g, _ in items]:
+                rs = g.get("rooms") or []
+                g["time"] = sum(int(r.get("time") or 0) for r in rs)
+                g["blds"] = {_bld(r) for r in rs}
+                g["floors"] = {_flr(r) for r in rs}
+                g["c140"] = sum(1 for r in rs if r.get("time") == 140)
+                g["c120"] = sum(1 for r in rs if r.get("time") == 120)
+    return [g for g in groups if g.get("rooms") or g.get("verify_group")]
 
 
 def swap_inspectors(groups, inspectors, pairs):
@@ -5689,6 +5842,9 @@ if run:
                         fg = fill_from_unstaffed(fg, roster)
                         fg = staff_biggest_first(fg)
                         fg = balance_light_charts(fg)
+                        # Open Full Clean rooms to a Daily Service person with
+                        # time to spare under its cap (ds_take_open).
+                        fg = ds_take_open(fg, DS_CAP_WEEKEND if _sched_weekend() else DS_CAP)
                         # Anyone borrowed whose rooms the others can take goes
                         # back to their own duty (release_borrowed).
                         fg, released = release_borrowed(fg, release, roster) if release else (fg, [])
