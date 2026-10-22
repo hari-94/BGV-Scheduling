@@ -33,7 +33,7 @@ import clock
 
 #: Raised when the page needs something this module didn't have before: the
 #: page reloads an older copy a running app is still holding (CLAUDE.md).
-VERSION = 1
+VERSION = 2
 
 FIRST_START_LATE = _dt.time(10, 30)
 TOGETHER_MIN = 3           # start and done this close: marked after the fact
@@ -70,7 +70,40 @@ def load(db, start, end):
         s = db.load_full_schedule(iso) or {}
         plan[iso] = {str(r.get("room")): (str(r.get("service") or ""), int(float(r.get("time") or 0)))
                      for g in s.get("groups_data") or [] for r in g.get("rooms") or []}
+    # Who inspected: the RQS the team typed on the sheet, as the 4 PM Report
+    # sync read it, over the one the app planned at 5 AM. On 22 Oct the RQS
+    # changed on 18 rooms after the push; through the day the office PC
+    # carries such changes into the app (app_sync.from_sheet), and for any
+    # day already synced the sheet itself is the record.
+    typed = _sheet_rqs(db, {r["date"] for r in rows})
+    for r in rows:
+        name = typed.get((r["date"], str(r["room"])))
+        if name:
+            r["inspector"] = name
     return rows, plan
+
+
+def _sheet_rqs(db, days):
+    """{(iso, room): RQS full name} from the Report's synced day tabs."""
+    import staff_names
+    try:
+        aliases = staff_names.aliases()
+    except Exception:
+        aliases = {}
+    out = {}
+    for month in sorted({d[:7] for d in days}):
+        rec = db._load_key("report_days_" + month) or {}
+        for iso, day in (rec.get("days") or {}).items():
+            if iso not in days:
+                continue
+            for row in day.get("rows") or []:
+                if len(row) < 4 or not row[3]:
+                    continue
+                first = str(row[3]).replace("+", "/").replace("&", "/").split("/")[0].strip()
+                if not first or first.lower().replace(" ", "").startswith(("rqs", "inspector")):
+                    continue
+                out[(iso, str(row[0]))] = staff_names.resolve(first, aliases) or first
+    return out
 
 
 def rooms(rows, plan, now=None):

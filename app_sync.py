@@ -194,3 +194,168 @@ def apply(plan, save=True):
     if rows:
         db.bulk_upsert_room_statuses(rows)
     return summary
+
+
+# ── the sheet, as the team edits it through the day ─────────────────────────
+_SVC = (("daily", "Daily Service"), ("sheet", "Daily Service"), ("towel", "Daily Service"),
+        ("stay", "Daily Service"), ("dust", "Dust n Vac"), ("vac", "Dust n Vac"))
+
+
+def _service(raw):
+    s = " ".join(str(raw or "").lower().split())
+    if ("full" in s or s.startswith("fc")) and "ih" in s:
+        return "Full Clean (IH)"
+    for word, svc in _SVC:
+        if word in s:
+            return svc
+    return "Full Clean"
+
+
+def _rqs_name(typed, aliases):
+    """The inspector a sheet's RQS cell names: the first name in it ("Grace/Dania"
+    is Grace with a trainee, as the Report reads it), or '' for a placeholder."""
+    first = str(typed or "").replace("+", "/").replace("&", "/").split("/")[0].strip()
+    if not first or first.lower().replace(" ", "").startswith(("rqs", "inspector", "n/a", "-")):
+        return ""
+    return staff_names.resolve(first, aliases)
+
+
+def from_sheet(rows, save=True):
+    """Today's charts brought in line with what the team has typed in the day's
+    tab since the push (HP, 22 Oct: "they changed the rqs in the sheet after 8,
+    the app didn't update it" -- 18 rooms that day, so the RQS on the phones,
+    the Live board and the Report's Timing tab were the 5 AM ones).
+
+      * The RQS on each room. A chart whose rooms now name two RQS is split, a
+        chart per RQS, same housekeeper and service, so each RQS's team view
+        holds exactly their rooms.
+      * Rooms added by hand: a room the app has no chart for, whose HSKP cell
+        names somebody the app knows (staff_names.resolve), joins that
+        person's chart of the same service and RQS (or a new one). Rooms with
+        nobody, or nobody clear, named are only reported.
+
+    Who cleans a room is HotSOS's business (from_hotsos) and is left alone
+    here. `rows` are hotsos_sync.read_rows lines. Returns a summary; with
+    save=False nothing is written."""
+    sched = db.load_full_schedule()
+    if not sched or not sched.get("groups_data"):
+        return {"changed": False, "why": "no schedule in the app today"}
+    aliases = staff_names.aliases()
+    fg = copy.deepcopy(sched["groups_data"])
+    labels = {g.get("label") for g in fg}
+    sheet = {r["room"]: r for r in rows}
+    charted = {r.get("room") for g in fg for r in g.get("rooms") or []}
+
+    def new_label(base, who):
+        lab = f"{base}·{who.split()[0]}" if who else f"{base}·"
+        while lab in labels:
+            lab += "'"
+        labels.add(lab)
+        return lab
+
+    # 1. The RQS on each room.
+    rqs_changed, split, out = [], [], []
+    for g in fg:
+        want = {}
+        for r in g.get("rooms") or []:
+            line = sheet.get(r.get("room"))
+            name = _rqs_name(line["rqs"], aliases) if line else ""
+            want[r.get("room")] = name or g.get("inspector") or ""
+        names = list(dict.fromkeys(want.values()))
+        if len(names) <= 1:
+            n = names[0] if names else (g.get("inspector") or "")
+            if n != (g.get("inspector") or ""):
+                rqs_changed += [(r.get("room"), g.get("inspector") or "", n) for r in g["rooms"]]
+                g["inspector"] = n
+            out.append(g)
+            continue
+        # Split: the current RQS keeps their rooms on this chart if any are
+        # left; otherwise the RQS with the most rooms keeps it.
+        keep = g.get("inspector") if g.get("inspector") in names else \
+            max(names, key=lambda n: sum(1 for v in want.values() if v == n))
+        rooms_of = {n: [r for r in g["rooms"] if want[r.get("room")] == n] for n in names}
+        for n in names:
+            if n == keep:
+                part = g
+                part["rooms"] = rooms_of[n]
+            else:
+                part = {k: v for k, v in g.items() if k not in ("rooms", "label")}
+                part.update(label=new_label(g.get("label", "X"), n), rooms=rooms_of[n])
+                split.append((g.get("label"), part["label"], n))
+            if n != (g.get("inspector") or ""):
+                rqs_changed += [(r.get("room"), g.get("inspector") or "", n) for r in rooms_of[n]]
+            part["inspector"] = n
+            out.append(part)
+    fg = out
+
+    # 2. Rooms added on the sheet by hand.
+    added, unplaced = [], []
+    for room, line in sheet.items():
+        if room in charted:
+            continue
+        hk = staff_names.resolve(line["hskp"].split("/")[0].strip(), aliases) if line["hskp"] else ""
+        if not hk:
+            unplaced.append(room)
+            continue
+        svc = _service(line["service"])
+        try:
+            t = int(float(line.get("time") or 0))
+        except ValueError:
+            t = 0
+        rec = {"room": room, "service": svc, "time": t, "pet": "", "guest": line.get("guest", ""),
+               "arriving": line.get("arriving", ""), "bld": int(room[0]),
+               "floor": int(room[1]) if room[1].isdigit() else 0,
+               "num": int("".join(c for c in room[2:] if c.isdigit()) or 0),
+               "late_checkout": "", "status": "", "notes": "added on the sheet",
+               "verify": False, "res_type": ""}
+        rqs = _rqs_name(line["rqs"], aliases)
+        dest = next((g for g in fg if g.get("housekeeper") == hk and g.get("service_type") == svc
+                     and not g.get("verify_group") and not g.get("dv_rqs2")
+                     and (g.get("inspector") or "") == rqs), None)
+        if dest is None:
+            short = {"Daily Service": "DS", "Dust n Vac": "DV", "Full Clean (IH)": "IH"}.get(svc, "FC")
+            dest = {"service_type": svc, "housekeeper": hk, "inspector": rqs, "rooms": [],
+                    "label": new_label(short + "+", hk), "c140": 0, "c120": 0}
+            fg.append(dest)
+        dest["rooms"].append(rec)
+        added.append((room, hk, svc))
+    for g in fg:
+        _recount(g)
+
+    summary = {"changed": bool(rqs_changed or added), "rqs": rqs_changed, "split": split,
+               "added": added, "unplaced": unplaced}
+    if not summary["changed"] or not save:
+        return summary
+    roles = {i.get("name"): i.get("role") for i in sched.get("inspectors_data") or []}
+    order, entries = [], {}
+    for g in fg:
+        name = g.get("inspector") or ""
+        if not name:
+            continue
+        if name not in entries:
+            order.append(name)
+            entries[name] = {"id": len(order), "name": name, "role": roles.get(name, "FC"),
+                             "groups": [], "buildings": set()}
+        entries[name]["groups"].append(g["label"])
+        entries[name]["buildings"] |= set(g.get("blds") or [])
+    inspectors = []
+    for name in order:
+        e = entries[name]
+        e["buildings"] = sorted(e["buildings"])
+        inspectors.append(e)
+    used = sorted({g.get("housekeeper") for g in fg if g.get("housekeeper")
+                   and not str(g["housekeeper"]).lower().startswith(("no hk", "need"))})
+    db.save_full_schedule(dict(sched, groups_data=fg, inspectors_data=inspectors,
+                               used_hk_set=used, updated_from_sheet_at=clock.stamp()))
+    # The mirror copies a chart's inspector onto its rooms on its next pass;
+    # done here as well so the Timing tab and the phones don't wait for it.
+    insp_of = {r.get("room"): (g["label"], g.get("inspector") or "") for g in fg
+               for r in g.get("rooms") or []}
+    now = db.get_room_statuses() or {}
+    rows_out = [{"room": room, "group_label": insp_of[room][0], "inspector": insp_of[room][1]}
+                for room in now if room in insp_of
+                and ((now[room].get("inspector") or ""), now[room].get("group_label"))
+                != (insp_of[room][1], insp_of[room][0])]
+    if rows_out:
+        db.bulk_upsert_room_statuses(rows_out)
+    return summary

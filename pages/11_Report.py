@@ -241,7 +241,7 @@ def _built(sync_token, roster_token, names_token, _weeks, _ov, _fixes, _aliases)
 # Its own tab, HP 18 Oct: "so we know if someone is not marking in timely
 # manner". It reads the HotSOS mirror, not the sheet, so it needs no sync.
 import report_timing as rtm           # noqa: E402
-if getattr(rtm, "VERSION", 0) < 1:
+if getattr(rtm, "VERSION", 0) < 2:
     import importlib
     rtm = importlib.reload(rtm)
 
@@ -410,8 +410,8 @@ def timing_tab():
     st.markdown(TM_CSS, unsafe_allow_html=True)
     st.markdown('<div class="rp-h1">⏱️ Timing</div><div class="rp-src">When each room was '
                 'started, marked done and inspected, from <b>HotSOS</b> — the app copies its '
-                'marks every two minutes, from 9 October · the RQS is the one on the app\'s '
-                'chart</div>', unsafe_allow_html=True)
+                'marks every two minutes, from 9 October · the RQS is the one typed on the '
+                'GC8 Inspections sheet</div>', unsafe_allow_html=True)
     today = clock.today()
     c1, c2, c3 = st.columns([2.3, 2.2, 2.2], vertical_alignment="bottom")
     with c1:
@@ -560,8 +560,10 @@ def timing_tab():
             f"after its start — usually the done tap came late.\n"
             f"- **First start ⚠**: the day's first room started after "
             f"{rtm._hhmm(_dt.datetime.combine(today, rtm.FIRST_START_LATE))} (carts roll at 10).\n"
-            f"- **Wait for RQS**: from the housekeeper's done to inspected. The RQS is the one on "
-            f"the app's chart; HotSOS doesn't record who inspected.\n"
+            f"- **Wait for RQS**: from the housekeeper's done to inspected. HotSOS doesn't record "
+            f"who inspected, so the RQS is the one typed on the sheet: the office PC copies the "
+            f"sheet's RQS into the app every ten minutes through the day, and from the 4 PM sync "
+            f"on the sheet's own record is used.\n"
             f"- Dust n Vac rooms have no minutes, so they aren't judged for marking. Only rooms on "
             f"the app's charts are copied from HotSOS, and a day the office PC was off has gaps.")
 

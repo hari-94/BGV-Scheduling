@@ -64,6 +64,29 @@ def full(name: str, table=None) -> str:
     return table[base] + sep + suffix
 
 
+def resolve(typed: str, table=None) -> str:
+    """The one person a name typed on a sheet means, or '' if it isn't
+    clearly one: an alias ("Grace", "Claudia P."), a full name already, or a
+    first name with a last initial that fits only one person ("Claudia P").
+    Unlike `full`, never hands back an unknown name as if it were a person."""
+    table = aliases() if table is None else table
+    t = " ".join(str(typed or "").split()).rstrip(".").strip()
+    if not t:
+        return ""
+    low = {k.lower().rstrip("."): v for k, v in table.items()}
+    if t.lower() in low:
+        return low[t.lower()]
+    people = set(table.values())
+    for p in people:
+        if p.lower() == t.lower():
+            return p
+    words = t.split()
+    first, init = words[0].lower(), (words[1][0].lower() if len(words) > 1 else None)
+    hits = {p for p in people if p.split()[0].lower() == first
+            and (init is None or (len(p.split()) > 1 and p.split()[1][0].lower() == init))}
+    return hits.pop() if len(hits) == 1 else ""
+
+
 def names_in_use(weeks=None, roster=None, since_days=28) -> dict:
     """{name: where it appears} for the people who matter now: housekeepers
     and RQS on the last four weeks and everything ahead, plus the standing

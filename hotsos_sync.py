@@ -134,6 +134,8 @@ _HDR = {
     "hskp": ("hskp", "housekeeper", "attendant", "room attendant", "hk"),
     "rqs": ("rqs", "inspector"),
     "time": ("time (min)", "time", "minutes", "credits"),
+    "guest": ("current guest or status", "current guest", "guest"),
+    "arriving": ("arriving guest", "arriving"),
 }
 
 
@@ -177,7 +179,12 @@ def read_rows(rows):
         out.append({"room": room,
                     "service": _clean(cell(r, "service")),
                     "hskp": _clean(cell(r, "hskp")),
-                    "rqs": _clean(cell(r, "rqs"))})
+                    "rqs": _clean(cell(r, "rqs")),
+                    # Only app_sync.from_sheet reads these (a room added by
+                    # hand needs its minutes and guest).
+                    "time": _clean(cell(r, "time")),
+                    "guest": _clean(cell(r, "guest")),
+                    "arriving": _clean(cell(r, "arriving"))})
     return out
 
 

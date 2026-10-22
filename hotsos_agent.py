@@ -481,6 +481,42 @@ def reconcile_charts():
     return None
 
 
+SHEET_SYNC_SECONDS = 600
+_SHEET_SEEN = {}
+
+
+def sync_sheet(cfg):
+    """What the team typed in today's tab since the push -- the RQS on each
+    room, rooms added by hand -- carried into the app (app_sync.from_sheet;
+    HP 22 Oct: RQS changed on 18 rooms after 8 and the app kept the 5 AM
+    ones). Same rule as reconcile_charts: only once today is pushed and no
+    schedule has been generated since. Read from the synced copy, and only
+    when it changed since the last look; a copy that is mid-sync is tried
+    again next time."""
+    import app_sync
+    path = cfg.get("workbook")
+    if not path or not Path(path).exists():
+        return None
+    truth = db._load_key(hs.TRUTH_KEY) or {}
+    if truth.get("date") != clock.today_iso():
+        return None
+    gen = (db.load_full_schedule() or {}).get("generated_at")
+    if gen and _dt.datetime.fromisoformat(gen) > _dt.datetime.fromisoformat(truth["at"]):
+        return None
+    mtime = Path(path).stat().st_mtime
+    if _SHEET_SEEN.get("mtime") == mtime and _SHEET_SEEN.get("day") == clock.today_iso():
+        return None
+    tab, rows = hs.read_workbook(path, clock.today())
+    out = app_sync.from_sheet(rows, save=True)
+    _SHEET_SEEN.update(mtime=mtime, day=clock.today_iso())
+    if out.get("changed"):
+        log(f"sheet -> app ({tab}): RQS on {len(out['rqs'])} room(s), "
+            f"{len(out['split'])} chart(s) split, {len(out['added'])} room(s) added"
+            + (f"; no housekeeper named, not placed: {', '.join(out['unplaced'])}"
+               if out.get("unplaced") else ""))
+    return out
+
+
 # The mirror keeps one HotSOS browser signed in all day. Playwright allows one
 # of those per thread: on the loop's own thread, the next Preview, Push or
 # SharePoint read failed with "using Playwright Sync API inside the asyncio
@@ -500,6 +536,14 @@ def _mirror_loop():
                 try:
                     rec = sync_room_status(cfg)
                     rec["reconciled"] = reconcile_charts()
+                    # On this thread, after the reconcile, so the two never
+                    # write today's charts at the same moment.
+                    if time.time() - _SHEET_SEEN.get("at", 0) > SHEET_SYNC_SECONDS:
+                        _SHEET_SEEN["at"] = time.time()
+                        try:
+                            rec["sheet"] = bool((sync_sheet(cfg) or {}).get("changed"))
+                        except Exception as ex:
+                            log(f"sheet -> app: {type(ex).__name__}: {ex}")
                 except Exception as ex:
                     rec = {"at": clock.stamp(), "error": f"{type(ex).__name__}: {ex}"}
                     log(f"room status sync failed: {rec['error']}")
