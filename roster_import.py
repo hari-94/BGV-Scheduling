@@ -858,12 +858,12 @@ def people_index(rows):
                   "home": homes.get(pid, ""), "n": counts[pid]}
             for pid, sp in spellings.items()}
 
-def match_person(index, *candidates):
+def match_person(index, *candidates, aliases=None):
     """Best pid for a sign-in name, or None.
 
     Tries each candidate whole, then with trailing digits stripped — app
     usernames look like "hari8059" while the sheet just says "Hari" — then on
-    first name alone.
+    first name, where the rest of the name must not disagree.
     """
     names = []
     for c in candidates:
@@ -880,13 +880,33 @@ def match_person(index, *candidates):
         for pid, info in index.items():
             if norm_name(info["label"]) == want:
                 return pid
+    # First name, but never against the rest of the name. Taking the first
+    # sheet row with the same first name sent "Luis Rendon" to Luis Urbina's
+    # week and "Edgar Onofre Moran" to Edgar Martinez's (23 Oct). So where
+    # both sides carry a surname or an initial they must agree ("Luis R." is
+    # Luis Rendon), and a bare first name on the sheet is not taken when the
+    # name directory says it is somebody else ("Edgar" -> Edgar Martinez).
+    full_of = {norm_name(k): norm_name(v) for k, v in (aliases or {}).items()}
     for want in names:
-        head = want.split(" ")[0]
+        words = want.split(" ")
+        head = words[0]
         if len(head) < 3:
             continue
+        fits = []
         for pid, info in index.items():
-            if norm_name(info["label"]).split(" ")[0] == head:
-                return pid
+            lab = norm_name(info["label"]).split(" ")
+            if lab[0] != head:
+                continue
+            if len(words) > 1 and len(lab) > 1:
+                if not (words[1].startswith(lab[1]) or lab[1].startswith(words[1])):
+                    continue
+            elif len(words) > 1:
+                other = full_of.get(" ".join(lab))
+                if other and other != want and not want.startswith(other):
+                    continue
+            fits.append(pid)
+        if len(fits) == 1 or (fits and len(words) > 1):
+            return fits[0]
     return None
 
 def summarise_person(rows, pid=None, person_key=None, person=None):

@@ -182,11 +182,19 @@ now_section = _current_sections(rows)
 # for it -- the nickname alone can match an old spelling with no weeks left.
 try:
     import staff_names
-    _dir = {k.lower(): v for k, v in staff_names.aliases().items()}
+    _aliases = staff_names.aliases()
+    _dir = {k.lower(): v for k, v in _aliases.items()}
     _full = _dir.get(me_display.strip().lower(), "") if me_display else ""   # "ARACELI" too
 except Exception:
-    _full = ""
-mine = ri.match_person(index, *[n for n in (_full, me_display) if n], me_user)
+    _aliases, _full = {}, ""
+# The name directory also says who a bare first name on the sheet is, so
+# "Edgar Onofre Moran" is not handed Edgar Martinez's week (23 Oct). A running
+# app may still hold a roster_import from before `aliases` existed.
+try:
+    mine = ri.match_person(index, *[n for n in (_full, me_display) if n], me_user,
+                           aliases=_aliases)
+except TypeError:
+    mine = ri.match_person(index, *[n for n in (_full, me_display) if n], me_user)
 # Only admins look up other people. RQS and housekeepers see themselves —
 # this page is personal, and the roster pages already cover the whole team.
 can_browse = auth.can("can_manage_users")
@@ -194,11 +202,18 @@ can_browse = auth.can("can_manage_users")
 if mine is None or can_browse:
     order = sorted(index, key=lambda p: index[p]["label"].lower())
     labels = [person_label(index[p], now_section.get(p)) for p in order]
-    default = order.index(mine) if mine in order else 0
+    # Somebody the schedule doesn't know starts on nobody, not on the first
+    # name in the list: unmatched, Edgar Onofre Moran was shown Adrian Lopez's
+    # week (23 Oct) until he changed it.
+    default = order.index(mine) if mine in order else (0 if can_browse else None)
     sel = st.selectbox(
         "Whose schedule?" if can_browse else
         "We could not match your sign-in to the schedule — pick your name",
-        labels, index=default, key="mh_person")
+        labels, index=default, key="mh_person", placeholder="Pick your name")
+    if sel is None:
+        st.info("If your name isn't in the list, you're not on the staff schedule yet — "
+                "ask your manager to add you.")
+        st.stop()
     mine = order[labels.index(sel)]
 
 info = index[mine]

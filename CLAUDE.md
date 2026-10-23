@@ -725,6 +725,17 @@ id's weight. Below 820px the menu is a grid, three across on a phone; above, one
 1050px bar on every page but the Schedule page, whose sidebar takes part of the
 window. A page-wide rule for rows or columns can't reach it, and doesn't need to.
 
+**My Home finds a person by name, and a first name alone is not a person.**
+`roster_import.match_person` used to fall back to the first sheet row with the
+same first name: "Luis Rendon" got Luis Urbina's week, "David Galeano" David
+Serrano's, and "Edgar Onofre Moran" Edgar Martinez's (23 Oct). Where both
+sides carry a surname or an initial they must now agree, and a bare first
+name on the sheet is refused when the name directory says it is somebody
+else (`staff_directory` "Edgar" -> Edgar Martinez). Somebody still unmatched
+gets an empty "pick your name" list -- it used to open on the first name in
+it, so they were shown Adrian Lopez's week. Replayed over every account, the
+stricter match changed exactly those two, both for the better.
+
 **Test what a person does.** Two bugs survived a passing test because the test
 committed a value with a rerun before clicking, which nobody does.
 
