@@ -21,8 +21,8 @@ The hard rules are fcpack's: the cap, one 140, a 140 beside at most one 120,
 no 120+70+70+70 unless it is one apartment, apartments never split (the
 solver places `fcpack.bundles`, never loose rooms). The 120+70+70+70 rule was
 a soft price here, cheaper than one level of walking, and the solver paid it
-whenever that saved a staircase. Buildings 2 and 3 cannot meet because the caller hands this one
-building at a time.
+whenever that saved a staircase. Buildings 2 and 3 never meet on a chart: the
+model forbids it, so the caller may hand over one building or the whole day.
 
 The heuristic's own answer goes in as the starting point, so the solver can
 only ever match or beat it; and the caller audits what comes back and keeps
@@ -69,7 +69,8 @@ def _chart_of_hint(buns, hint):
 
 
 def pack(rooms, cap, loc_of, low_min, hint=None):
-    """Exact Full Clean charts for one building's rooms.
+    """Exact Full Clean charts for one building's rooms, or several buildings'
+    (never building 2 with building 3 on one chart).
 
     Returns a list of charts (lists of room dicts), or raises -- the caller
     keeps its own charts on any exception. `hint` is the heuristic's charts for
@@ -89,7 +90,12 @@ def pack(rooms, cap, loc_of, low_min, hint=None):
         start = None
 
     T = [b.time for b in buns]
-    L = [min(b.levels) for b in buns]
+    # Levels are numbered within a building (building * 10 + level), so the
+    # same level number in two buildings is two floors, and a chart spanning
+    # buildings pays for the distance in step 3 -- the count and short-day
+    # steps come first, so it crosses only when that saves something.
+    B = [getattr(loc_of(b.rooms[0]), "bld", 0) for b in buns]
+    L = [B[i] * 10 + min(b.levels) for i, b in enumerate(buns)]
     X = [int(round(b.x)) for b in buns]
     levels = sorted(set(L))
     xmax = max(X) + 1
@@ -105,6 +111,19 @@ def pack(rooms, cap, loc_of, low_min, hint=None):
     y = [m.NewBoolVar("y%d" % j) for j in range(K)]
     for i in range(n):
         m.AddExactlyOne(x[i, j] for j in range(K))
+    # Buildings 2 and 3 have no bridge: never on one chart. Building 1 may go
+    # with either (the caller hands this one building, or building 1 with its
+    # neighbours, 23 Oct).
+    in2 = [i for i in range(n) if B[i] == 2]
+    in3 = [i for i in range(n) if B[i] == 3]
+    if in2 and in3:
+        for j in range(K):
+            h2, h3 = m.NewBoolVar("h2_%d" % j), m.NewBoolVar("h3_%d" % j)
+            for i in in2:
+                m.AddImplication(x[i, j], h2)
+            for i in in3:
+                m.AddImplication(x[i, j], h3)
+            m.Add(h2 + h3 <= 1)
 
     t, short, deficit, near = [], [], [], []
     for j in range(K):

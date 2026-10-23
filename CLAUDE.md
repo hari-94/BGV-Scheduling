@@ -323,6 +323,21 @@ a staircase: seven 120+70+70+70 charts on 4 October. **It is a hard rule now,
 in `fcpack._legal`**, so every pass refuses it. The one exception is a single
 apartment of that shape, which cannot be split.
 
+**Building 1 is packed with its neighbours too** (`pack_fc_sequential`,
+HP 23 Oct: "pack tight"). Each building packed alone left every building's
+last, part-filled group as a person of its own: 23 October was five people on
+1,320 minutes that four carry, because building 2's 190 and building 1's 260
+could not meet. The day is now also packed as building 1 + 2 beside 3,
+building 1 + 3 beside 2, and the whole day as one region (`fcsolve` forbids
+buildings 2 and 3 on one chart and numbers levels per building, so crossing a
+bridge costs walking in step 3); the layout with the fewest groups, then the
+fewest short, then the fewest crossing wins, and a merged layout is solved
+only when its lower bound could beat the separate one. Replayed over the 60
+stored days to 23 October: weekdays 495 -> 459 housekeepers and 113 -> 50
+short charts, weekends 435 -> 422 and 35 -> 15, never worse on any day; the
+price is 1-3 charts a day crossing a bridge (8 on 5 September, which saved
+two people). 8 s a light day, 23 s a heavy one (46 s at most).
+
 **Short of people, the short charts are filled from the unstaffed ones.** The
 packer plans one housekeeper per chart, so on a short-staffed day the last
 charts go to "No HK available" while a short chart still goes home early -- 4

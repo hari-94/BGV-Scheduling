@@ -3902,15 +3902,16 @@ def pack_fc_sequential(room_list):
                 for r in chart]
         return -max(nums) if nums else 0
 
-    charts, per_bld = [], []
-    for b in sorted(by_bld, key=lambda x: WALK.get(x, 9)):
-        here = [r for u in by_bld[b] for r in u.rooms]
+    def _pack_region(region_units):
+        """One region's groups: fcpack, then gathered and tightened, with
+        the rooms as the exact solver's starting point."""
+        here = [r for u in region_units for r in u.rooms]
         try:
             packed = fcpack.pack(here, MAX_FC, _where, LOW_MIN)
         except Exception as ex:
-            print("[fc] building %s would not pack (%s); cutting it in order" % (b, ex))
+            print("[fc] region would not pack (%s); cutting it in order" % ex)
             packed, cur, t, n140, n120, n70, blds = [], [], 0, 0, 0, 0, set()
-            for u in by_bld[b]:
+            for u in sorted(region_units, key=_key):
                 if cur and not fcpack._legal(t + u.time, n140 + u.n140,
                                              n120 + u.n120, blds | u.blds, MAX_FC,
                                              n70 + u.n70):
@@ -3931,16 +3932,60 @@ def pack_fc_sequential(room_list):
         # Then, without moving minutes into or out of the day, lift what can be
         # lifted over LOW_MIN and put each group onto as few floors as it fits.
         packed = _fc_tighten(packed)
-        per_bld.append((here, packed))
+        return here, packed
 
-    # Finally hand each building to the exact solver, with the groups above as
-    # its starting point; it keeps them unless it can do better. The solver
-    # releases the GIL and the buildings share nothing, so all three run at
-    # once -- 8.6s a day one after another, 3.4s together, identical charts.
+    # Each building packed alone left every building's last, part-filled
+    # group as a person of its own. On 23 October that was building 2's 190
+    # minutes and building 1's 260 -- five people on 1,320 minutes that four
+    # carry (HP: "pack tight"). Building 1 bridges to both others, so the day
+    # is also packed with building 1 alongside building 2, and alongside
+    # building 3; buildings 2 and 3 never share a region, so never a group.
+    # The layout with the fewest groups wins, then the fewest short ones,
+    # then the one that keeps buildings apart. A merged layout is only solved
+    # when its own lower bound could beat the separate one, so a day with
+    # nothing to gain costs no more than before.
+    import math as _m
+
+    def _floor(regions):
+        return sum(_m.ceil(sum(u.time for u in reg) / MAX_FC) for reg in regions if reg)
+
+    layouts = [[by_bld[b] for b in sorted(by_bld, key=lambda x: WALK.get(x, 9))]]
+    if by_bld.get(1) and (by_bld.get(2) or by_bld.get(3)):
+        rest = [b for b in by_bld if b not in (1, 2, 3)]
+        for with_1 in (2, 3):
+            other = 3 if with_1 == 2 else 2
+            merged = [by_bld[with_1] + by_bld[1], by_bld.get(other, [])] + [by_bld[b] for b in rest]
+            layouts.append([reg for reg in merged if reg])
+    # And the whole day as one region, for when building 1 is best split
+    # between its two neighbours (23 Oct: 1020A/B with building 2, 1424H with
+    # building 3). fcsolve itself keeps buildings 2 and 3 off one chart.
+    if len([b for b in (1, 2, 3) if by_bld.get(b)]) > 1:
+        layouts.append([[u for b in by_bld for u in by_bld[b]]])
+    base_floor = _floor(layouts[0])
+    layouts = [layouts[0]] + [l for l in layouts[1:] if _floor(l) < base_floor]
+
+    jobs = [reg for layout in layouts for reg in layout]
+    per_reg = [_pack_region(reg) for reg in jobs]
+    # Then the exact solver, every region at once: it keeps the starting
+    # groups unless it can do better. CP-SAT releases the GIL and the regions
+    # share nothing -- 8.6s a day one building after another, 3.4s together.
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=max(1, len(per_bld))) as pool:
-        solved = list(pool.map(lambda hp: _fc_exact(*hp), per_bld))
-    for packed in solved:
+    with ThreadPoolExecutor(max_workers=max(1, min(len(per_reg), 6))) as pool:
+        solved_all = list(pool.map(lambda hp: _fc_exact(*hp), per_reg))
+    results, i = [], 0
+    for layout in layouts:
+        groups = solved_all[i:i + len(layout)]
+        i += len(layout)
+        flat = [c for g in groups for c in g]
+        n_short = sum(1 for c in flat if sum(int(r.get("time") or 0) for r in c) < LOW_MIN)
+        n_cross = sum(1 for c in flat if len({str(r.get("room"))[0] for r in c}) > 1)
+        results.append(((len(flat), n_short, n_cross), groups))
+    best = min(range(len(results)), key=lambda k: (results[k][0], k))
+    if best:
+        print("[fc] building 1 packed with its neighbour: %s against %s"
+              % (results[best][0], results[0][0]))
+    charts = []
+    for packed in results[best][1]:
         charts.extend(sorted(packed, key=_down))
 
     kept = sorted(str(r.get("room")) for c in charts for r in c)
