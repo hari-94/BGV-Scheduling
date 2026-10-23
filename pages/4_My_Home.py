@@ -216,6 +216,31 @@ if mine is None or can_browse:
         st.stop()
     mine = order[labels.index(sel)]
 
+# One person, every row. The sheet keeps somebody who works two sections as
+# two rows ("Federico Lopez" and "Federico Lopez · Houseperson PM"), and each
+# row was a person of its own here: Federico's 639 PM days, Leonardo's
+# overnights and Rosibel's Houseperson AM never reached their pages (23 Oct).
+# A day on two rows shows both cells and counts as worked if either does.
+def _base(pid):
+    return ri.norm_name(str(index[pid]["label"]).split(" · ")[0])
+
+
+_mine_all = {p for p in index if _base(p) == _base(mine)} | {mine}
+if len(_mine_all) > 1:
+    _days = {}
+    for _r in rows:
+        if _r["pid"] not in _mine_all:
+            continue
+        _r = dict(_r, pid=mine)
+        _was = _days.get(_r["date"])
+        if _was is None:
+            _days[_r["date"]] = _r
+        elif _r["worked"] and not _was["worked"]:
+            _days[_r["date"]] = _r
+        elif _r["worked"] and _was["worked"] and _r["raw"] and _r["raw"] != _was["raw"]:
+            _days[_r["date"]] = dict(_was, raw=f'{_was["raw"]} · {_r["raw"]}')
+    rows = [r for r in rows if r["pid"] not in _mine_all] + list(_days.values())
+
 info = index[mine]
 s_all = ri.summarise_person(rows, pid=mine)
 by_date = {r["date"]: r for r in s_all["rows"]}

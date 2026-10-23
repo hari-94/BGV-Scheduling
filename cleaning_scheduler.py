@@ -6165,8 +6165,14 @@ if _is_hk:
         except Exception:
             pass
 
-    # Collect this HK's groups
-    my_groups = [g for g in fg if g.get("housekeeper","") == _my_name]
+    # Collect this HK's groups -- by the name the charts use, matched the way
+    # My Rooms matches it. Comparing the display name exactly showed "Senia"
+    # 0 rooms beside her four on "Senia Fernandez"'s chart (23 Oct).
+    import assignments as _asg
+    _chart_me = _asg.match_name(
+        sorted({g.get("housekeeper", "") for g in fg if g.get("housekeeper")}),
+        _my_name, auth.current_user().get("username", "")) or ""
+    my_groups = [g for g in fg if _chart_me and g.get("housekeeper", "") == _chart_me]
 
     # Stats
     my_rooms_all = [r for g in my_groups for r in g["rooms"]]
@@ -6275,7 +6281,7 @@ if _is_hk:
                 _hrk = f"{_hgidx}_{_hridx}_{rm}" # fully unique row key
                 # Ensure room is initialised in rs with this HK's info
                 if rm not in rs:
-                    rs[rm] = {"room":rm,"status":"pending","housekeeper":_my_name,
+                    rs[rm] = {"room":rm,"status":"pending","housekeeper":_chart_me or _my_name,
                               "group_label":g_label,"inspector":insp_name}
                 r_state = rs.get(rm, {"status":"pending"})
                 cur = r_state.get("status","pending")

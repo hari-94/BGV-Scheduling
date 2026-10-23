@@ -736,6 +736,16 @@ gets an empty "pick your name" list -- it used to open on the first name in
 it, so they were shown Adrian Lopez's week. Replayed over every account, the
 stricter match changed exactly those two, both for the better.
 
+**One person, every row, and the chart's name, not the sign-in's.** The
+sheet keeps somebody who works two sections as two rows ("Federico Lopez"
+and "Federico Lopez · Houseperson PM"), and `people_index` gives each its own
+pid; My Home now gathers every row with the same name before the " · " onto
+the matched person, so Federico's PM days, Leonardo's overnights and Susan's
+second shift reach them (23 Oct). The Schedule page's housekeeper view
+compared the display name to the chart's housekeeper exactly and showed
+"Senia" 0 rooms beside her four on Senia Fernandez's chart; it now matches
+with `assignments.match_name`, as My Rooms does.
+
 **Test what a person does.** Two bugs survived a passing test because the test
 committed a value with a rerun before clicking, which nobody does.
 
