@@ -239,6 +239,7 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         generate.ds_auto = {}
         generate.leftover = []
         generate.swapped = []
+        generate.moved_insp = []
 
         def run_generate():
             at.text_area(key="room_input").set_value(room_text)
@@ -276,6 +277,8 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
                                                 if "leftover_given" in at.session_state else [])]
         generate.swapped = [tuple(x) for x in (at.session_state["swapped_insp"]
                                                if "swapped_insp" in at.session_state else [])]
+        generate.moved_insp = [tuple(x[:2]) + (len(x[2]),) for x in (at.session_state["moved_insp"]
+                                                                if "moved_insp" in at.session_state else [])]
         generate.roles = {k: (at.session_state[k] if k in at.session_state else "")
                           for k in ("rqs1", "rqs2")}
         return fg
@@ -1017,6 +1020,8 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
         note += f" · out of service, not on this sheet: {blocked_rooms.describe(_gone)}"
     if _kept:
         note += " · blocked but a guest arrives, so on the sheet: " + ", ".join(r for r, _ in _kept)
+    for _a, _b, _n in getattr(generate, "moved_insp", []):
+        note += f" · {_n} chart(s) inspected by {_b} instead of {_a} (manager's call)"
     for _a, _b in getattr(generate, "swapped", []):
         note += f" · inspections swapped (manager's call): {_a} ⇄ {_b}"
     for _n, _rs in getattr(generate, "leftover", []):

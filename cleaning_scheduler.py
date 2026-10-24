@@ -4543,6 +4543,45 @@ def ds_take_open(groups, cap=DS_CAP):
     return [g for g in groups if g.get("rooms") or g.get("verify_group")]
 
 
+def move_inspections(groups, inspectors, moves):
+    """Whole charts handed from one inspector to another for the day
+    (borrow_off "inspect_move": [{"from", "to", "upto"}]), as on 24 October:
+    "I can take more rooms and Gustavo can have less, since he has more dust
+    n vac to do". The biggest of `from`'s charts that still keeps `to` within
+    `upto` rooms goes first, then the next. Only someone already inspecting
+    that day takes any. Returns (groups, inspectors, [(from, to, labels)])."""
+    done = []
+    for mv in moves:
+        a, b = mv.get("from"), mv.get("to")
+        upto = int(mv.get("upto") or 13)     # INSP_ROOM_MAX, which lives inside assign_inspectors
+        if not a or not b or not any(g.get("inspector") == b for g in groups):
+            continue
+
+        def rooms_of(n):
+            return sum(len(g.get("rooms") or []) for g in groups if g.get("inspector") == n)
+        moved = []
+        for g in sorted((g for g in groups if g.get("inspector") == a and not g.get("dv_rqs2")),
+                        key=lambda g: -len(g.get("rooms") or [])):
+            if rooms_of(b) + len(g.get("rooms") or []) <= upto:
+                g["inspector"] = b
+                moved.append(g["label"])
+        if not moved:
+            continue
+        for e in inspectors:
+            if e.get("name") == a:
+                e["groups"] = [l for l in e.get("groups") or [] if l not in moved]
+        mine = next((e for e in inspectors if e.get("name") == b and e.get("role") == "FC"), None)
+        if mine is None:
+            mine = {"id": len(inspectors) + 1, "name": b, "role": "FC", "groups": [], "buildings": [],
+                    "travel_warning": False, "heavy_warning": False, "complexity": 0}
+            inspectors.append(mine)
+        mine["groups"] = list(mine.get("groups") or []) + moved
+        mine["buildings"] = sorted({x for g in groups if g.get("inspector") == b for x in g.get("blds") or []})
+        inspectors[:] = [e for e in inspectors if e.get("groups") or e.get("role") != "FC"]
+        done.append((a, b, moved))
+    return groups, inspectors, done
+
+
 def swap_inspectors(groups, inspectors, pairs):
     """Two inspectors trade their Full Clean rounds for the day (borrow_off
     "swap_inspectors"), as on 18 October: Mayra Benalcazar, RQS 1, had the 7
@@ -5964,6 +6003,11 @@ if run:
                         _day_rule = {}
                     if _day_rule.get("inspect_overflow") == "rqs12":
                         fg, inspectors = overflow_to_rqs12(fg, inspectors, rqs1, rqs2)
+                    # Charts handed from one inspector to another (the manager's call).
+                    st.session_state["moved_insp"] = []
+                    if _day_rule.get("inspect_move"):
+                        fg, inspectors, st.session_state["moved_insp"] = move_inspections(
+                            fg, inspectors, list(_day_rule["inspect_move"]))
                     # Two inspectors trade rounds (the manager's call for the day).
                     st.session_state["swapped_insp"] = []
                     if _day_rule.get("swap_inspectors"):
@@ -6019,6 +6063,9 @@ if run:
                     if _bw:
                         st.info("Short of people — moved onto rooms from other duties: "
                                 + "; ".join(f"**{n}** ({r}, was {d})" for n, r, d in _bw))
+                    for _a, _b, _ls in st.session_state.get("moved_insp") or []:
+                        st.info(f"Inspections moved (the manager's call for the day): {', '.join(_ls)} "
+                                f"from **{_a}** to **{_b}**")
                     for _a, _b in st.session_state.get("swapped_insp") or []:
                         st.info(f"Inspections swapped (the manager's call for the day): "
                                 f"**{_a}** ⇄ **{_b}**")
