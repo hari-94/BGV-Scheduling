@@ -360,6 +360,14 @@ their charts go back to unstaffed and `fill_from_unstaffed` /
 unstaffed than before means they stay off rooms (`released` in the session and
 the build's record); otherwise the day is kept exactly as it was.
 
+**And a scheduled housekeeper with no chart goes on first.** Re-staffing
+with the borrowed people in can leave somebody on the schedule over: on 24
+October Lilliam Peralta (ON) had nothing while Luis Urbina and Araceli Duarte
+were pulled off Dust and Vac and shadowing, and the passes only deal rooms to
+people already on a chart. `release_borrowed` now first hands a borrowed
+person's whole chart to a free scheduled housekeeper who may legally take it
+(the building 2/3 rule), and the borrowed person goes back to their duty.
+
 Inspectors are batched the same way: a building at a time, its trailing
 part-batch left alone until there are not enough inspectors, then merged
 cheapest-bridge-first. RQS rounds crossing a building 245 → 192.

@@ -4626,9 +4626,33 @@ def release_borrowed(groups, names, roster):
 
     released = []
     before = unstaffed(groups)
+    # Somebody on the schedule with no chart at all goes on before anybody
+    # borrowed stays on. Re-staffing with the borrowed people in can leave a
+    # scheduled housekeeper over: on 24 October Lilliam Peralta (ON, building
+    # 3) had nothing while Luis Urbina and Araceli Duarte were pulled off Dust
+    # and Vac and shadowing -- and the passes below only deal rooms to people
+    # already on a chart, so they never saw her.
+    on_chart = {g.get("housekeeper") for g in groups if g.get("housekeeper")}
+    free = sorted(n for n, v in (roster or {}).items()
+                  if v.get("present") and n not in names and n not in on_chart)
     for name in sorted(names, key=lambda p: load(groups, p)):
         if not any(g.get("housekeeper") == name for g in groups):
             released.append(name)              # given nothing at all
+            continue
+        mine = [g for g in groups if g.get("housekeeper") == name]
+        blds = set().union(*[set(g.get("blds") or []) for g in mine])
+        only_ds = all(g.get("service_type") == SVC_DS for g in mine)
+
+        def _can(p):
+            home = (roster.get(p) or {}).get("building", 0)
+            return only_ds or not ((home == 2 and 3 in blds) or (home == 3 and 2 in blds))
+        swap = next((p for p in sorted(free, key=lambda p: ((roster.get(p) or {}).get("building", 0)
+                                                           not in blds, p)) if _can(p)), None)
+        if swap:
+            for g in mine:
+                g["housekeeper"] = swap
+            free.remove(swap)
+            released.append(name)
             continue
         trial = _copy.deepcopy(groups)
         n = 0
