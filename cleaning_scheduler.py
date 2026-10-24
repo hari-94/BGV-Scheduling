@@ -3961,25 +3961,36 @@ def pack_fc_sequential(room_list):
     # building 3). fcsolve itself keeps buildings 2 and 3 off one chart.
     if len([b for b in (1, 2, 3) if by_bld.get(b)]) > 1:
         layouts.append([[u for b in by_bld for u in by_bld[b]]])
-    base_floor = _floor(layouts[0])
-    layouts = [layouts[0]] + [l for l in layouts[1:] if _floor(l) < base_floor]
-
-    jobs = [reg for layout in layouts for reg in layout]
-    per_reg = [_pack_region(reg) for reg in jobs]
-    # Then the exact solver, every region at once: it keeps the starting
-    # groups unless it can do better. CP-SAT releases the GIL and the regions
-    # share nothing -- 8.6s a day one building after another, 3.4s together.
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=max(1, min(len(per_reg), 6))) as pool:
-        solved_all = list(pool.map(lambda hp: _fc_exact(*hp), per_reg))
-    results, i = [], 0
-    for layout in layouts:
-        groups = solved_all[i:i + len(layout)]
-        i += len(layout)
-        flat = [c for g in groups for c in g]
-        n_short = sum(1 for c in flat if sum(int(r.get("time") or 0) for r in c) < LOW_MIN)
-        n_cross = sum(1 for c in flat if len({str(r.get("room"))[0] for r in c}) > 1)
-        results.append(((len(flat), n_short, n_cross), groups))
+
+    def _solve(lays):
+        """[(count, short, crossing), groups] per layout. The exact solver runs
+        every region at once: CP-SAT releases the GIL and the regions share
+        nothing -- 8.6s a day one building after another, 3.4s together."""
+        jobs = [reg for layout in lays for reg in layout]
+        per_reg = [_pack_region(reg) for reg in jobs]
+        with ThreadPoolExecutor(max_workers=max(1, min(len(per_reg), 6))) as pool:
+            solved_all = list(pool.map(lambda hp: _fc_exact(*hp), per_reg))
+        out, i = [], 0
+        for layout in lays:
+            groups = solved_all[i:i + len(layout)]
+            i += len(layout)
+            flat = [c for g in groups for c in g]
+            n_short = sum(1 for c in flat if sum(int(r.get("time") or 0) for r in c) < LOW_MIN)
+            n_cross = sum(1 for c in flat if len({str(r.get("room"))[0] for r in c}) > 1)
+            out.append(((len(flat), n_short, n_cross), groups))
+        return out
+
+    # The buildings apart first; a merged layout is then solved whenever its
+    # floor could beat what that actually came to, in people or in short
+    # days. Measuring against the separate layout's *floor* skipped them on
+    # 24 October: both floors were 17, the separate layout came to 18, and the
+    # whole day packs into 17.
+    results = _solve(layouts[:1])
+    (base_n, base_short, _), _ = results[0]
+    more = [l for l in layouts[1:] if _floor(l) < base_n or (base_short and _floor(l) <= base_n)]
+    if more:
+        results += _solve(more)
     best = min(range(len(results)), key=lambda k: (results[k][0], k))
     if best:
         print("[fc] building 1 packed with its neighbour: %s against %s"
@@ -4284,10 +4295,15 @@ def balance_light_charts(groups):
                     key=lambda g: -g["time"]):
         people = {x["housekeeper"] for x in live if not is_unassigned_hk(x.get("housekeeper"))}
         gb = bset(g["rooms"])
-        fits = [p for p in people if total(p) + g["time"] <= MAX_FC and total(p) < LOW_MIN
+        # The light first, but not only the light: on 24 October a 20-minute
+        # Daily Service room (2136I) stayed open beside Josselin at 330 with
+        # 2132E and 2132G next door, because 330 isn't under LOW_MIN. Nobody
+        # on it is worse than somebody going to 350.
+        fits = [p for p in people if total(p) + g["time"] <= MAX_FC
                 and not mixes(p_blds(p) | gb)]
         if fits:
-            g["housekeeper"] = min(fits, key=lambda p: (not (p_blds(p) & gb), total(p)))
+            g["housekeeper"] = min(fits, key=lambda p: (total(p) >= LOW_MIN,
+                                                        not (p_blds(p) & gb), total(p)))
     return groups
 
 

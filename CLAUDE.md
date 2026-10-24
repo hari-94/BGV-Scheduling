@@ -164,6 +164,9 @@ rooms off any round over `LOW_MIN` to whoever was light, which on 15 October
 cut Lilliam's round to 330 and handed 125 minutes to Luis Urbina on Full Clean:
 three people on 770 minutes two cover. It now only hands *open* charts to the
 light. Don't reintroduce sharing a staffed round.
+An open chart goes to the light first, but to anyone whose day stays within
+MAX_FC if nobody light can take it (24 Oct: a 20-minute room stayed open
+beside Josselin at 330).
 
 **Daily Service is filled one housekeeper at a time** (`_ds_fill`, HP 21
 Oct: "only pick the next housekeeper if the previous one is filled with 460
@@ -332,7 +335,8 @@ building 1 + 3 beside 2, and the whole day as one region (`fcsolve` forbids
 buildings 2 and 3 on one chart and numbers levels per building, so crossing a
 bridge costs walking in step 3); the layout with the fewest groups, then the
 fewest short, then the fewest crossing wins, and a merged layout is solved
-only when its lower bound could beat the separate one. Replayed over the 60
+only when its lower bound could beat what the separate one actually came to
+(its own lower bound hid 24 October's 17 against 18). Replayed over the 60
 stored days to 23 October: weekdays 495 -> 459 housekeepers and 113 -> 50
 short charts, weekends 435 -> 422 and 35 -> 15, never worse on any day; the
 price is 1-3 charts a day crossing a bridge (8 on 5 September, which saved
