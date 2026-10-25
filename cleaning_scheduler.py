@@ -4561,7 +4561,7 @@ def ds_take_open(groups, cap=DS_CAP):
 
 def move_inspections(groups, inspectors, moves):
     """Whole charts handed from one inspector to another for the day
-    (borrow_off "inspect_move": [{"from", "to", "upto"}]), as on 24 October:
+    (borrow_off "inspect_move": [{"from", "to", "upto", "service"?}]), as on 24 October:
     "I can take more rooms and Gustavo can have less, since he has more dust
     n vac to do". The biggest of `from`'s charts that still keeps `to` within
     `upto` rooms goes first, then the next. Only someone already inspecting
@@ -4576,7 +4576,12 @@ def move_inspections(groups, inspectors, moves):
         def rooms_of(n):
             return sum(len(g.get("rooms") or []) for g in groups if g.get("inspector") == n)
         moved = []
-        for g in sorted((g for g in groups if g.get("inspector") == a and not g.get("dv_rqs2")),
+        # "service" limits the move to one kind of chart: 25 Oct, Mayra (RQS 1
+        # and 2) handed her 4 Full Clean rooms to Ana Caisa but keeps the
+        # Daily Service and in-house rounds that are RQS 2's by design.
+        svc = mv.get("service")
+        for g in sorted((g for g in groups if g.get("inspector") == a and not g.get("dv_rqs2")
+                         and (not svc or g.get("service_type") == svc)),
                         key=lambda g: -len(g.get("rooms") or [])):
             if rooms_of(b) + len(g.get("rooms") or []) <= upto:
                 g["inspector"] = b
