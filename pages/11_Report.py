@@ -241,7 +241,7 @@ def _built(sync_token, roster_token, names_token, _weeks, _ov, _fixes, _aliases)
 # Its own tab, HP 18 Oct: "so we know if someone is not marking in timely
 # manner". It reads the HotSOS mirror, not the sheet, so it needs no sync.
 import report_timing as rtm           # noqa: E402
-if getattr(rtm, "VERSION", 0) < 2:
+if getattr(rtm, "VERSION", 0) < 3:
     import importlib
     rtm = importlib.reload(rtm)
 
@@ -345,10 +345,11 @@ def _tm_hk_chart(recs, people, now):
 
 
 def _tm_rqs_chart(recs, people):
-    """One row per RQS: a dot per room at how long it waited, done to inspected."""
+    """One row per RQS: a dot per Full Clean room at how long it waited, done
+    to inspected."""
     import plotly.graph_objects as go
     order = [p["name"] for p in people]
-    xs = [x for x in recs if x["rqs"] in order]
+    xs = [x for x in recs if x["rqs"] in order and rtm.full_clean(x)]
     fig = go.Figure()
     for lo, hi, name, colour in ((None, rtm.WAIT_SOON, f"Within {rtm.WAIT_SOON} min", TM_GREEN),
                                  (rtm.WAIT_SOON, rtm.WAIT_LATE,
@@ -446,8 +447,10 @@ def timing_tab():
 
     timed = [x for x in recs if x["std"] > 0 and "dust" not in x["service"].lower()]
     n_tog = sum(1 for x in recs if x["together"])
-    waits = [x["wait"] for x in recs if x["wait"] is not None]
-    still = [x for x in recs if x["waiting"] is not None]
+    # The RQS figures are Full Clean inspections only (HP, 28 Oct).
+    fc = [x for x in recs if rtm.full_clean(x)]
+    waits = [x["wait"] for x in fc if x["wait"] is not None]
+    still = [x for x in fc if x["waiting"] is not None]
     firsts = [p["first_avg"] for p in hks if p["first_avg"] is not None]
     late_firsts = sum(p["late_starts"] for p in hks)
     import statistics as _stats
@@ -459,11 +462,12 @@ def timing_tab():
         ("Marked together", f"{n_tog}<small>{round(100 * n_tog / len(timed)) if timed else 0}%</small>",
          f"start and done within {rtm.TOGETHER_MIN} min — marked after the fact"),
         ("Wait for RQS", f"{round(_stats.median(waits)) if waits else '–'}<small>min median</small>",
-         f"{sum(1 for w in waits if w > rtm.WAIT_LATE)} rooms waited over {rtm.WAIT_LATE} min"),
+         f"Full Clean · {sum(1 for w in waits if w > rtm.WAIT_LATE)} rooms waited over "
+         f"{rtm.WAIT_LATE} min"),
     ]
     if still:
         cards.append(("Waiting now", f"{len(still)}<small>rooms</small>",
-                      f"done, not inspected · longest {max(x['waiting'] for x in still)} min"))
+                      f"Full Clean done, not inspected · longest {max(x['waiting'] for x in still)} min"))
     st.markdown('<div class="tm-cards">' + "".join(
         f'<div class="tm-k"><div class="kt">{e(t)}</div><div class="kv">{v}</div>'
         f'<div class="kl">{e(s)}</div></div>' for t, v, s in cards) + "</div>",
@@ -511,7 +515,7 @@ def timing_tab():
                              help="Inspected, but never marked done in HotSOS"),
                      })
     if who in ("Both", "RQS"):
-        st.markdown(f"#### 🔍 RQS · {span}")
+        st.markdown(f"#### 🔍 RQS · Full Clean · {span}")
         fig = _tm_rqs_chart(recs, rqs)
         if fig is not None:
             st.plotly_chart(fig, width="stretch", config={"displayModeBar": False},
@@ -564,6 +568,9 @@ def timing_tab():
             f"who inspected, so the RQS is the one typed on the sheet: the office PC copies the "
             f"sheet's RQS into the app every ten minutes through the day, and from the 4 PM sync "
             f"on the sheet's own record is used.\n"
+            f"- **RQS** figures — the chart, the table, Wait for RQS and Waiting now — count Full "
+            f"Clean rooms only. The Daily Service and Dust n Vac round (RQS 2) is left out, so an "
+            f"RQS who only did that round isn't listed.\n"
             f"- Dust n Vac rooms have no minutes, so they aren't judged for marking. Only rooms on "
             f"the app's charts are copied from HotSOS, and a day the office PC was off has gaps.")
 

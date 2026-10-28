@@ -787,6 +787,14 @@ marked after); **left open** (done more than twice the room's minutes after
 start); inspected with no done mark; and done to inspected over 60 minutes.
 Dust n Vac has no minutes and is never judged.
 
+**The RQS side is Full Clean only** (`report_timing.full_clean`, HP 28
+October): the RQS chart and table, Wait for RQS and Waiting now count "Full
+Clean" and "Full Clean (IH)" rooms. RQS 2's Daily Service and Dust n Vac
+round is property-wide by design, and listed beside the Full Clean
+inspectors it read as the same job; someone who only did that round
+(David Serrano, 22-28 Oct) is no longer listed. The housekeepers' side and
+Every room still show every service.
+
 ## Agreed but not built
 
 `docs/inspection-scoring.md` — the RQS inspection checklist and the per-housekeeper

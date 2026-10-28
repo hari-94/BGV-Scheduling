@@ -21,7 +21,9 @@ not marking in timely manner"):
   * left open -- done pressed more than LONG_OPEN times the room's minutes
     after its start: the done tap came long after the room was finished;
   * no done mark -- inspected with no done from the housekeeper;
-  * waiting for the RQS -- done to inspected over WAIT_LATE minutes.
+  * waiting for the RQS -- done to inspected over WAIT_LATE minutes, on
+    Full Clean rooms only (HP, 28 Oct): RQS 2's Daily Service and Dust n
+    Vac round is left out of every RQS figure.
 
 No Streamlit here.
 """
@@ -33,7 +35,7 @@ import clock
 
 #: Raised when the page needs something this module didn't have before: the
 #: page reloads an older copy a running app is still holding (CLAUDE.md).
-VERSION = 2
+VERSION = 3
 
 FIRST_START_LATE = _dt.time(10, 30)
 TOGETHER_MIN = 3           # start and done this close: marked after the fact
@@ -181,12 +183,21 @@ def housekeepers(recs):
     return sorted(out, key=lambda p: (-p["flags"], p["name"]))
 
 
+def full_clean(x) -> bool:
+    """A Full Clean room ("Full Clean", "Full Clean (IH)")."""
+    return x["service"].lower().startswith("full clean")
+
+
 def inspectors(recs):
-    """Per RQS: how long their finished rooms waited to be inspected."""
+    """Per RQS: how long their finished Full Clean rooms waited to be
+    inspected. Full Clean only (HP, 28 Oct): the Daily Service and Dust n Vac
+    round is RQS 2's, property-wide by design, and its waits put RQS 2 beside
+    the Full Clean inspectors as though it were the same job."""
     by = collections.defaultdict(list)
     for x in recs:
         # "Inspector 3" is a chart nobody was found for, not a person.
-        if x["rqs"] and not x["rqs"].startswith("Inspector ") and (x["done"] or x["inspected"]):
+        if (x["rqs"] and not x["rqs"].startswith("Inspector ") and full_clean(x)
+                and (x["done"] or x["inspected"])):
             by[x["rqs"]].append(x)
     out = []
     for name, xs in by.items():
