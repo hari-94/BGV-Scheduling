@@ -1025,7 +1025,9 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
                     res["eng_sheet"] = "not queued: sent by the backup PC, which has no synced SharePoint folder"
                 elif not only_room:
                     try:
+                        import importlib
                         import eng_sheet
+                        eng_sheet = importlib.reload(eng_sheet)   # a fix reaches the next push
                         f = eng_sheet.publish(Path(cfg["workbook"]).parent, day, rows)
                         res["eng_sheet"] = f.name
                         log(f"  ENG sheet values queued: {f.name}")

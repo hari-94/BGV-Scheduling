@@ -3,10 +3,10 @@ eng_sheet.py — the day's names for the "RQS-ENG-Runners" tab of
 "Daily Tasks Ops Departments.xlsx" (GC8Team site), which the Engineering
 team works from.
 
-Three things on that tab are ours and were typed in by hand every morning:
-the date at the top, the AM housepersons by HSP number, and each RQS with the
-Full Clean rooms they inspect, under the building the rooms are in. Everything
-else on it belongs to other departments and is never touched.
+Four things on that tab are ours and were typed in by hand every morning:
+the date at the top, the AM and the PM housepersons by HSP number, and each
+RQS with the Full Clean rooms they inspect, under the building the rooms are
+in. Everything else on it belongs to other departments and is never touched.
 
 The workbook is open in Excel Online all day (the Front Desk keeps their tabs
 in it), so the office PC does not edit the file. After a Push it drops the
@@ -23,6 +23,11 @@ Where the values come from:
     "Entrenamiento ... +5"); a building ("BLD 3") is not. The AM lead is
     whoever the "AM Lead" / "PM Leads" sections have on "Lead" that is not a
     PM lead.
+  * PM housepersons: the "Houseperson PM" section, the same route numbers.
+    The PM lead is whoever "PM Leads" has on a PM lead ("Lead - PM"); a PM
+    lead's cell naming a route instead ("HSP 1", "HSP 1PM trining veronica")
+    is that PM route -- on every such day to 28 Oct the AM route was already
+    covered and the PM one was open.
 """
 import datetime as _dt
 import json
@@ -35,15 +40,21 @@ OUTBOX = "App Outbox"
 HSP_ROUTES = range(1, 8)
 
 _BLD = re.compile(r"\b(?:bld|bldg|building)\s*\d+", re.I)
-_NUM = re.compile(r"(?<![\d:.])([1-7])(?![\d:])")
+# The route is the first number in the cell and any joined to it by "+"; what
+# follows is the task, whose numbers are stairs, theaters and lockers. Reading
+# every digit put "1 deep clean stair 6" on HSP 6 as well as 1, and on the PM
+# side "4 + deep celan lookers 1-39" on HSP 1.
+_ROUTE = re.compile(r"(?<![\d:.])[1-7](?![\d:])(?:\s*\+\s*[1-7](?![\d:]))*")
 
 
 def hsp_numbers(raw) -> list:
     """The HSP routes a houseperson cell names: "6 + 7" -> [6, 7],
-    "6 - Women bathroom/ BLD 3" -> [6], "Entrenamiento ... +5" -> [5]."""
+    "6 - Women bathroom/ BLD 3" -> [6], "Entrenamiento ... +5" -> [5],
+    "6+7 + deep clean theather 5" -> [6, 7]."""
     s = _BLD.sub(" ", str(raw or ""))
     s = re.sub(r"\b\d{1,2}:\d{2}\b", " ", s)            # a time ("8:30 am") is not a route
-    return sorted({int(n) for n in _NUM.findall(s)})
+    m = _ROUTE.search(s)
+    return sorted({int(n) for n in re.findall(r"\d", m.group())}) if m else []
 
 
 def _working(rec, iso) -> bool:
@@ -58,8 +69,8 @@ def _short(name) -> str:
     return re.sub(r"\.+$", "", str(name).split(" · ")[0].strip())
 
 
-def housepersons(week, iso) -> dict:
-    """{"HSP 1": [names], ..., "LEAD": [names]} for the day's AM shift."""
+def housepersons(week, iso, shift="AM") -> dict:
+    """{"HSP 1": [names], ..., "LEAD": [names]} for the day's AM or PM shift."""
     out = {f"HSP {n}": [] for n in HSP_ROUTES}
     out["LEAD"] = []
     for key, rec in (week.get("people") or {}).items():
@@ -68,13 +79,19 @@ def housepersons(week, iso) -> dict:
             continue
         raw = str((rec.get("cells") or {}).get(iso, "") or "")
         name = _short(rec.get("name") or key)
-        if sec == "Houseperson AM":
+        low = raw.lower()
+        if sec == f"Houseperson {shift}":
             for n in hsp_numbers(raw):
                 out[f"HSP {n}"].append(name)
-        elif sec in ("AM Lead", "PM Leads"):
-            low = raw.lower()
+        elif shift == "AM" and sec in ("AM Lead", "PM Leads"):
             if sec == "AM Lead" or ("lead" in low and "pm" not in low):
                 out["LEAD"].append(name)
+        elif shift == "PM" and sec == "PM Leads":
+            if "lead" in low and "pm" in low:
+                out["LEAD"].append(name)
+            elif "lead" not in low:
+                for n in hsp_numbers(raw):
+                    out[f"HSP {n}"].append(name)
     return out
 
 
@@ -121,6 +138,7 @@ def payload(day: _dt.date, rows, week, now=None, directory=()) -> dict:
         "date": f"{day:%m/%d/%Y}",
         "title": f"{day:%m/%d/%Y}   ·   Updated {now:%m/%d %I:%M %p}".replace(" 0", " "),
         "housepersons": housepersons(week, day.isoformat()),
+        "housepersons_pm": housepersons(week, day.isoformat(), "PM"),
         "rqs": rqs_rooms(rows, directory),
         "made_at": clock.stamp(),
     }
