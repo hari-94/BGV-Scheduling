@@ -6,9 +6,9 @@
  *
  * Writes ONLY: the date/time at the top (B2), the AM houseperson names
  * (column E, rows of the "AM Housepersons" block, by HSP number and the
- * "Hsp Lead Am" row), the PM houseperson names (column E of the "PM
- * Housepersons" block the same way, its lead row being whichever says "Hsp
- * Lead"), and the RQS names + Full Clean rooms (columns F and G)
+ * "Hsp Lead Am" row), the PM houseperson names (column E, from "PM
+ * Housepersons" down to "Front Desk", by HSP number and the "HSP Lead PM"
+ * row), and the RQS names + Full Clean rooms (columns F and G)
  * under the BLD 1 / BLD 2 / BLD 3 labels. Everything else belongs to other
  * teams and is not touched. Rows are found by their labels, not fixed row
  * numbers, so a row added to the sheet doesn't send names to the wrong place.
@@ -48,19 +48,21 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
     }
   }
 
-  // 2b. PM housepersons: from "PM Housepersons" down to the next label in
-  // column B. Each slot is written once, so a block below that also has HSP
-  // rows can't be reached even if the sheet has no label between them. A
-  // payload from before the PM names were sent has none, and leaves it alone.
+  // 2b. PM housepersons: from "PM Housepersons" down to "Front Desk". Column B
+  // doesn't end the block: its HSP rows sit beside "BLD 1".."BLD 3", and its
+  // "HSP Lead PM" row is under "Overnight" (28 Oct). Each slot is written
+  // once, on the first row after the heading that names it, so nothing
+  // further down can be reached. A payload from before the PM names were
+  // sent has none, and leaves the block alone.
   const pmNames = p.housepersons_pm;
   if (pm >= 0 && pmNames) {
-    let stop = vals.length;
-    for (let r = pm + 1; r < vals.length; r++) if (cell(r, B)) { stop = r; break; }
+    let stop = find(B, s => /^front desk/i.test(s), pm + 1);
+    if (stop < 0) stop = vals.length;
     const done: { [slot: string]: boolean } = {};
     for (let r = pm + 1; r < stop; r++) {
       const m = cell(r, D).match(/^hsp\s*(\d)/i);
       let slot = m ? `HSP ${m[1]}` : "";
-      if (!slot && /hsp lead/i.test(cell(r, C))) slot = "LEAD";
+      if (!slot && /hsp\s*lead\s*pm/i.test(cell(r, C))) slot = "LEAD";
       if (slot && !done[slot] && pmNames[slot] !== undefined) {
         ws.getCell(r, E).setValue(pmNames[slot].join(" / "));
         done[slot] = true;
