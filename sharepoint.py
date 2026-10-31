@@ -105,6 +105,86 @@ def list_folder(sub, top=20):
     return [(f["Name"], f["TimeLastModified"]) for f in (out or {}).get("value", [])]
 
 
+_PUT_JS = """async ([site, folder, name, b64, expect]) => {
+  const q = s => s.replace(/'/g, "''");
+  const file = site + "/_api/web/GetFileByServerRelativeUrl('" + q(folder + "/" + name) + "')";
+  if (expect) {
+    const m = await fetch(file + "?$select=TimeLastModified",
+                          {headers: {Accept: "application/json;odata=nometadata"},
+                           credentials: "include", cache: "no-store"});
+    if (m.ok) {
+      const t = (await m.json()).TimeLastModified;
+      if (t !== expect) return {error: "changed on SharePoint since it was read (" + t + ")"};
+    }
+  }
+  const ctx = await fetch(site + "/_api/contextinfo", {method: "POST", credentials: "include",
+                          headers: {Accept: "application/json;odata=nometadata"}});
+  if (!ctx.ok) return {error: "contextinfo answered " + ctx.status};
+  const digest = (await ctx.json()).FormDigestValue;
+  const bin = atob(b64); const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  const r = await fetch(site + "/_api/web/GetFolderByServerRelativeUrl('" + q(folder) +
+                        "')/Files/add(url='" + q(name) + "',overwrite=true)",
+                        {method: "POST", credentials: "include", body: buf,
+                         headers: {Accept: "application/json;odata=nometadata",
+                                   "X-RequestDigest": digest}});
+  if (!r.ok) return {error: "upload answered " + r.status + " " + (await r.text()).slice(0, 200)};
+  const j = await r.json();
+  return {modified: j.TimeLastModified};
+}"""
+
+
+def upload(file_name, data: bytes, expect_modified=None, timeout_ms=120000):
+    """Save `data` as `file_name` under the GC8 Inspections folder (a sub-path
+    such as "App Outbox/x.txt" works) -- for the backup PC, which has no
+    synced folder to write into. With `expect_modified` (the `modified` that
+    `fetch` returned), nothing is saved if anybody saved the file since, so a
+    stale copy never overwrites the team's typing. (info, None) or (None, why)."""
+    # Its own thread: a Push calls this with HotSOS's Playwright still open
+    # on the caller's thread, and a second sync Playwright there refuses to
+    # start ("Sync API inside the asyncio loop").
+    box = {}
+    t = threading.Thread(target=lambda: box.update(r=_upload(file_name, data, expect_modified,
+                                                             timeout_ms)), daemon=True)
+    t.start()
+    t.join(timeout_ms / 1000 + 200)
+    return box.get("r") or (None, "the upload did not finish")
+
+
+def _upload(file_name, data, expect_modified, timeout_ms):
+    if not _ONE_AT_A_TIME.acquire(timeout=150):
+        return None, "another SharePoint call is still running"
+    try:
+        from playwright.sync_api import sync_playwright
+        sub, _, name = f"/{file_name}".rpartition("/")
+        with sync_playwright() as p:
+            hidden = None
+            try:
+                browser = p.chromium.connect_over_cdp(CDP, timeout=3000)
+                ctx = browser.contexts[0] if browser.contexts else browser.new_context()
+            except Exception:
+                hidden = ctx = p.chromium.launch_persistent_context(
+                    PROFILE, channel="chrome", headless=True)
+            page = ctx.new_page()
+            try:
+                page.goto(SITE, timeout=timeout_ms)
+                if not page.url.startswith(SITE):
+                    return None, "this PC's Chrome isn't signed in to SharePoint"
+                out = page.evaluate(_PUT_JS, [SITE, FOLDER + sub, name,
+                                              base64.b64encode(data).decode(), expect_modified])
+            finally:
+                page.close()
+                if hidden is not None:
+                    hidden.close()
+    except Exception as ex:
+        return None, str(ex).splitlines()[0][:160]
+    finally:
+        _ONE_AT_A_TIME.release()
+    if not out or out.get("error"):
+        return None, (out or {}).get("error", "no answer")
+    return out, None
+
+
 def _fetch(file_name, timeout_ms):
     try:
         from playwright.sync_api import sync_playwright

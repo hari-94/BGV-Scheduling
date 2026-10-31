@@ -805,6 +805,87 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
     return status
 
 
+def run_backup_build(cfg, day=None, by="backup", ssrs=None, publish=True):
+    """run_build for the backup PC, which reaches neither SSRS nor a synced
+    folder. The rooms are `ssrs` (an export somebody downloaded) or else the
+    office PC's last pull of the day (ROOMS_CACHE_PREFIX, refreshed every two
+    hours until 20:00 the night before). The Arrival Report and both
+    workbooks are read from SharePoint into a temporary folder, the tabs are
+    written there, and each workbook is uploaded back only if nobody saved it
+    on SharePoint in the meantime."""
+    import importlib
+    import io
+    import daily_build
+    import sharepoint
+    daily_build = importlib.reload(daily_build)
+    day = day or clock.today()
+    status = {"date": str(day), "by": by, "started_at": clock.stamp(), "status": "running",
+              "ahead": False, "backup": socket.gethostname()}
+    db._upsert_key(daily_build.BUILD_KEY, status)
+    try:
+        if day != clock.today():
+            raise ValueError("the backup PC builds today only")
+        room_text = None
+        if ssrs is None:
+            cache = db._load_key(hs.ROOMS_CACHE_PREFIX + str(day)) or {}
+            room_text = cache.get("room_text")
+            if not room_text:
+                raise RuntimeError("no rooms for today: SSRS is office-only and the office "
+                                   "PC left no pull of today")
+            status["rooms_from"] = f"the office PC's pull of {cache.get('pulled_at')}"
+        else:
+            status["rooms_from"] = "an SSRS export given to the backup PC"
+        tmp = Path(tempfile.gettempdir()) / "bgv-backup" / str(day)
+        (tmp / "Arrival Reports").mkdir(parents=True, exist_ok=True)
+        for name, modified in sharepoint.list_folder("Arrival Reports", top=40):
+            if "arriv" in name.lower() and daily_build._name_date(Path(name).stem, day) == day:
+                data, _ = sharepoint.fetch(f"Arrival Reports/{name}")
+                if data is not None:
+                    f = tmp / "Arrival Reports" / name
+                    f.write_bytes(data)
+                    # find_arrival_report picks the latest resend by file
+                    # time: give each the time SharePoint has, not the
+                    # download's (which made the oldest look newest).
+                    t = _dt.datetime.fromisoformat(modified.replace("Z", "+00:00")).timestamp()
+                    os.utime(f, (t, t))
+        arr = daily_build.find_arrival_report(tmp / "Arrival Reports", day)
+        arrival = daily_build.read_arrival_report(arr) if arr else ""
+        books = {}
+        for name in ("GC8 Daily Schedule.xlsx", Path(cfg["workbook"]).name):
+            data, info = sharepoint.fetch(name)
+            if data is None:
+                raise RuntimeError(f"{name} not read from SharePoint: {info.get('error')}")
+            (tmp / name).write_bytes(data)
+            books[name] = info["modified"]
+        st = _state()
+        tabs = st.setdefault("tabs", {})
+        sched = db.load_full_schedule() or {}
+        mine = not sched.get("groups_data") or sched.get("generated_by") == "auto-5am"
+        status["app_saved"] = bool(publish and mine)
+        daily_name, big_name = list(books)
+        out = daily_build.build(day, ssrs, arrival, tmp / daily_name, tabs,
+                                publish=publish and mine, big_path=tmp / big_name,
+                                room_text=room_text)
+        STATE.write_text(json.dumps(st))
+        for name, field in ((daily_name, "outcome"), (big_name, "big_tab")):
+            if out.get(field) in ("written", "replaced") and publish:
+                _, why = sharepoint.upload(name, (tmp / name).read_bytes(),
+                                           expect_modified=books[name])
+                if why:
+                    out[field] = f"not saved to SharePoint: {why}"
+        status.update(out, status="done", arrival=arr.name if arr else None,
+                      workbook=daily_name)
+        log(f"backup built {day}: {out['rooms']} rooms, {out['charts']} charts, tab "
+            f"{out['tab']} {out['outcome']}; {big_name}: {out.get('big_tab')}; "
+            f"arrival report {'found' if arr else 'MISSING'}")
+    except Exception as ex:
+        status.update(status="error", error=f"{type(ex).__name__}: {ex}")
+        log(f"backup build failed: {traceback.format_exc()}")
+    status["finished_at"] = clock.stamp()
+    db._upsert_key(daily_build.BUILD_KEY, status)
+    return status
+
+
 # ── the Report page's numbers ────────────────────────────────────────────────
 def sync_report(cfg, by="4 PM"):
     """Read every day tab of GC8 Inspections and store it for the Report page
@@ -1021,14 +1102,21 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
                 # that sheet is the day's, and a push ahead must not replace it.
                 # On every push, not only one that moved rooms: an RQS swap on
                 # the sheet changes nothing in HotSOS but does change this.
-                if not only_room and cfg.get("backup"):
-                    res["eng_sheet"] = "not queued: sent by the backup PC, which has no synced SharePoint folder"
-                elif not only_room:
+                # The backup PC has no synced folder: it writes the file
+                # locally and uploads it into App Outbox itself.
+                if not only_room:
                     try:
                         import importlib
                         import eng_sheet
                         eng_sheet = importlib.reload(eng_sheet)   # a fix reaches the next push
-                        f = eng_sheet.publish(Path(cfg["workbook"]).parent, day, rows)
+                        folder = (Path(tempfile.gettempdir()) / "bgv-backup" if cfg.get("backup")
+                                  else Path(cfg["workbook"]).parent)
+                        f = eng_sheet.publish(folder, day, rows)
+                        if cfg.get("backup"):
+                            import sharepoint
+                            _, why = sharepoint.upload(f"{eng_sheet.OUTBOX}/{f.name}", f.read_bytes())
+                            if why:
+                                raise RuntimeError(f"upload to SharePoint failed: {why}")
                         res["eng_sheet"] = f.name
                         log(f"  ENG sheet values queued: {f.name}")
                     except Exception as ex:
@@ -1443,10 +1531,16 @@ def run_backup():
             if _beat_age(req) > REQUEST_MAX_AGE:
                 fail = (f"Not run: the backup PC got this {int(_beat_age(req) // 60)} minutes "
                         "after it was pressed. Press it again.")
-            elif req.get("mode") == "build":
-                fail = ("The office PC is offline, and building the sheet needs SSRS, which "
-                        "only the office network reaches. Preview and Push still work.")
             cfg = load_config(required=False)
+            if not fail and req.get("mode") == "build":
+                st = run_backup_build(cfg, _dt.date.fromisoformat(req["date"]),
+                                      by=req.get("by", "") + " (backup)")
+                db._upsert_key(hs.RESULT_KEY, {
+                    "id": req["id"], "date": req.get("date"), "mode": "build",
+                    "by": req.get("by", ""), "finished_at": clock.stamp(),
+                    "status": "done" if st["status"] == "done" else "error",
+                    "error": st.get("error", "")})
+                continue
             if not fail and not cfg.get("workbook"):
                 fail = "The backup PC isn't set up -- run 'python hotsos_agent.py setup' on it."
             if fail:
@@ -1469,7 +1563,10 @@ def run_backup():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["setup", "forecast", "roster", "staff", "build",
-                                    "preview", "push", "run", "report", "backup", "teams"])
+                                    "backup-build", "preview", "push", "run", "report",
+                                    "backup", "teams"])
+    ap.add_argument("--ssrs", default=None,
+                    help="backup-build: a Housekeeping Dashboard export to build from")
     ap.add_argument("--date", default=None)
     ap.add_argument("--only-room", default=None)
     ap.add_argument("--test", action="store_true",
@@ -1496,6 +1593,11 @@ def main():
     if a.cmd == "build":
         print(run_build(load_config(), _dt.date.fromisoformat(a.date) if a.date else None,
                         by="console"))
+        return
+    if a.cmd == "backup-build":
+        ssrs = Path(a.ssrs).read_bytes() if a.ssrs else None
+        print(run_backup_build(load_config(), _dt.date.fromisoformat(a.date) if a.date else None,
+                               by="console (backup)", ssrs=ssrs))
         return
     if a.cmd == "report":
         rec = sync_report(load_config(), by="console")

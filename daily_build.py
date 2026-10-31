@@ -951,8 +951,12 @@ def tab_edited(path, day: _dt.date, state: dict) -> bool:
 
 
 def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
-          state: dict, publish=True, big_path=None, guard=None):
+          state: dict, publish=True, big_path=None, guard=None, room_text=None):
     """The whole morning: rooms + e-mail -> Generate -> the day's tab.
+
+    `room_text` instead of `ssrs_xlsx`: the rooms already read off an export
+    (the backup PC, which can't reach SSRS, builds from the office PC's last
+    cached pull).
 
     Once the team has edited the day's tab, the day is theirs: nothing is
     generated, written or saved."""
@@ -961,7 +965,10 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
                 "tab": tab_name(day), "outcome": "kept (edited)"}
     excel_to_room_text, build_export_frame = borrow("excel_to_room_text",
                                                     "build_export_frame")
-    room_text, n_rooms, _sheet = excel_to_room_text(io.BytesIO(ssrs_xlsx))
+    if room_text is None:
+        room_text, n_rooms, _sheet = excel_to_room_text(io.BytesIO(ssrs_xlsx))
+    else:
+        n_rooms = max(0, len(room_text.strip().splitlines()) - 1)
     fg = generate(room_text, arrival_text, publish=publish, day=day)
     frame = assign_dust_n_vac(build_export_frame(fg))
     # Weekends: the carpet person on each building's pet rooms, and who strips
