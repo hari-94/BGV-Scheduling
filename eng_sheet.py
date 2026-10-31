@@ -21,13 +21,14 @@ Where the values come from:
   * AM housepersons: Schedule.xlsx, "Houseperson AM" section. The number in a
     cell is the HSP route ("3", "6 + 7", "2 - Deep clean lobby bathroom",
     "Entrenamiento ... +5"); a building ("BLD 3") is not. The AM lead is
-    whoever the "AM Lead" / "PM Leads" sections have on "Lead" that is not a
-    PM lead.
+    whoever the "AM Lead" section has working.
   * PM housepersons: the "Houseperson PM" section, the same route numbers.
-    The PM lead is whoever "PM Leads" has on a PM lead ("Lead - PM"); a PM
-    lead's cell naming a route instead ("HSP 1", "HSP 1PM trining veronica")
-    is that PM route -- on every such day to 28 Oct the AM route was already
-    covered and the PM one was open.
+    The PM lead is whoever "PM Leads" has on "Lead" -- plain "Lead" too, not
+    only "Lead - PM": Luis R. on "Lead" in PM Leads went to the AM lead row
+    beside Jose M (Hari, 31 Oct: the AM and PM leads are different people).
+    A PM lead's cell naming a route instead ("HSP 1", "HSP 1PM trining
+    veronica") is that PM route -- on every such day to 28 Oct the AM route
+    was already covered and the PM one was open.
 """
 import datetime as _dt
 import json
@@ -83,11 +84,10 @@ def housepersons(week, iso, shift="AM") -> dict:
         if sec == f"Houseperson {shift}":
             for n in hsp_numbers(raw):
                 out[f"HSP {n}"].append(name)
-        elif shift == "AM" and sec in ("AM Lead", "PM Leads"):
-            if sec == "AM Lead" or ("lead" in low and "pm" not in low):
-                out["LEAD"].append(name)
+        elif shift == "AM" and sec == "AM Lead":
+            out["LEAD"].append(name)
         elif shift == "PM" and sec == "PM Leads":
-            if "lead" in low and "pm" in low:
+            if "lead" in low:
                 out["LEAD"].append(name)
             elif "lead" not in low:
                 for n in hsp_numbers(raw):
