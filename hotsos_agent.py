@@ -1464,6 +1464,77 @@ def _beat_age(beat):
         return float("inf")
 
 
+MAIL_WAIT = (5, 20)        # the backup waits this long for the 5 AM dashboard email
+
+
+def _todays_export(day):
+    """A Housekeeping Dashboard export for `day` alone, as bytes: the one SSRS
+    emails at 5:00, else the newest in Downloads (somebody downloaded today's
+    rooms for the backup PC); None if neither -- the build then falls back to
+    the office PC's last pull."""
+    import io
+    import forecast
+    import sharepoint
+
+    def for_day(data):
+        try:
+            return [d.get("date") for d in forecast.read_dashboard(io.BytesIO(data))["days"]] == [str(day)]
+        except Exception:
+            return False
+    since = _dt.datetime.combine(day, _dt.time(), clock.MTN).astimezone(_dt.timezone.utc)
+    data, info = sharepoint.dashboard_email(since.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    if info.get("error"):
+        log(f"backup 5 AM: dashboard email not read: {info['error']}")
+    elif data and for_day(data):
+        log(f"backup 5 AM: rooms from the email '{info.get('subject')}'")
+        return data
+    elif data:
+        log(f"backup 5 AM: the email '{info.get('subject')}' is not {day} alone")
+    for f in sorted((Path.home() / "Downloads").glob("Housekeeping Dashboard*.xlsx"),
+                    key=lambda p: p.stat().st_mtime, reverse=True)[:5]:
+        data = f.read_bytes()
+        if for_day(data):
+            log(f"backup 5 AM: rooms from {f.name}")
+            return data
+    return None
+
+
+_morning = {"tried": 0.0, "every": 600}
+
+
+def _backup_morning(cfg):
+    """The office loop's 5 AM build and auto-push, for a morning this PC is
+    standing in. From BUILD_HOUR until AUTO_PUSH_GIVE_UP, and not if a build
+    for today is already done (the office PC, or by hand). A failed build is
+    tried again every ten minutes: on 31 Oct a SharePoint read failed once
+    ("Failed to fetch") and worked the next time."""
+    import daily_build
+    now = clock.now()
+    if now.hour < BUILD_HOUR or not cfg.get("workbook"):
+        return
+    today = str(now.date())
+    if (_state().get("built") != today and now.hour < AUTO_PUSH_GIVE_UP
+            and time.time() - _morning["tried"] > _morning["every"]):
+        _morning["tried"] = time.time()
+        b = db._load_key(daily_build.BUILD_KEY) or {}
+        if b.get("date") == today and b.get("status") == "done":
+            log(f"backup 5 AM: {today} already built by {b.get('by')}")
+            ok = True
+        else:
+            ssrs = _todays_export(now.date())
+            if ssrs is None and (now.hour, now.minute) < MAIL_WAIT:
+                _morning["every"] = 60          # the email lands within the minute
+                log("backup 5 AM: no dashboard email yet; checking again in a minute")
+                return
+            _morning["every"] = 600
+            ok = run_backup_build(cfg, now.date(), by="5 AM (backup)", ssrs=ssrs)["status"] == "done"
+        if ok:
+            st = _state()                   # the build wrote its tabs to it
+            st["built"] = today
+            STATE.write_text(json.dumps(st))
+    _auto_push()
+
+
 def run_backup():
     """Answer the HotSOS page's Preview and Push, but only while the office PC
     is down. HotSOS and SharePoint are both reachable from outside the office;
@@ -1519,6 +1590,12 @@ def run_backup():
             except Exception as ex:
                 last_teams = time.time()
                 log(f"teams notes: {type(ex).__name__}: {ex}")
+            # And the 5 AM build with the auto-push after it (HP 31 Oct: the
+            # office PC is down for 1 Nov and nobody is in until 9).
+            try:
+                _backup_morning(load_config(required=False))
+            except Exception as ex:
+                log(f"backup 5 AM: {type(ex).__name__}: {ex}")
 
             req = got.get(hs.REQUEST_KEY) or {}
             if not req.get("id") or req["id"] == done_req:

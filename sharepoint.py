@@ -222,3 +222,65 @@ def _fetch(file_name, timeout_ms):
     if not out or out.get("error"):
         return None, {"error": (out or {}).get("error", "no answer")}
     return base64.b64decode(out["b64"]), {"modified": out.get("modified"), "by": out.get("by", "")}
+
+
+# ── the Housekeeping Dashboard email ─────────────────────────────────────────
+# SSRS mails the day's Housekeeping Dashboard to Hari at 5:00 every morning
+# ("Housekeeping Dashboard was executed at <date> 5:00 AM", from BGV NoReply),
+# landing within the minute. The backup PC can't reach SSRS, but it can read
+# that email: the same profile is signed in to Outlook on the web, which keeps
+# a mail token in its page storage. Read only -- nothing is moved or marked.
+OWA = "https://outlook.office.com/mail/"
+
+_MAIL_JS = r"""async (since) => {
+  let k = null;
+  for (let i = 0; i < 30 && !k; i++) {
+    k = Object.keys(localStorage).find(k => /accesstoken/i.test(k) &&
+          (JSON.parse(localStorage[k]).target || "").includes("outlook.office.com/Mail.Read"));
+    if (!k) await new Promise(r => setTimeout(r, 1000));
+  }
+  if (!k) return {error: "Outlook on the web isn't signed in"};
+  const H = {headers: {Authorization: "Bearer " + JSON.parse(localStorage[k]).secret,
+                       Accept: "application/json"}};
+  const api = "https://outlook.office.com/api/v2.0/me/messages";
+  const r = await fetch(api + "?$search=" + encodeURIComponent('"Housekeeping Dashboard was executed"')
+                        + "&$top=5&$select=Subject,ReceivedDateTime,HasAttachments", H);
+  if (!r.ok) return {error: "Outlook answered " + r.status};
+  const m = (await r.json()).value.filter(x => x.HasAttachments && x.ReceivedDateTime >= since);
+  m.sort((a, b) => a.ReceivedDateTime < b.ReceivedDateTime ? 1 : -1);
+  if (!m.length) return {none: true};
+  const a = await (await fetch(api + "/" + m[0].Id + "/attachments", H)).json();
+  const x = (a.value || []).find(x => /\.xlsx$/i.test(x.Name || ""));
+  if (!x) return {error: "the email has no .xlsx"};
+  return {b64: x.ContentBytes, subject: m[0].Subject, at: m[0].ReceivedDateTime};
+}"""
+
+
+def dashboard_email(since_utc, timeout_ms=90000):
+    """(bytes, info) for the newest Housekeeping Dashboard email received at or
+    after `since_utc` ("2026-11-01T06:00:00Z"), info = {"subject", "at"};
+    (None, {}) if none has come yet; (None, {"error": why})."""
+    if not _ONE_AT_A_TIME.acquire(timeout=150):
+        return None, {"error": "another SharePoint read is still running"}
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            ctx = p.chromium.launch_persistent_context(PROFILE, channel="chrome", headless=True)
+            try:
+                page = ctx.new_page()
+                page.goto(OWA, timeout=timeout_ms)
+                out = page.evaluate(_MAIL_JS, since_utc)
+            finally:
+                ctx.close()
+    except Exception as ex:
+        msg = str(ex).splitlines()[0][:160]
+        if "user data directory is already in use" in msg.lower() or "ProcessSingleton" in msg:
+            msg = "the sign-in browser profile is busy (another Chrome using it)"
+        return None, {"error": msg}
+    finally:
+        _ONE_AT_A_TIME.release()
+    if not out or out.get("error"):
+        return None, {"error": (out or {}).get("error", "no answer")}
+    if out.get("none"):
+        return None, {}
+    return base64.b64decode(out["b64"]), {"subject": out.get("subject"), "at": out.get("at")}
