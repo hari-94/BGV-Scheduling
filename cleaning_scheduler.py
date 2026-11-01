@@ -4978,6 +4978,37 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
         _, i, j = best
         batches[i] = batches[i] + batches[j]
         batches.pop(j)
+    # Still a batch more than there are inspectors, and no two whole batches
+    # merge: share the smallest one's charts out among the rest, moving one
+    # chart on to a third batch where that makes the room. On 1 Nov building
+    # 2's two charts (7 rooms) went to an "Inspector 6" nobody was, beside
+    # Mayra with 4 -- building 1's batch was full and building 3 can't take
+    # building 2 -- though five rounds of 11-13 rooms were there to be had.
+    def _fits(b):
+        return (_brms(b) <= INSP_ROOM_MAX
+                and not rule23.mixes({x for g in b for x in g["blds"]}))
+    def _place(g, rest):
+        ok = [b for b in rest if _fits(b + [g])]
+        if ok:
+            min(ok, key=lambda b: (_hops(_bset(b + [g])), _brms(b))).append(g)
+            return True
+        for b in rest:
+            for x in list(b):
+                nb = [y for y in b if y is not x] + [g]
+                if not _fits(nb):
+                    continue
+                to = next((c for c in rest if c is not b and _fits(c + [x])), None)
+                if to is not None:
+                    b[:] = nb
+                    to.append(x)
+                    return True
+        return False
+    while _cap_batches and len(batches) > _cap_batches:
+        k = min(range(len(batches)), key=lambda i: _brms(batches[i]))
+        trial = [list(b) for i, b in enumerate(batches) if i != k]
+        if not all(_place(g, trial) for g in sorted(batches[k], key=lambda g: -len(g["rooms"]))):
+            break
+        batches = trial
     # Balance batches to reduce cross-building and floor travel. Run several full
     # passes; each pass keeps swapping charts between batches while any swap lowers
     # the combined score (which now also penalizes the single worst-travelling
