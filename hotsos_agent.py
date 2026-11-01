@@ -1081,8 +1081,12 @@ def run_push(cfg, day: _dt.date, mode: str, only_room=None, req_id=None, by=""):
             # The sheet is final and HotSOS has it: make the app's charts (what
             # the phones show) say the same. Only for today -- the app holds
             # one day's schedule.
+            # A push that sent nothing, because HotSOS already had every room,
+            # counts too: on 1 Nov a 6:20 re-push (RQS only) left the 5:30 one
+            # on record, the 6:16 schedule looked unpushed, and the charts
+            # never followed the housekeepers swapped in HotSOS that morning.
             if day == clock.today():
-                if sent:
+                if sent or not errors:
                     db._upsert_key(hs.TRUTH_KEY, {"date": str(day), "at": clock.stamp(),
                                                   "by": f"push by {by}"})
                 try:
