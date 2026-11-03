@@ -751,6 +751,77 @@ def write_big_tab(path, day: _dt.date, frame, state: dict, note="", borrowed=(),
     return outcome
 
 
+def copy_big_tab(path, day: _dt.date, daily_path, state: dict, daily_state: dict, guard=None):
+    """The day's tab, copied from the daily workbook into the big one, for a
+    build whose own write_big_tab was skipped. On 3 Nov SharePoint answered 503
+    at 05:01, the big workbook got no tab, and nothing tried again: the RQS had
+    no Nov 3 tab and every sheet -> app pass failed until it was copied by hand.
+
+    The daily tab is what write_big_tab would have written (the same
+    _fill_sheet), so copying it cell for cell needs no rebuild. Same rules as
+    write_big_tab: only a daily tab nobody edited is copied, a tab in the big
+    workbook is replaced only if it is an earlier build's and unedited, and
+    `guard` is asked before opening and before saving."""
+    import copy
+    import openpyxl
+    from hotsos_sync import tab_date
+    path, name = Path(path), tab_name(day)
+    if not path.exists() or not Path(daily_path).exists():
+        return "no file"
+    src = openpyxl.load_workbook(daily_path)
+    if name not in src.sheetnames:
+        return "no daily tab"
+    fp = _fingerprint(src[name])
+    if daily_state.get(name) != fp:
+        return "not copied (the daily tab was edited)"
+    if guard:
+        ok, why = guard()
+        if not ok:
+            return f"skipped ({why})"
+    mtime = path.stat().st_mtime
+    wb = openpyxl.load_workbook(path)
+    same = [t for t in wb.sheetnames if tab_date(t, day.year) == day]
+    outcome = "written"
+    if same:
+        # An earlier build's tab nobody touched is replaced (a rebuild for
+        # call-offs, whose own save was skipped); anything else is the team's.
+        t = same[0]
+        old = _fingerprint(wb[t])
+        if old == fp:
+            return "unchanged"
+        if t != name or state.get(name) != old:
+            return f"kept ('{t}' was made or edited by hand)"
+        pos = wb.sheetnames.index(t)
+        wb.remove(wb[t])
+        outcome = "replaced"
+    else:
+        before = [i for i, t in enumerate(wb.sheetnames)
+                  if (tab_date(t, day.year) or _dt.date.max) < day]
+        pos = max(before) + 1 if before else len(wb.sheetnames)
+    ws = wb.create_sheet(name, pos)
+    for row in src[name].iter_rows():
+        for c in row:
+            n = ws.cell(row=c.row, column=c.column, value=c.value)
+            if c.has_style:        # styles can't be shared between workbooks
+                n.font, n.fill, n.border = copy.copy(c.font), copy.copy(c.fill), copy.copy(c.border)
+                n.alignment, n.number_format = copy.copy(c.alignment), c.number_format
+    for k, cd in src[name].column_dimensions.items():
+        ws.column_dimensions[k].width = cd.width
+    ws.freeze_panes = src[name].freeze_panes
+    if path.stat().st_mtime != mtime:
+        return "skipped (the file changed while the tab was being made)"
+    if guard:
+        ok, why = guard()
+        if not ok:
+            return f"skipped ({why})"
+    buf = io.BytesIO()
+    wb.save(buf)
+    data = buf.getvalue()
+    _save_in_place(path, data)
+    state[name] = _fingerprint(openpyxl.load_workbook(io.BytesIO(data), read_only=True)[name])
+    return outcome
+
+
 def assign_dust_n_vac(frame):
     """Dust n Vac is RQS 2's round: in the sheet, RQS 2 is its housekeeper too.
 

@@ -26,6 +26,7 @@ Read-only apart from those files: it never fixes, pushes or edits anything.
 """
 import datetime as _dt
 import json
+import re
 
 from pathlib import Path
 
@@ -51,6 +52,27 @@ def _age_min(s):
     return None if x is None else (clock.now() - x).total_seconds() / 60
 
 
+def called_off_with_charts(build) -> list:
+    """Housekeepers the staff schedule now has off today who still hold one
+    of the app's charts. The 5 AM build staffs from the schedule as it stood
+    at 5; on 3 Nov two housekeepers were marked no-call at 07:24, after the
+    push, and their two 460-minute Daily Service rounds sat on them unnoticed.
+    Somebody the build pulled off another duty is off the housekeeping roster
+    on purpose, and isn't counted."""
+    import roster_import as ri
+    iso = clock.today_iso()
+    wk = ri.find_week_key(db.staff_week_keys(), iso)
+    week = db.load_staff_week(wk) if wk else None
+    if not week:
+        return []
+    hk = ri.day_roster(week, db.load_staff_overrides(), wk, iso, {}).get("hk_roster") or {}
+    borrowed = {str(x).split(" (")[0] for x in build.get("borrowed") or []}
+    sched = db.load_full_schedule() or {}
+    holding = {g.get("housekeeper") for g in sched.get("groups_data") or []} - {None, ""}
+    return sorted(n for n in holding
+                  if n in hk and not hk[n].get("present") and n not in borrowed)
+
+
 def problems(cfg) -> list:
     """Everything that needs a person, as short sentences. Empty when fine."""
     import daily_build
@@ -67,6 +89,19 @@ def problems(cfg) -> list:
             out.append(f"The 5 AM build failed: {str(b.get('error'))[:160]}")
         elif str(b.get("big_tab", "")).startswith("error"):
             out.append(f"Today's tab couldn't be written to GC8 Inspections 2026.xlsx: {b['big_tab'][:120]}")
+        elif (str(b.get("big_tab", "")).startswith("skipped")
+              and (_age_min(b.get("finished_at")) or 0) > 30):
+            # The agent retries every pass (retry_big_tab); a skip that
+            # outlasts half an hour is no longer a passing blip. Before 3 Nov a
+            # skip alerted nobody, and the RQS went without the day's tab.
+            out.append("Today's tab still isn't in GC8 Inspections 2026.xlsx: "
+                       f"{b['big_tab'][:120]}")
+        if b.get("date") == str(today) and b.get("status") == "done" and now.hour < 16:
+            gone = called_off_with_charts(b)
+            if gone:
+                out.append("Off today on the staff schedule but holding a chart: "
+                           + ", ".join(gone) + ". Rebuild today from the HotSOS page and "
+                           "Push, or move their rooms.")
         elif not b.get("arrival") and now.hour < 12:
             out.append("Today's schedule was built without an Arrival Report (none saved last night). "
                        "Forward the front desk's e-mail to yourself with 'Arrival' in the subject, "
@@ -166,14 +201,19 @@ def run(cfg) -> list:
     now = clock.now()
     current = problems(cfg)
     send = []
+    # Numbers left out of the key: "hasn't refreshed for 38.6 hours" and
+    # "... 38.7 hours" are one problem, and was e-mailed as a new one each
+    # time the figure ticked over (three times in 20 minutes on 1 Nov).
+    def _key(p):
+        return re.sub(r"\d+(\.\d+)?", "#", p)[:60]
     for p in current:
-        key = p[:60]
+        key = _key(p)
         last = _t(seen.get(key))
         if last is None or (now - last).total_seconds() > REMIND_HOURS * 3600:
             send.append(p)
             seen[key] = clock.stamp()
     # forget what's cleared, so it alerts again if it comes back
-    keys = {p[:60] for p in current}
+    keys = {_key(p) for p in current}
     seen = {k: v for k, v in seen.items() if k in keys}
     STATE.write_text(json.dumps({"seen": seen, "last_run": clock.stamp(),
                                  "current": current}))

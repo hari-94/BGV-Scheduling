@@ -476,6 +476,19 @@ loop came round in the last 15 minutes: when the loop wrote the beat, the 5 AM
 build -- three or four minutes of nothing else -- read as an outage and the
 backup stood in (19 and 20 Oct).
 
+**A skipped big-workbook tab is retried, and call-offs after the build are
+flagged** (3 Nov). The 5 AM build asks SharePoint once before writing GC8
+Inspections 2026; that morning it answered 503, the tab was "skipped", nothing
+tried again and the alarm only knew "error" -- the RQS had no Nov 3 tab and
+every sheet -> app pass failed. `retry_big_tab` now runs before each watchdog
+pass and copies the daily workbook's tab across (`daily_build.copy_big_tab`,
+under write_big_tab's rules: never over a tab the team made or edited), and a
+skip that lasts 30 minutes alerts. The same morning two housekeepers were
+marked no-call at 07:24, after the push, and their two 460-minute rounds sat on
+them: `agent_watch.called_off_with_charts` alerts when somebody the staff
+schedule has off still holds a chart. It never rebuilds or pushes by itself --
+after the push the rooms are in HotSOS, and reshuffling them is a person's call.
+
 **Service passwords are changed on the Admin page, not at each PC.** Each agent
 publishes a P-256 public key (`agent_pubkey_<host>`) and keeps the private key in
 Credential Manager; the page seals the new password to every PC's key, and the

@@ -805,6 +805,37 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
     return status
 
 
+def retry_big_tab(cfg):
+    """Today's build left GC8 Inspections 2026 without its tab (SharePoint
+    down, someone saving, the file locked): copy the daily tab across, every
+    pass of the watchdog until it lands. The 5 AM run asked once, and on
+    3 Nov a single 503 at 05:01 cost the RQS their sheet for the morning."""
+    import daily_build
+    b = db._load_key(daily_build.BUILD_KEY) or {}
+    big = str(b.get("big_tab") or "")
+    if (b.get("date") != clock.today_iso() or b.get("status") != "done"
+            or not big.startswith(("skipped", "error")) or not cfg.get("workbook")):
+        return None
+    daily, _ = daily_paths(cfg)
+    st = _state()
+    tabs = st.setdefault("tabs", {})
+    try:
+        out = daily_build.copy_big_tab(cfg["workbook"], clock.today(), daily,
+                                       tabs.setdefault("big", {}), tabs,
+                                       guard=_big_guard(cfg["workbook"]))
+    except Exception as ex:
+        out = f"error: {type(ex).__name__}: {ex}"
+    if out in ("written", "replaced"):
+        fresh = _state()                 # the loop may have written it meanwhile
+        fresh.setdefault("tabs", {}).setdefault("big", {}).update(tabs["big"])
+        STATE.write_text(json.dumps(fresh))
+    if out != big:
+        b["big_tab"] = out if out.startswith("skipped") else f"{out} (retried {clock.now():%H:%M})"
+        db._upsert_key(daily_build.BUILD_KEY, b)
+        log(f"GC8 Inspections 2026, today's tab: {b['big_tab']}")
+    return out
+
+
 def run_backup_build(cfg, day=None, by="backup", ssrs=None, publish=True):
     """run_build for the backup PC, which reaches neither SSRS nor a synced
     folder. The rooms are `ssrs` (an export somebody downloaded) or else the
@@ -1314,6 +1345,10 @@ def run_loop():
             # depend on anybody's session being signed in.
             if time.time() - last_watch > 600:
                 last_watch = time.time()
+                try:
+                    retry_big_tab(cfg)
+                except Exception as ex:
+                    log(f"big tab retry: {type(ex).__name__}: {ex}")
                 try:
                     import agent_watch
                     sent = agent_watch.run(cfg)
