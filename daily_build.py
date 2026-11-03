@@ -63,8 +63,12 @@ def borrow(*names, path=PAGE):
         elif isinstance(n, (ast.Assign, ast.AnnAssign)):
             targets = n.targets if isinstance(n, ast.Assign) else [n.target]
             for t in targets:
-                if isinstance(t, ast.Name):
-                    defs[t.id] = n
+                # `DS_W_FILL, DS_W_BLD, DS_W_LEVEL = 4, 8, 2` binds three names
+                # through a tuple; missing it made every forecast's _ds_fill fail
+                # and fall back to the old Daily Service packing (735 times by 3 Nov).
+                for x in (t.elts if isinstance(t, (ast.Tuple, ast.List)) else [t]):
+                    if isinstance(x, ast.Name):
+                        defs[x.id] = n
         elif isinstance(n, (ast.Import, ast.ImportFrom)):
             imports.append(n)
     missing = [n for n in names if n not in defs]
