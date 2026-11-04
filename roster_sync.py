@@ -28,6 +28,31 @@ def parse(raw: bytes):
     return ri.parse_all_weeks(wb, wbs), len(wb.worksheets)
 
 
+#: Settings row holding recent changes to people's days, for My Home's notice.
+CHANGES_KEY = "staff_changes"
+CHANGES_KEEP_DAYS = 14
+
+
+def log_changes(d):
+    """Add a sync's cell changes for today and later to the rolling log.
+
+    The meta row's last_diff is overwritten by the next sync, which on the
+    office PC runs every few minutes -- so it could never tell a housekeeper
+    on Thursday that her Friday was changed on Tuesday. Past days are left
+    out: nobody needs telling about a day that has gone. Kept 14 days."""
+    today = clock.today().isoformat()
+    new = [{"at": clock.stamp(), "name": ch["name"], "date": ch["date"],
+            "old": ch["old"], "new": ch["new"]}
+           for dd in d["changed_weeks"].values() for ch in dd["changed"]
+           if ch["date"] >= today]
+    if not new:
+        return
+    cutoff = (clock.today() - datetime.timedelta(days=CHANGES_KEEP_DAYS)).isoformat()
+    old = [c for c in (db._load_key(CHANGES_KEY) or {}).get("changes") or []
+           if str(c.get("at", ""))[:10] >= cutoff and c.get("date", "") >= today]
+    db._upsert_key(CHANGES_KEY, {"changes": (old + new)[-2000:]})
+
+
 def touches_day(d, incoming, day_iso: str) -> bool:
     """Whether a diff changes who works on `day_iso`."""
     for wk in d["new_weeks"]:
@@ -96,6 +121,10 @@ def save(raw: bytes, file_name: str, by: str, incoming=None, n_sheets=None,
         })
     except Exception as ex:
         failed.append(f"meta: {ex}")
+    try:
+        log_changes(d)
+    except Exception as ex:
+        failed.append(f"change log: {ex}")
     # Keep the workbook itself so the Excel export works any day, not only in
     # a session where someone happened to upload it.
     try:

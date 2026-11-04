@@ -30,6 +30,33 @@ def e(s):
     return _html.escape(str(s) if s is not None else "")
 
 
+def _t(key, fallback):
+    """T, with English to fall back on. i18n is an imported module, so a
+    running app keeps its old copy after a deploy and an unknown key comes
+    back as itself -- 'rooms.everyone' on the page until the next reboot."""
+    s = T(key)
+    return fallback if s == key else s
+
+
+def _tf(key, fallback, **kw):
+    """_t, filled in. The values may carry our own <b> markup, so nothing in
+    them is escaped -- only ever pass numbers and that."""
+    return _t(key, fallback).format(**kw)
+
+
+#: Day and month names for the header, in the reader's language.
+_ES = i18n.lang() == "es"
+_DOW = (["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"])[_ES]
+_MON = (["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+        ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"])[_ES]
+
+
+def _date_str(d):
+    return (f"{_DOW[d.weekday()]} {d.day} {_MON[d.month - 1]}" if _ES
+            else f"{_DOW[d.weekday()]}, {_MON[d.month - 1]} {d.day}")
+
+
 # ── statuses ─────────────────────────────────────────────────────────────────
 # The words come from roomstatus so that a room marked here is the same room
 # the supervisor sees moving on the Live board. They used to be two private
@@ -484,7 +511,7 @@ if _dme:
     _pct_d = int(round(100 * _n_done / len(_mine_d))) if _mine_d else 0
     st.markdown(
         f'<div class="mrhero"><h1>{e(T("rooms.hello", name=str(me_display or _dme).split()[0].title()))}</h1>'
-        f'<p>{e(T("duty.subtitle"))} · {e(today.strftime("%A, %d %B %Y"))}</p>'
+        f'<p>{e(T("duty.subtitle"))} · {e(_date_str(today))}</p>'
         f'<div class="mrbar"><i style="width:{_pct_d}%"></i></div>'
         f'<div class="mrcount">{e(T("duty.progress", done=_n_done, total=len(_mine_d)))}</div></div>',
         unsafe_allow_html=True)
@@ -631,7 +658,7 @@ if _mine_plan:
 st.markdown(
     f'<div class="mrhero m3">{_ring(done_n, total_n)}<div>'
     f'<h1>{e(T("rooms.hello", name=greet))}</h1>'
-    f'<p>{e(today.strftime("%a, %b ") + str(today.day))}'
+    f'<p>{e(_date_str(today))}'
     f'{" · " + e(T("rooms.total_time", mins=mins)) if mins else ""}'
     f'{"" if my_rooms else " · " + e(T("rooms.subtitle_team"))}</p>'
     f'{_fin}</div></div>', unsafe_allow_html=True)
@@ -653,12 +680,6 @@ if _drooms and st.session_state.get("role", "") in ("rqs", "admin"):
         st.markdown('<table style="width:100%;font-size:.88rem;border-collapse:collapse">'
                     + "".join(_rows) + "</table>", unsafe_allow_html=True)
 
-def _t(key, fallback):
-    """T, with English to fall back on. i18n is an imported module, so a
-    running app keeps its old copy after a deploy and an unknown key comes
-    back as itself -- 'rooms.everyone' on the page until the next reboot."""
-    s = T(key)
-    return fallback if s == key else s
 
 
 # Drawn here so it sits under the header, filled at the end of the page once
@@ -778,25 +799,26 @@ def _flags_for(r):
     out = []
     res = str(r.get("res_type", "") or "")
     if "owner" in res.lower():
-        out.append(("owner", "OWNER"))
+        out.append(("owner", _t("flag.owner", "OWNER")))
     note = " ".join(str(r.get(k, "") or "") for k in ("notes", "service"))
     low = note.lower()
     if "vip" in low:
         out.append(("vip", "VIP"))
     if "priority" in low or "rush" in low:
-        out.append(("vip", "PRIORITY"))
+        out.append(("vip", _t("flag.priority", "PRIORITY")))
     if "early" in low:
-        out.append(("early", "EARLY IN"))
+        out.append(("early", _t("flag.early", "EARLY IN")))
     if str(r.get("arriving", "") or "").strip() and not any(
             k == "early" for k, _ in out):
-        out.append(("early", "ARRIVING"))
+        out.append(("early", _t("flag.arriving", "ARRIVING")))
     if str(r.get("pet", "") or "").strip():
-        out.append(("pet", "PET"))
+        out.append(("pet", _t("flag.pet", "PET")))
     if r.get("late_checkout"):
         # The time is the whole point of the flag -- "LATE OUT" on its own
         # tells somebody to skip the room, not when to come back for it.
         at = _day.late_out_at(r)
-        out.append(("late", f"LATE OUT {at}" if at else "LATE OUT"))
+        lo = _t("flag.late", "LATE OUT")
+        out.append(("late", f"{lo} {at}" if at else lo))
     return out
 
 
@@ -1172,7 +1194,8 @@ def _day_strip(blocks):
     # Pacing lands most charts exactly on the target, where the overrun is a
     # rounding sliver. Half a minute is not late; showing "0m over" is.
     over = s["over"] > 0.5
-    fin_txt = _day.hhmm(finish) + (" · %.0fm over" % s["over"] if over else " ✓")
+    fin_txt = _day.hhmm(finish) + (" · " + _tf("day.over", "{m}m over", m="%.0f" % s["over"])
+                                   if over else " ✓")
     return (
         f'<div class="dayw">'
         f'<div class="dayh"><b>{e(T("rooms.yourday"))}</b>'
@@ -1184,20 +1207,24 @@ def _day_strip(blocks):
         f'<div class="dayax"><span>{_day.hhmm(begin)}</span>'
         f'<span>3:30 ▏ 4:00</span></div>'
         f'<div class="daysum">'
-        f'<b>{s["rooms"]}</b> rooms · <b>{s["clean"]:.0f}m</b> cleaning · '
-        f'<b>{s["travel"]:.0f}m</b> walking'
+        + _tf("day.rooms", "{n} rooms", n=f'<b>{s["rooms"]}</b>') + " · "
+        + _tf("day.cleaning", "{m} cleaning", m=f'<b>{s["clean"]:.0f}m</b>') + " · "
+        + _tf("day.walking", "{m} walking", m=f'<b>{s["travel"]:.0f}m</b>')
         # The sheet's minutes are standards the floor beats. Say by how much
         # rather than silently quoting times nobody can trace back.
-        + (f' · paced <b>{(1 - s["pace"]) * 100:.0f}%</b> under the sheet'
+        + (" · " + _tf("day.paced", "paced {p} under the sheet",
+                       p=f'<b>{(1 - s["pace"]) * 100:.0f}%</b>')
            if s["pace"] < 0.995 else "")
-        + (f' · <b>{s["wait"]:.0f}m</b> waiting on a guest' if s["wait"] > 0 else "")
-        + (f' · <b>{s["late_rooms"]}</b> late checkout'
-           + ("s" if s["late_rooms"] != 1 else "") if s["late_rooms"] else "")
+        + (" · " + _tf("day.waiting", "{m} waiting on a guest", m=f'<b>{s["wait"]:.0f}m</b>')
+           if s["wait"] > 0 else "")
+        + (" · " + _tf("day.late", "{n} late checkout(s)", n=f'<b>{s["late_rooms"]}</b>')
+           if s["late_rooms"] else "")
         # Never present a guess as a plan: if the sheet carried no minutes for
         # some rooms, the finish time is an estimate and has to say so.
-        + (f' · <b>{s["untimed"]}</b> with no time on the sheet, estimated'
+        + (" · " + _tf("day.untimed", "{n} with no time on the sheet, estimated",
+                       n=f'<b>{s["untimed"]}</b>')
            if s["untimed"] else "")
-        + f'</div></div>')
+        + '</div></div>')
 
 
 _flat = sorted(shown_rooms, key=_seat)

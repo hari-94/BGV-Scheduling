@@ -28,13 +28,16 @@ MIN_LEN = 6          # the same floor the rest of the app uses
 
 me = auth.current_user()
 uname = me.get("username", "")
+# The role in the reader's language: auth's badge only ever says "Housekeeper".
+_rk = "role." + me.get("role", "")
+_role_lbl = i18n.t(_rk) if _rk in i18n.STRINGS else auth.role_badge(me.get("role", ""))
 
 st.markdown(f"""<div style="background:#fff;border:1px solid #e6e9ee;border-radius:16px;
      padding:18px 22px;margin-bottom:16px">
   <div style="font-size:1.3rem;font-weight:700;color:#16202e">
     {i18n.t('profile.hello')} {st.session_state.get('display_name') or uname}</div>
   <div style="font-size:.85rem;color:#5b6675;margin-top:4px">
-    {uname} · {auth.role_badge(me.get('role',''))}</div>
+    {uname} · {_role_lbl}</div>
 </div>""", unsafe_allow_html=True)
 
 st.markdown(f"#### {T('profile.change_pw')}")

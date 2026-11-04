@@ -771,6 +771,23 @@ for the person cleaning it), finished rooms as one-line rows under "Done", and
 each room's status button kept beside its card on a phone (the
 `st-key-tkrow_` container per row) instead of on a row of its own.
 
+**My Home opens on today** (HP, 4 Nov). In order: a Today card (the shift,
+the area, and -- for someone with rooms -- My Rooms' numbers with a link to
+it), a notice when the sheet changed one of their coming days since they last
+pressed Got it, tomorrow and the next day off (or back to work), the schedule
+one week at a time with what each code means, and one month's figures. The
+old counts, period filter, charts and day table are behind "My full record".
+The notice reads `staff_changes` in app_settings, which `roster_sync.save`
+appends to (`log_changes`: today-and-later cells only, 14 days kept) -- the
+meta row's `last_diff` is overwritten by each sync, so it could not serve.
+What someone has acknowledged is `staffchg_seen_<username>`. Edits made in
+the app (staff_overrides) are not logged yet. **Every word a housekeeper
+reads is in i18n** -- My Home, My Rooms (room tags, the day strip's summary,
+dates) and Profile (the role): a page with English left in it read as
+half-translated to a Spanish-speaking team. The sheet's own words ("Daily
+service", "Building 2") and roster_import's task meanings are translated on
+the page, keyed by the English, so an older roster_import still gets them.
+
 **My Home finds a person by name, and a first name alone is not a person.**
 `roster_import.match_person` used to fall back to the first sheet row with the
 same first name: "Luis Rendon" got Luis Urbina's week, "David Galeano" David
