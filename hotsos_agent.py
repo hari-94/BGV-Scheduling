@@ -1514,6 +1514,24 @@ def evening_preview(cfg, day=None, test=False):
     day = day or (clock.today() + _dt.timedelta(days=1))
     iso = day.isoformat()
     rec = {"date": iso, "at": clock.stamp(), "host": socket.gethostname()}
+    # The latest rooms first (HP, 4 Nov): the forecast's pull can be hours
+    # old by 9 PM, and an evening's bookings and cancellations move the day.
+    # SSRS is office-network only, so on a failure the last pull stands in
+    # and the card says how old it is.
+    fresh_note = ""
+    try:
+        import io
+        p = pull_ssrs(day, day, tag="_eve")
+        raw = p.read_bytes()
+        p.unlink(missing_ok=True)
+        (to_text,) = daily_build.borrow("excel_to_room_text")
+        text, n, _ = to_text(io.BytesIO(raw))
+        old = db._load_key(hs.ROOMS_CACHE_PREFIX + iso) or {}
+        db._upsert_key(hs.ROOMS_CACHE_PREFIX + iso, dict(old, date=iso, room_text=text,
+                                                         rooms=int(n), pulled_at=clock.stamp()))
+    except Exception as ex:
+        fresh_note = f" (fresh pull failed: {type(ex).__name__})"
+        log(f"evening preview {iso}: SSRS pull failed, using the last one -- {ex}")
     cache = db._load_key(hs.ROOMS_CACHE_PREFIX + iso) or {}
     if not cache.get("room_text"):
         return dict(rec, status="waiting", why="no room list for that day yet (forecast pull)")
@@ -1558,7 +1576,7 @@ def evening_preview(cfg, day=None, test=False):
         "Good to know": [
             f"Arrival Report: {arr_name}" if arr_name else
             "Arrival Report: not in yet — the charts have no late checkouts or early ins",
-            f"Room list pulled {str(cache.get('pulled_at', ''))[11:16]}"
+            f"Room list pulled {str(cache.get('pulled_at', ''))[11:16]}{fresh_note}"
             + (f" · forecast needs {fc.get('hskp')} housekeepers, {fc.get('rqs')} RQS" if fc else "")],
     }
     card = tn.preview_card(day, groups, extra)

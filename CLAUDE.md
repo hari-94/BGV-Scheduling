@@ -535,9 +535,19 @@ is in. It goes to the `personal` webhook in `teams_webhooks`, else `test`;
 
 **The ENG sheet's cells are written in one style.** `office_scripts/eng_sheet.ts`
 sets the workbook's Normal font and size, black, not bold, left and wrapped
-on every cell it writes (the date bold). The script runs in Excel Online, so
-a change to it reaches the flow only when it is pasted into the workbook's
-Automate → script editor.
+on every cell it writes (the date bold), each step in try/catch so a
+formatting hiccup never stops the names being written. The script the flow
+runs is `ENG sheet update.osts` in Hari's OneDrive (Documents/Documents/
+Office Scripts): JSON whose `body` is this file. A change reaches the flow
+when that `body` is replaced -- done on 4 Nov over SharePoint REST from the
+agent's signed-in `pa-browser` profile (stop the agent first; two Chromes
+can't share it), keeping `parameterInfo` as it is while `main`'s
+signature doesn't change.
+
+**At 9 PM the room list is pulled fresh** before the preview is built
+(`pull_ssrs` for tomorrow, the stored list kept if SSRS fails, and the card
+says so). Rooms held off every chart carry why: stayover, P/U model,
+unallocated or buyback (may be clean), no guest yet (`teams_notes.why_held`).
 
 ## Forecasting a week from the bookings
 

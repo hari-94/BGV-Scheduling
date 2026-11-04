@@ -28,28 +28,30 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
   // the names looked uneven. The font and size are the workbook's own Normal
   // style -- its body text -- so they match the rest of the tab. Fill and
   // borders belong to the sheet's design and are left alone.
+  // A cell nobody has touched carries the workbook's Normal style.
   let fontName = "Calibri";
   let fontSize = 11;
   try {
-    const normal = workbook.getPredefinedCellStyle("Normal");
-    if (normal) {
-      fontName = normal.getFont().getName() || fontName;
-      fontSize = normal.getFont().getSize() || fontSize;
-    }
+    const plain = ws.getRange("Z200").getFormat().getFont();
+    fontName = plain.getName() || fontName;
+    fontSize = plain.getSize() || fontSize;
   } catch (e) { /* keep Calibri 11 */ }
+  // Never lets a formatting hiccup stop the names being written.
   const even = (r: ExcelScript.Range, bold = false) => {
-    const f = r.getFormat();
-    const font = f.getFont();
-    font.setName(fontName);
-    font.setSize(fontSize);
-    font.setColor("#000000");
-    font.setBold(bold);
-    font.setItalic(false);
-    font.setUnderline(ExcelScript.RangeUnderlineStyle.none);
-    font.setStrikethrough(false);
-    f.setHorizontalAlignment(ExcelScript.HorizontalAlignment.left);
-    f.setVerticalAlignment(ExcelScript.VerticalAlignment.center);
-    f.setWrapText(true);
+    try {
+      const f = r.getFormat();
+      const font = f.getFont();
+      font.setName(fontName);
+      font.setSize(fontSize);
+      font.setColor("#000000");
+      font.setBold(bold);
+      font.setItalic(false);
+      font.setUnderline(ExcelScript.RangeUnderlineStyle.none);
+      font.setStrikethrough(false);
+      f.setHorizontalAlignment(ExcelScript.HorizontalAlignment.left);
+      f.setVerticalAlignment(ExcelScript.VerticalAlignment.center);
+      f.setWrapText(true);
+    } catch (e) { /* the value is written; only the look is skipped */ }
   };
 
   const vals = ws.getRange("A1:K80").getValues();

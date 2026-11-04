@@ -330,6 +330,24 @@ _SVC_SHORT = {"Full Clean": "FC", "Full Clean (IH)": "IH", "Daily Service": "DS"
               "Dust n Vac": "DV"}
 
 
+def why_held(g, r):
+    """Why the schedule kept a room off every chart, in two or three words --
+    the same tests the Schedule page uses to set it aside."""
+    text = " ".join(str(r.get(k) or "") for k in ("notes", "service", "status")).lower()
+    guest = re.sub(r"\s+", " ", str(r.get("guest") or "")).strip().lower()
+    if "stayover" in text or "stay over" in text:
+        return "stayover"
+    if "p/u model" in text or "pu model" in text:
+        return "P/U model"
+    if guest.startswith("buyback"):
+        return "buyback — may be clean"
+    if g.get("unalloc_group") or guest in ("unallocated", "---", ""):
+        return "unallocated — may be clean"
+    if guest in ("room, walk", "deposit, deposit"):
+        return "no guest yet"
+    return "to confirm"
+
+
 def preview_card(day, groups, extra):
     """The Adaptive Card: one row per chart -- housekeeper, rooms, minutes,
     RQS -- then everything a manager would want to know the night before.
@@ -372,9 +390,9 @@ def preview_card(day, groups, extra):
     if checks:
         extra = dict(extra)
         extra.setdefault("Not on a chart", []).append(
-            f"{sum(len(g['rooms']) for g in checks)} rooms to check or confirm "
+            f"{sum(len(g['rooms']) for g in checks)} rooms held back to check or confirm "
             f"({sum(mins(g) for g in checks)} min): "
-            + ", ".join(str(r.get("room", "")) for g in checks for r in g["rooms"]))
+            + ", ".join(f"{r.get('room', '')} ({why_held(g, r)})" for g in checks for r in g["rooms"]))
     for title, lines in extra.items():
         if not lines:
             continue
