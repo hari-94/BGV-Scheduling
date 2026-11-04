@@ -524,6 +524,21 @@ until 11, never repeats a chat that already took it, and `teams_notes_sent`
 records what happened. No report or no tab by 11: nothing is sent, and the
 record says why.
 
+**At 9 PM tomorrow's charts go to Hari's own chat** (HP, 4 Nov).
+`hotsos_agent.evening_preview` builds tomorrow as a preview (nothing saved)
+from the forecast's room list (`ssrs_rooms_<date>`) and posts one Adaptive
+Card -- a row per chart: housekeeper, rooms, minutes, RQS -- then who is
+spare, light duty, borrowing, what is still open, whether the Arrival Report
+is in. It goes to the `personal` webhook in `teams_webhooks`, else `test`;
+`evening_preview_sent` records it, and `python hotsos_agent.py evening
+--test` sends one now without touching that record.
+
+**The ENG sheet's cells are written in one style.** `office_scripts/eng_sheet.ts`
+sets the workbook's Normal font and size, black, not bold, left and wrapped
+on every cell it writes (the date bold). The script runs in Excel Online, so
+a change to it reaches the flow only when it is pasted into the workbook's
+Automate → script editor.
+
 ## Forecasting a week from the bookings
 
 **Plan a week** used to seed its three numbers — labour minutes, checkouts,

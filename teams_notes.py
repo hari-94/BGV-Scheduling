@@ -234,11 +234,12 @@ def as_card(msg):
             "body": body}
 
 
-def post(url, msg, timeout=30):
-    """Send one message to a Teams workflow URL. Returns (HTTP status, body)."""
+def post(url, msg, timeout=30, card=None):
+    """Send one message to a Teams workflow URL. Returns (HTTP status, body).
+    `card` is a ready Adaptive Card, for messages that are not notes."""
     payload = {"type": "message", "attachments": [{
         "contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": None,
-        "content": as_card(msg)}]}
+        "content": card or as_card(msg)}]}
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
                                  headers={"Content-Type": "application/json"})
     try:
@@ -315,6 +316,75 @@ def run_morning(day, read_day, arr_folder=None, test=False, already=None, log=pr
         log(f"teams notes -> {group}{' (test)' if test else ''}: HTTP {st}")
     ok = all(str(rec["results"].get(n, "")).startswith("2") for n in ("houseperson", "housekeeping"))
     return dict(rec, status="sent" if ok else "failed")
+
+
+# ── 9 PM: tomorrow's charts, to Hari's own chat (HP, 4 Nov) ───────────────────
+# A preview built the night before from the forecast's room list, so the
+# evening can be planned: who has what, who is spare, what is still open.
+# Sent to the "personal" webhook, else "test" -- both post to Hari alone.
+PREVIEW_KEY = "evening_preview_sent"     # {date, at, status, results}
+PREVIEW_AT = (21, 0)
+PREVIEW_UNTIL_HOUR = 23
+
+_SVC_SHORT = {"Full Clean": "FC", "Full Clean (IH)": "IH", "Daily Service": "DS",
+              "Dust n Vac": "DV"}
+
+
+def preview_card(day, groups, extra):
+    """The Adaptive Card: one row per chart -- housekeeper, rooms, minutes,
+    RQS -- then everything a manager would want to know the night before.
+    `extra` is {title: [lines]} in display order; empty ones are left out."""
+    def mins(g):
+        return sum(r.get("time", 0) or 0 for r in g.get("rooms") or [])
+
+    def row(cells, bold=False, sep=False):
+        widths = (30, 44, 11, 22)
+        return {"type": "ColumnSet", "spacing": "Small", "separator": sep, "columns": [
+            {"type": "Column", "width": w, "items": [
+                {"type": "TextBlock", "text": t, "wrap": True, "size": "Small",
+                 "weight": "Bolder" if bold else "Default"}]}
+            for t, w in zip(cells, widths)]}
+
+    order = {"Full Clean": 0, "Full Clean (IH)": 1, "Daily Service": 2, "Dust n Vac": 3}
+    real = sorted((g for g in groups if g.get("rooms") and not g.get("verify_group")),
+                  key=lambda g: (order.get(g.get("service_type"), 9),
+                                 str(g.get("housekeeper") or "~"), g.get("label", "")))
+    checks = [g for g in groups if g.get("verify_group") and g.get("rooms")]
+    n_rooms = sum(len(g.get("rooms") or []) for g in real)
+    people = {g.get("housekeeper") for g in real if g.get("housekeeper")
+              and not str(g.get("housekeeper")).startswith(("Need", "No HK"))}
+    rqs = {g.get("inspector") for g in real if g.get("inspector")
+           and not str(g.get("inspector")).startswith("Inspector ")}
+    body = [{"type": "TextBlock", "size": "Large", "weight": "Bolder", "wrap": True,
+             "text": f"Tomorrow · {day:%a %b} {day.day} — preview"},
+            {"type": "TextBlock", "isSubtle": True, "size": "Small", "spacing": "None", "wrap": True,
+             "text": f"{n_rooms} rooms on charts · {len(people)} housekeepers · {len(rqs)} RQS. "
+                     "Built tonight from the forecast's room list; the 5 AM build uses the "
+                     "morning's and may differ."},
+            row(["Housekeeper", "Rooms", "Min", "RQS"], bold=True, sep=True)]
+    for g in real:
+        hk = str(g.get("housekeeper") or "")
+        if not hk or hk.startswith(("Need", "No HK")):
+            hk = "⚠ nobody" if not g.get("dv_rqs2") else "RQS 2 round"
+        rooms = ", ".join(str(r.get("room", "")) for r in g.get("rooms") or [])
+        body.append(row([hk, f"{_SVC_SHORT.get(g.get('service_type'), '')} · {rooms}",
+                         str(mins(g)) if mins(g) else "—", str(g.get("inspector") or "—")]))
+    if checks:
+        extra = dict(extra)
+        extra.setdefault("Not on a chart", []).append(
+            f"{sum(len(g['rooms']) for g in checks)} rooms to check or confirm "
+            f"({sum(mins(g) for g in checks)} min): "
+            + ", ".join(str(r.get("room", "")) for g in checks for r in g["rooms"]))
+    for title, lines in extra.items():
+        if not lines:
+            continue
+        body.append({"type": "TextBlock", "text": title, "weight": "Bolder", "color": "Accent",
+                     "spacing": "Medium", "separator": True, "wrap": True})
+        body += [{"type": "TextBlock", "text": f"• {l}", "wrap": True, "spacing": "Small",
+                  "size": "Small"} for l in lines]
+    return {"$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard", "version": "1.4", "msteams": {"width": "Full"},
+            "body": body}
 
 
 def main():

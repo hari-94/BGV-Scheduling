@@ -23,6 +23,35 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
   const ws = workbook.getWorksheet("RQS-ENG-Runners");
   if (!ws) throw new Error("Tab 'RQS-ENG-Runners' not found");
 
+  // One text style for every cell this script writes (HP, 4 Nov): the cells
+  // had kept whatever font, size, colour and bold someone once gave them, so
+  // the names looked uneven. The font and size are the workbook's own Normal
+  // style -- its body text -- so they match the rest of the tab. Fill and
+  // borders belong to the sheet's design and are left alone.
+  let fontName = "Calibri";
+  let fontSize = 11;
+  try {
+    const normal = workbook.getPredefinedCellStyle("Normal");
+    if (normal) {
+      fontName = normal.getFont().getName() || fontName;
+      fontSize = normal.getFont().getSize() || fontSize;
+    }
+  } catch (e) { /* keep Calibri 11 */ }
+  const even = (r: ExcelScript.Range, bold = false) => {
+    const f = r.getFormat();
+    const font = f.getFont();
+    font.setName(fontName);
+    font.setSize(fontSize);
+    font.setColor("#000000");
+    font.setBold(bold);
+    font.setItalic(false);
+    font.setUnderline(ExcelScript.RangeUnderlineStyle.none);
+    font.setStrikethrough(false);
+    f.setHorizontalAlignment(ExcelScript.HorizontalAlignment.left);
+    f.setVerticalAlignment(ExcelScript.VerticalAlignment.center);
+    f.setWrapText(true);
+  };
+
   const vals = ws.getRange("A1:K80").getValues();
   const cell = (r: number, c: number) => String(vals[r][c] ?? "").trim();   // r, c are 0-based
   const B = 1, C = 2, D = 3, E = 4, F = 5, G = 6;
@@ -33,6 +62,7 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
 
   // 1. date and time at the top
   ws.getRange("B2").setValue(p.title);
+  even(ws.getRange("B2"), true);
 
   // 2. AM housepersons: between "AM Housepersons" and "PM Housepersons"
   const am = find(B, s => /^am housepersons/i.test(s));
@@ -44,6 +74,7 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
       if (!slot && /hsp lead am/i.test(cell(r, C))) slot = "LEAD";
       if (slot && p.housepersons[slot] !== undefined) {
         ws.getCell(r, E).setValue(p.housepersons[slot].join(" / "));
+        even(ws.getCell(r, E));
       }
     }
   }
@@ -65,6 +96,7 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
       if (!slot && /hsp\s*lead\s*pm/i.test(cell(r, C))) slot = "LEAD";
       if (slot && !done[slot] && pmNames[slot] !== undefined) {
         ws.getCell(r, E).setValue(pmNames[slot].join(" / "));
+        even(ws.getCell(r, E));
         done[slot] = true;
       }
     }
@@ -92,6 +124,7 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
     for (let k = 0; k < rows; k++) {
       ws.getCell(first + k, F).setValue(k < entries.length ? entries[k][0] : "");
       ws.getCell(first + k, G).setValue(k < entries.length ? entries[k][1] : "");
+      even(ws.getRangeByIndexes(first + k, F, 1, 2));
     }
   });
 }

@@ -1205,6 +1205,7 @@ def run_loop():
     last_beat = 0
     last_cred = _register("office")
     last_teams = 0
+    last_preview = 0
     _LOOP_PASS[0] = time.time()
     start_beat()
     while True:
@@ -1299,6 +1300,13 @@ def run_loop():
             except Exception as ex:
                 last_teams = time.time()
                 log(f"teams notes: {type(ex).__name__}: {ex}")
+
+            # 9 PM: tomorrow's charts as a preview, to Hari's own chat.
+            try:
+                last_preview = _preview_tick(cfg, last_preview)
+            except Exception as ex:
+                last_preview = time.time()
+                log(f"evening preview: {type(ex).__name__}: {ex}")
 
             # The room-status mirror runs on its own thread (start_mirror).
             start_mirror()
@@ -1491,6 +1499,111 @@ def _teams_tick(cfg, last):
     return time.time()
 
 
+def evening_preview(cfg, day=None, test=False):
+    """Build tomorrow as a preview (nothing saved) and send it to Hari's chat:
+    who has which rooms with which RQS, then who is spare, light duty,
+    borrowing, anything left open, and whether the Arrival Report is in.
+    Returns the record kept under teams_notes.PREVIEW_KEY."""
+    import importlib
+    import re
+    import daily_build
+    import teams_notes as tn
+    import roster_import as ri
+    daily_build = importlib.reload(daily_build)
+    tn = importlib.reload(tn)                 # a card fix reaches tonight's send
+    day = day or (clock.today() + _dt.timedelta(days=1))
+    iso = day.isoformat()
+    rec = {"date": iso, "at": clock.stamp(), "host": socket.gethostname()}
+    cache = db._load_key(hs.ROOMS_CACHE_PREFIX + iso) or {}
+    if not cache.get("room_text"):
+        return dict(rec, status="waiting", why="no room list for that day yet (forecast pull)")
+    arrival, arr_name = "", ""
+    _, arr_folder = daily_paths(cfg) if cfg.get("workbook") else (None, None)
+    if arr_folder:
+        p = daily_build.find_arrival_report(arr_folder, day)
+        if p:
+            arrival, arr_name = daily_build.read_arrival_report(p), p.name
+    groups = daily_build.generate(cache["room_text"], arrival, publish=False, day=day)
+
+    # Who the sheet has on tomorrow, against who the charts used.
+    norm = lambda s: re.sub(r"\s+", " ", str(s or "")).strip().lower()
+    wk = ri.find_week_key(db.staff_week_keys(), iso)
+    people = []
+    if wk:
+        eff, _ = ri.apply_overrides(db.load_staff_week(wk), db.load_staff_overrides() or {}, wk)
+        people = ri.week_to_people(eff, iso)
+    on_hk = {norm(g.get("housekeeper")) for g in groups}
+    on_rqs = {norm(g.get("inspector")) for g in groups}
+    spare_hk = sorted(p["name"] for p in people if p["group"] == "hk"
+                      and p["kind"] in ri.PRESENT_KINDS and norm(p["name"]) not in on_hk)
+    spare_rqs = sorted(p["name"] for p in people if p["group"] == "rqs"
+                       and p["kind"] in ri.PRESENT_KINDS and norm(p["name"]) not in on_rqs)
+    open_ = [f"{tn._SVC_SHORT.get(g.get('service_type'), '')} "
+             f"{sum(r.get('time', 0) or 0 for r in g['rooms'])} min "
+             f"({', '.join(str(r.get('room')) for r in g['rooms'])})"
+             for g in groups if g.get("rooms") and not g.get("verify_group")
+             and not g.get("dv_rqs2")
+             and (not g.get("housekeeper") or str(g["housekeeper"]).startswith(("Need", "No HK")))]
+    no_rqs = sum(1 for g in groups if g.get("rooms") and not g.get("verify_group")
+                 and str(g.get("inspector") or "").startswith("Inspector "))
+    fc = next((d for d in ((db._load_key(hs.FORECAST_KEY) or {}).get("days") or [])
+               if d.get("date") == iso), {})
+    extra = {
+        "Anyone extra": ([f"Housekeepers with no rooms: {', '.join(spare_hk)}"] if spare_hk else [])
+                        + ([f"RQS not needed: {', '.join(spare_rqs)}"] if spare_rqs else []),
+        "Light duty": [f"{n}: {what}" for n, what in getattr(daily_build.generate, "light_duty", [])],
+        "Borrowed from other duties": [f"{n} ({r}) — {duty}" for n, r, duty
+                                       in getattr(daily_build.generate, "borrowed", [])],
+        "Still open": open_ + ([f"{no_rqs} chart(s) with no RQS"] if no_rqs else []),
+        "Good to know": [
+            f"Arrival Report: {arr_name}" if arr_name else
+            "Arrival Report: not in yet — the charts have no late checkouts or early ins",
+            f"Room list pulled {str(cache.get('pulled_at', ''))[11:16]}"
+            + (f" · forecast needs {fc.get('hskp')} housekeepers, {fc.get('rqs')} RQS" if fc else "")],
+    }
+    card = tn.preview_card(day, groups, extra)
+    hooks = db._load_key(tn.WEBHOOKS_KEY) or {}
+    url = hooks.get("personal") or hooks.get("test")
+    if not url:
+        return dict(rec, status="failed", why="no personal or test webhook in teams_webhooks")
+    st_, body = tn.post(url, None, card=card)
+    log(f"evening preview {iso} -> {'personal' if hooks.get('personal') else 'test'} chat: HTTP {st_}")
+    rec.update(status="sent" if 200 <= st_ < 300 else "failed", http=st_,
+               charts=len(groups), spare_hk=spare_hk, spare_rqs=spare_rqs,
+               report=arr_name, why=None if 200 <= st_ < 300 else body[:200])
+    if not test:
+        db._upsert_key(tn.PREVIEW_KEY, rec)
+    return rec
+
+
+def _preview_tick(cfg, last):
+    """From the loop: at 9 PM, once, tomorrow's preview to Hari's chat. Tried
+    every 10 minutes until 11 PM if a try fails."""
+    if time.time() - last < 600:
+        return last
+    import teams_notes as tn
+    now = clock.now()
+    if not cfg.get("workbook") or (now.hour, now.minute) < tn.PREVIEW_AT \
+            or now.hour >= tn.PREVIEW_UNTIL_HOUR:
+        return time.time() - 540 if (now.hour, now.minute) < tn.PREVIEW_AT else time.time()
+    tomorrow = str(now.date() + _dt.timedelta(days=1))
+    st = _state()
+    if st.get("preview_day") == tomorrow:
+        return time.time()
+    sent = db._load_key(tn.PREVIEW_KEY) or {}
+    if sent.get("date") == tomorrow and sent.get("status") == "sent":
+        st["preview_day"] = tomorrow
+        STATE.write_text(json.dumps(st))
+        return time.time()
+    rec = evening_preview(cfg)
+    if rec.get("status") == "sent":
+        st["preview_day"] = tomorrow
+        STATE.write_text(json.dumps(st))
+    else:
+        log(f"evening preview {tomorrow}: {rec.get('status')} -- {rec.get('why')}")
+    return time.time()
+
+
 # ── backup: a second PC that stands in for the office PC ─────────────────────
 STANDBY_SECONDS = 3 * 60     # the office PC's heartbeat older than this: stand in
 STANDBY_POLL_SECONDS = 60    # how often a standing-by backup looks at the heartbeat
@@ -1680,7 +1793,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["setup", "forecast", "roster", "staff", "build",
                                     "backup-build", "preview", "push", "run", "report",
-                                    "backup", "teams"])
+                                    "backup", "teams", "evening"])
     ap.add_argument("--ssrs", default=None,
                     help="backup-build: a Housekeeping Dashboard export to build from")
     ap.add_argument("--date", default=None)
@@ -1692,6 +1805,13 @@ def main():
         rec = teams_morning(load_config(), _dt.date.fromisoformat(a.date) if a.date else None,
                             test=a.test, by="console")
         print({k: rec.get(k) for k in ("status", "why", "report", "tab", "results")})
+        return
+    if a.cmd == "evening":
+        # Tomorrow's (or --date's) preview to Hari's chat now. --test leaves
+        # the 9 PM send record alone, so tonight's send still goes.
+        rec = evening_preview(load_config(), _dt.date.fromisoformat(a.date) if a.date else None,
+                              test=a.test)
+        print({k: rec.get(k) for k in ("status", "why", "charts", "spare_hk", "spare_rqs", "report")})
         return
     if a.cmd == "setup":
         return setup()
