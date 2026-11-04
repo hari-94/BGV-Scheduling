@@ -4726,6 +4726,105 @@ def release_borrowed(groups, names, roster):
             released.append(name)
     return groups, released
 
+#: Settings row naming the housekeepers on light duty (HP, 4 Nov). The reason
+#: is the manager's to know and is never stored -- only "light duty".
+LIGHT_DUTY_KEY = "light_duty"
+
+
+def light_duty_names():
+    try:
+        return [str(n).strip() for n in (db._load_key(LIGHT_DUTY_KEY) or {}).get("names") or []
+                if str(n).strip()]
+    except Exception as ex:
+        print(f"[app] light duty list unreadable: {ex}")
+        return []
+
+
+def ease_light_duty(groups, names, roster):
+    """Somebody on light duty does the least the day allows, or nothing.
+
+    The manager's rule (HP, 4 Nov): if there is any way, leave them free and
+    put somebody else in their spot; if they must work, give them the
+    smallest day. In that order, for each of them holding rooms:
+
+    1. A scheduled housekeeper with nothing takes their whole day, if the
+       building 2/3 rule lets them (release_borrowed's swap).
+    2. Their rooms go back to the others under the usual short-day passes --
+       caps, apartments whole, never buildings 2 and 3 -- but only if that
+       leaves nothing more unstaffed than before.
+    3. Otherwise they swap days with whoever has the lightest one they could
+       legally trade with.
+
+    Returns (groups, [(name, what happened)])."""
+    import copy as _copy
+    want = {n.lower() for n in names}
+    who = [p for p in {g.get("housekeeper") for g in groups if g.get("housekeeper")}
+           if str(p).lower() in want]
+    if not who:
+        return groups, []
+
+    def load(gs, p):
+        return sum(g["time"] for g in gs if g.get("housekeeper") == p)
+
+    def unstaffed(gs):
+        return sum(1 for g in gs if g.get("rooms") and not g.get("verify_group")
+                   and not g.get("dv_rqs2") and is_unassigned_hk(g.get("housekeeper")))
+
+    def legal(person, charts):
+        """May `person` take these charts? Daily Service goes anywhere; Full
+        Clean keeps the building 2/3 block on the person's home building."""
+        home = (roster.get(person) or {}).get("building", 0)
+        blds = set().union(*[set(g.get("blds") or []) for g in charts
+                             if g.get("service_type") != SVC_DS] or [set()])
+        return not ((home == 2 and 3 in blds) or (home == 3 and 2 in blds))
+
+    done = []
+    for name in who:
+        mine = [g for g in groups if g.get("housekeeper") == name]
+        if not mine:
+            continue
+        on_chart = {g.get("housekeeper") for g in groups if g.get("housekeeper")}
+        free = sorted(n for n, v in (roster or {}).items()
+                      if v.get("present") and n not in on_chart and n.lower() not in want)
+        swap = next((p for p in free if legal(p, mine)), None)
+        if swap:
+            for g in mine:
+                g["housekeeper"] = swap
+            done.append((name, f"free -- {swap} took the day"))
+            continue
+        before = unstaffed(groups)
+        trial = _copy.deepcopy(groups)
+        n = sum(1 for g in trial if is_unassigned_hk(g.get("housekeeper")))
+        for g in trial:
+            if g.get("housekeeper") == name:
+                n += 1
+                g["housekeeper"] = f"{NO_HK_LABEL} {n}"
+        trial = balance_light_charts(fill_from_unstaffed(trial, roster))
+        if unstaffed(trial) <= before and not any(g.get("housekeeper") == name for g in trial):
+            groups = trial
+            done.append((name, "free -- rooms shared out"))
+            continue
+        mine_load = load(groups, name)
+        others = sorted(
+            (p for p in on_chart if p and p != name and not is_unassigned_hk(p)
+             and str(p).lower() not in want and load(groups, p) < mine_load),
+            key=lambda p: load(groups, p))
+        for p in others:
+            theirs = [g for g in groups if g.get("housekeeper") == p]
+            if legal(name, theirs) and legal(p, mine):
+                for g in mine:
+                    g["housekeeper"] = p
+                for g in theirs:
+                    g["housekeeper"] = name
+                done.append((name, f"lightest day ({load(groups, name)}m, swapped with {p})"))
+                break
+        else:
+            done.append((name, f"working {mine_load}m -- nobody lighter to swap with"))
+    for name, what in done:
+        print(f"[app] light duty: {name}: {what}")
+    return groups, done
+
+
 #: West to east, the order somebody actually walks the property. Sorting charts
 #: by building *number* puts 3 next to 2 — the only two that do not touch — so
 #: an inspector handed consecutive charts across that seam gets the most
@@ -6008,6 +6107,9 @@ if run:
                         # Anyone borrowed whose rooms the others can take goes
                         # back to their own duty (release_borrowed).
                         fg, released = release_borrowed(fg, release, roster) if release else (fg, [])
+                        # Light duty last, so it sees the day as staffed (HP, 4 Nov).
+                        fg, st.session_state["light_duty_eased"] = ease_light_duty(
+                            fg, light_duty_names(), roster)
                         inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
                         return fg, inspectors, used_hk_set, released
 

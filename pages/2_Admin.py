@@ -174,8 +174,27 @@ st.markdown('<p class="pg-title"> Admin Panel</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="pg-sub">Logged in as <strong>{cu["username"]}</strong> · User management & system settings</p>',
             unsafe_allow_html=True)
 
-tab_users, tab_create, tab_pw, tab_activity, tab_svc = st.tabs(
-    ["All Users", "Create User", "Reset Password", "Activity", "Service Passwords"])
+tab_users, tab_create, tab_pw, tab_activity, tab_svc, tab_light = st.tabs(
+    ["All Users", "Create User", "Reset Password", "Activity", "Service Passwords", "Light Duty"])
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LIGHT DUTY (HP, 4 Nov): who the schedule frees, or gives the least, first
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_light:
+    st.markdown('<p class="sec">Light duty</p>', unsafe_allow_html=True)
+    st.caption("Housekeepers listed here are left free whenever the day has someone to take "
+               "their place, and otherwise get the lightest day. Applies from the next "
+               "Generate or 5 AM build. Only the names are stored -- never the reason.")
+    _ld = (db._load_key("light_duty") or {})
+    _ld_now = [str(n) for n in _ld.get("names") or []]
+    _hk_names = sorted(set((db._load_key("roster") or {}).get("hk_roster") or {}) | set(_ld_now))
+    _ld_pick = st.multiselect("On light duty", _hk_names, default=_ld_now, key="ld_names")
+    if st.button("Save light duty", key="ld_save", type="primary"):
+        db._upsert_key("light_duty", {"names": _ld_pick, "set_by": cu["username"],
+                                      "at": __import__("clock").stamp()})
+        st.success("Saved." if _ld_pick else "Saved -- nobody on light duty.")
+    if _ld.get("set_by"):
+        st.caption(f'Last changed by {_ld["set_by"]} · {str(_ld.get("at", ""))[:16].replace("T", " ")}')
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ALL USERS

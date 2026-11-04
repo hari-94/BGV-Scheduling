@@ -364,6 +364,15 @@ their charts go back to unstaffed and `fill_from_unstaffed` /
 unstaffed than before means they stay off rooms (`released` in the session and
 the build's record); otherwise the day is kept exactly as it was.
 
+**Light duty: free if the day allows, else the lightest day** (HP, 4 Nov).
+Admin → Light Duty keeps a list of names (`light_duty` in app_settings; the
+reason is never stored). `ease_light_duty` runs last in `_staff`: a free
+scheduled housekeeper takes their whole day if the building 2/3 rule allows;
+otherwise their rooms are shared out by the usual short-day passes if that
+leaves nothing more unstaffed; otherwise they swap days with whoever has the
+lightest one they could legally trade. The 5 AM build's record says which,
+under `light_duty`.
+
 **And a scheduled housekeeper with no chart goes on first.** Re-staffing
 with the borrowed people in can leave somebody on the schedule over: on 24
 October Lilliam Peralta (ON) had nothing while Luis Urbina and Araceli Duarte

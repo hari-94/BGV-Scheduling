@@ -238,6 +238,7 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         at.session_state["sched_day"] = iso          # weekend rules follow the day built
         generate.borrowed = []
         generate.released = []
+        generate.light_duty = []
         generate.blocked, generate.blocked_kept = [], []
         generate.roles = {}
         generate.ds_auto = {}
@@ -276,6 +277,9 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
                                                 if "released" in at.session_state else [])]
         generate.ds_auto = dict(at.session_state["ds_auto"]
                                 if "ds_auto" in at.session_state else {})
+        # Who on light duty was freed or given the lightest day (ease_light_duty).
+        generate.light_duty = [tuple(x) for x in (at.session_state["light_duty_eased"]
+                                                  if "light_duty_eased" in at.session_state else [])]
         # Open rooms a manager gave to someone for the day (leftover_to).
         generate.leftover = [tuple(x) for x in (at.session_state["leftover_given"]
                                                 if "leftover_given" in at.session_state else [])]
@@ -1135,6 +1139,7 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
             "borrowed": [f"{n} ({duty})" for n, _, duty in borrowed],
             "borrowed_roles": [r for _, r, _ in borrowed],
             "released": [f"{n} ({duty})" for n, duty in getattr(generate, "released", [])],
+            "light_duty": [f"{n}: {what}" for n, what in getattr(generate, "light_duty", [])],
             "blocked": len(getattr(generate, "blocked", [])),
             "stretched": stretched, "vacant_charts": int(vacant),
             "rooms_without_rqs": int(no_rqs), "big_tab": big,
