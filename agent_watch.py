@@ -102,18 +102,26 @@ def problems(cfg) -> list:
                 out.append("Off today on the staff schedule but holding a chart: "
                            + ", ".join(gone) + ". Rebuild today from the HotSOS page and "
                            "Push, or move their rooms.")
-        elif not b.get("arrival") and now.hour < 12:
+        # Its own check, not an elif of the one above: chained to it, a build
+        # that finished never reached this, and 4 Nov went out without its
+        # report and without a word.
+        if b.get("date") == str(today) and not b.get("arrival") and now.hour < 12:
             out.append("Today's schedule was built without an Arrival Report (none saved last night). "
                        "Forward the front desk's e-mail to yourself with 'Arrival' in the subject, "
                        "then rebuild today from the HotSOS page if you need its late checkouts.")
 
-    # tomorrow's Arrival Report, while there's still time to ask for it
+    # the next Arrival Report, from 21:30 until the 5 AM build reads it. Until
+    # 4 Nov this stopped at midnight; that night's report was sent at 21:55 to
+    # *GC8 FrontDesk instead of *GC8OPS, the flow never saw it, and the last
+    # word was a reminder sent before it had even been written.
     folder = Path(cfg["workbook"]).parent / "Arrival Reports" if cfg.get("workbook") else None
-    if folder and (now.hour, now.minute) >= (21, 30):
-        tomorrow = today + _dt.timedelta(days=1)
-        if not daily_build.find_arrival_report(folder, tomorrow):
-            out.append(f"No Arrival Report for tomorrow ({tomorrow:%a %b %d}) has arrived yet. Ask the front "
-                       "desk to send it — any subject with 'Arrival' in it works.")
+    if folder and ((now.hour, now.minute) >= (21, 30) or now.hour < 5):
+        day = today + _dt.timedelta(days=1) if now.hour >= 12 else today
+        if not daily_build.find_arrival_report(folder, day):
+            # The same words either side of midnight, so it is one alert, not two.
+            out.append(f"No Arrival Report for {day:%a %b %d} has arrived yet. Ask the front desk to "
+                       "send it to *GC8OPS (not only *GC8 FrontDesk) -- any subject with 'Arrival' "
+                       "in it works.")
 
     # the HotSOS mirror, through the day
     s = db._load_key(getattr(hs, "STATUS_SYNC_KEY", "hotsos_status_sync")) or {}
