@@ -216,7 +216,7 @@ _VTO_RE = re.compile(r"\b(vto|v\.t\.o\.?|keystone|firc)\b", re.I)
 # unfamiliar one — both count as a worked day either way.
 _KNOWN_OTHER_RE = re.compile(
     r"\b(hsp|ullr|garages?|projects?|food|maps|stripping\s+linen|rollaways|"
-    r"lavar\s+botes|cleaning\s+(windows|carpets)|breck\s*in|training|eng|"
+    r"lavar\s+botes|cleaning\s+(windows|carpets)|breck\s*inn?|training|eng|"
     r"help\s+with\s+party|safety\s+meeting|stairs\s*only|baseboards|"
     r"listening\s+session|conference|meeting|spiff|touch\s*up|sales|"
     r"am\s+team|voluntario|deep\s+clean|inventory|inventario|windows)\b")

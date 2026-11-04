@@ -372,6 +372,11 @@ people already on a chart. `release_borrowed` now first hands a borrowed
 person's whole chart to a free scheduled housekeeper who may legally take it
 (the building 2/3 rule), and the borrowed person goes back to their duty.
 
+**Breck Inn is another property, never a duty to borrow from** (HP, 4 Nov).
+Adrian's "Breck Inn" days were read as an ordinary other duty, and on a short
+morning `borrowable` pulled him onto 4 rooms while he was working there.
+`_NEVER_BORROW` lists it now, beside HSP, sick and VTO.
+
 Inspectors are batched the same way: a building at a time, its trailing
 part-batch left alone until there are not enough inspectors, then merged
 cheapest-bridge-first. RQS rounds crossing a building 245 → 192.

@@ -372,9 +372,11 @@ def _apply_roster(at, iso):
 # them, people on some other duties that day are counted as working -- Dust
 # and Vac first, then projects and anything else. Deep cleans of named units
 # and HSP (houseperson) are never borrowed: that work has to happen anyway.
+# Nor is Breck Inn: that is a shift at another property, so the person is not
+# here to borrow (Hari, 4 Nov -- Adrian was pulled from it onto 4 rooms).
 _DV_DUTY = re.compile(r"dust\s*(and|&|n|y)?\s*vac", re.I)
 _NEVER_BORROW = re.compile(r"\b\d{4}[a-i]\b|deep\s*clean|\bhsp\b|house\s*person|"
-                           r"\bsick\b|\bvto\b", re.I)
+                           r"\bsick\b|\bvto\b|\bbreck\s*inn?\b", re.I)
 
 
 def borrowable(iso):
