@@ -7,7 +7,7 @@ database on every run, so a swap or a room move an RQS makes upstairs shows up
 here without anyone reloading anything.
 """
 import streamlit as st
-import sys, os, datetime, hashlib
+import sys, os, re, datetime, hashlib
 import html as _html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, i18n
@@ -66,6 +66,7 @@ def _status_words(cur):
     return T(k) if k else _rst.label(cur)
 
 st.markdown("""<style>
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,700&display=swap');
 /* Same width family as the rest of the app. Without a cap this page took
    Streamlit's wide default and stretched right across a big monitor. */
 .block-container{max-width:min(1100px,97%);}
@@ -331,6 +332,79 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
   [data-testid="stColumn"]{min-width:100% !important;flex:1 1 100% !important}
   .mrhero h1{font-size:1.35rem}
 }
+
+/* ── Material 3 (HP chose it, 4 Nov) ──
+   Tonal surfaces instead of gradients and stripes, the room to do next on
+   its own card, finished rooms as one-line list items under "Done". These
+   rules come last so they win over the older ones above at equal weight. */
+[data-testid="stMain"]{background:#f9f9ff}
+/* The app's own rules set Syne on headings and DM Sans on text, with weight
+   enough to win over a plain family here. */
+:is(.mrhero,.tk,.dayw,.m3sec,.mrlive,.mrdone,.dtwrap),
+:is(.mrhero,.tk,.dayw,.m3sec,.mrlive,.mrdone,.dtwrap) *{
+  font-family:'Roboto Flex',Roboto,system-ui,sans-serif !important}
+.mrhero{background:#ecedf5;color:#191c20;border-radius:28px;padding:18px 20px;
+  box-shadow:none;margin:0 0 12px}
+.mrhero h1{font-size:1.4rem;font-weight:500;letter-spacing:0}
+.mrhero p{color:#43474e;opacity:1}
+.mrbar{background:#d6e3ff}
+.mrbar i{background:#005ac1}
+.mrhero.m3{display:flex;align-items:center;gap:18px}
+.m3ring{flex:0 0 auto}
+.m3fin{font-size:.88rem;font-weight:500;margin-top:4px;color:#0f6b2c}
+.m3fin.over{color:#9b1c48}
+.mrlive{color:#43474e;margin:0 4px 10px}
+.mrdone{background:#c8f0cf;color:#0f3d1c;box-shadow:none;border-radius:20px}
+.dayw{background:#ecedf5;border:none;border-radius:20px;padding:12px 14px 10px}
+.daytrack{border-radius:10px;background:#dfe2eb}
+.m3sec{font-size:.78rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;
+  color:#43474e;margin:14px 4px 8px}
+
+/* One room: a white card, a tinted circle for what kind of room it is. */
+.tk{background:#fff;border:none;border-radius:20px;padding:10px 14px;min-height:64px;
+  box-shadow:0 1px 2px rgba(25,28,32,.08)}
+.tkico{width:40px;height:40px;border-radius:20px;background:var(--tint,#e7eef8);
+  display:flex;align-items:center;justify-content:center;font-size:1.15rem;opacity:1}
+.tkroom{font-size:1.1rem;font-weight:500;color:#191c20}
+.tkdot{display:none}
+.tkchip{border-radius:8px;letter-spacing:.02em;font-weight:600;padding:3px 8px;font-size:.66rem}
+.tkover{font-size:.7rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;
+  color:#00458f;margin-bottom:2px}
+/* The room to do next. */
+.tk.next{background:#d6e3ff;padding:16px 16px 14px;border-radius:24px;box-shadow:none}
+.tk.next .tkico{background:#ffffff}
+.tk.next .tkroom{font-size:1.9rem;font-weight:400;color:#001b3e;letter-spacing:-.01em}
+.tk.next .tkguest{color:#2e4772}
+/* Finished: one line -- room, minutes, where it is. */
+.tk.gone{min-height:56px;padding:8px 14px;box-shadow:none;border:1px solid #e1e2ec}
+.tk.gone .tkguest,.tk.gone .tkarr,.tk.gone .tkmsg,.tk.gone .tkrqs,
+.tk.gone .tkchip:not(.stchip),.tk.gone .tkwhen{display:none}
+.tk.gone .tkfoot{margin-top:2px}
+
+/* The card and its button stay side by side on a phone. Without this the
+   page's own "one column per row" rule put the status button on a row of
+   its own under every card -- the empty-looking bars HP pointed at. */
+[class*="st-key-tkrow_"] [data-testid="stHorizontalBlock"]{
+  flex-wrap:nowrap !important;gap:8px !important}
+[class*="st-key-tkrow_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{
+  min-width:0 !important;flex:1 1 auto !important;width:auto !important}
+[class*="st-key-tkrow_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child{
+  flex:0 0 52px !important}
+[class*="st-key-pop_"]>div>button{
+  width:52px !important;height:52px !important;min-height:52px !important;
+  border-radius:16px !important;border:none !important;background:#e7eef8 !important;
+  font-size:1.2rem !important}
+[class*="st-key-"][class*="_more_"] button{
+  justify-content:flex-start !important;text-transform:none !important;letter-spacing:0;
+  color:#005ac1 !important;font-size:.8rem !important;font-weight:500 !important;
+  min-height:36px !important;padding:2px 14px !important}
+[class*="st-key-"][class*="_more_"] button > div{justify-content:flex-start !important}
+[class*="st-key-"][class*="_more_"]{margin-top:-6px}
+/* The status button is an icon button: no chevron beside the glyph. */
+[class*="st-key-pop_"] button [data-testid="stIconMaterial"]{display:none !important}
+[class*="st-key-"][class*="_next_"] button{
+  height:56px !important;border-radius:16px !important;font-size:1rem !important;
+  font-weight:500 !important;background:#005ac1 !important;color:#fff !important;border:none !important}
 </style>""", unsafe_allow_html=True)
 
 cu = auth.current_user()
@@ -517,14 +591,50 @@ mins = sum(g.get("time", 0) for g in my_charts) or sum(
     r.get("time", 0) for _g, r in shown_rooms)
 pct = int(round(100 * done_n / total_n)) if total_n else 0
 
+# The order each person's rooms should be worked in (see below the notes).
+_plan, _seatmap = {}, {}
+for _g, _r in shown_rooms:
+    _plan.setdefault(str(_g.get("housekeeper", "")), []).append(_r)
+for _hk in list(_plan):
+    try:
+        _blocks = _day.plan_day(_plan[_hk])
+    except Exception:
+        _blocks = []          # an unmappable room must never blank the page
+    _plan[_hk] = _blocks
+    _seatmap[_hk] = {b["room"]: (i, b) for i, b in enumerate(_blocks)}
+
+
+def _ring(done, total):
+    """Rooms done, as a Material progress ring: the count a glance wants."""
+    c = 201.06                                    # 2 * pi * 32
+    arc = c * done / total if total else 0
+    return (f'<svg class="m3ring" width="76" height="76" viewBox="0 0 76 76" role="img" '
+            f'aria-label="{e(T("rooms.progress", done=done, total=total))}">'
+            f'<circle cx="38" cy="38" r="32" fill="none" stroke="#d6e3ff" stroke-width="8"/>'
+            f'<circle cx="38" cy="38" r="32" fill="none" stroke="#005ac1" stroke-width="8" '
+            f'stroke-linecap="round" stroke-dasharray="{arc:.1f} {c}" transform="rotate(-90 38 38)"/>'
+            f'<text x="38" y="44" text-anchor="middle" font-size="19" font-weight="700" '
+            f'fill="#191c20">{done}/{total}</text></svg>')
+
+
+_fin = ""
+_mine_plan = _plan.get(str(mine or "")) or []
+if _mine_plan:
+    _s = _day.summary(_mine_plan)
+    if _s["over"] > 0.5:
+        _over = "%.0f" % _s["over"]
+        _fin = (f'<div class="m3fin over">'
+                f'{e(T("rooms.over_by", t=_day.hhmm(_s["finish"]), m=_over))}</div>')
+    else:
+        _fin = f'<div class="m3fin">✓ {e(T("rooms.on_track", t=_day.hhmm(_s["finish"])))}</div>'
+
 st.markdown(
-    f'<div class="mrhero"><h1>{e(T("rooms.hello", name=greet))}</h1>'
-    f'<p>{e(T("rooms.subtitle") if my_rooms else T("rooms.subtitle_team"))}'
-    f' · {e(today.strftime("%A, %d %B %Y"))}'
-    f'{" · " + e(T("rooms.total_time", mins=mins)) if mins else ""}</p>'
-    f'<div class="mrbar"><i style="width:{pct}%"></i></div>'
-    f'<div class="mrcount">{e(T("rooms.progress", done=done_n, total=total_n))}'
-    f'</div></div>', unsafe_allow_html=True)
+    f'<div class="mrhero m3">{_ring(done_n, total_n)}<div>'
+    f'<h1>{e(T("rooms.hello", name=greet))}</h1>'
+    f'<p>{e(today.strftime("%a, %b ") + str(today.day))}'
+    f'{" · " + e(T("rooms.total_time", mins=mins)) if mins else ""}'
+    f'{"" if my_rooms else " · " + e(T("rooms.subtitle_team"))}</p>'
+    f'{_fin}</div></div>', unsafe_allow_html=True)
 
 # Carpet and stripping, read-only, for the RQS and managers (duties).
 if _drooms and st.session_state.get("role", "") in ("rqs", "admin"):
@@ -847,9 +957,18 @@ def _detail_html(g, r, rec, owner):
         + '</div>')
 
 
-def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False, when=None):
-    """One room, as a line you can act on without reading twice."""
+def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False, when=None,
+              next_up=False):
+    """One room, as a line you can act on without reading twice. `next_up`
+    is the room to do next, drawn larger and with its next step as a button."""
     code = str(r.get("room", ""))
+    # Its own keyed container, which is what keeps the card and its button on
+    # one line on a phone (the st-key-tkrow_ rules in the stylesheet).
+    with st.container(key="tkrow_%s_%s" % (key_prefix, re.sub(r"\W", "", code) or "x")):
+        _room_row_body(g, r, code, key_prefix, owner, editable, show_owner, when, next_up)
+
+
+def _room_row_body(g, r, code, key_prefix, owner, editable, show_owner, when, next_up):
     rec = statuses.get(code) or {}
     cur = _rst.normalise(rec.get("status"))
     bg, ink, accent = STATUS_STYLE.get(cur, STATUS_STYLE[NOT_STARTED])
@@ -870,24 +989,33 @@ def _room_row(g, r, key_prefix, owner, editable=True, show_owner=False, when=Non
         st.markdown(
             f'<div class="tk{" just" if code == flash else ""}'
             f'{" working" if cur == IN_PROGRESS else ""}'
+            f'{" next" if next_up else ""}'
             f'{" gone" if _rst.is_clean(cur) else ""}" '
             f'style="border-left-color:{accent};--acc:{accent};--tint:{bg};'
             f'--ink:{ink}">'
             f'<div class="tkico">{icon}</div>'
             f'<div class="tkmain">'
-            f'<div class="tkline1"><span class="tkroom">{e(code)}</span>'
+            + (f'<div class="tkover">{e(_t("rooms.up_next", "Up next"))}</div>' if next_up else "")
+            + f'<div class="tkline1"><span class="tkroom">{e(code)}</span>'
             + (f'<span class="tkwhen">{e(when)}</span>' if when else "")
             + f'<span class="tkmins">⚑ {r.get("time", 0)}m</span>'
             f'{"<span class=tknote>📝</span>" if note else ""}</div>'
             f'<div class="tkguest">{e(guest) or "—"}</div>'
             + (f'<div class="tkarr">→ {e(arriving)}</div>' if arriving else "")
             + (f'<div class="tkmsg">📝 {e(note)}</div>' if note else "")
-            + f'<div class="tkfoot"><span class="tkchip" style="background:{bg};color:{ink};'
+            + f'<div class="tkfoot"><span class="tkchip stchip" style="background:{bg};color:{ink};'
               f'font-weight:700">{e(_status_words(cur))}</span>{chips}'
             f'<span class="tkrqs">{"🧹 " + e(owner) if show_owner else "👤 " + (e(insp) or "—")}</span></div>'
             f'</div>'
             f'<div class="tkdot" style="background:{accent}"></div>'
             f'</div>', unsafe_allow_html=True)
+        # The room to do next carries its next step as a real button. Not while
+        # HotSOS is where rooms are marked: the app only mirrors it then, and a
+        # button here would be a second place to disagree.
+        if next_up and editable and nxt and not _rst.mirrored():
+            st.button(f"▶ {T(STATUS_KEY[nxt])}", key=f"{key_prefix}_next_{code}",
+                      use_container_width=True, on_click=_mark,
+                      args=(code, g, nxt, owner))
         # A card that opens. The line is what you work from; the rest of what
         # is known about the room is a tap away rather than crowding it.
         _open = st.session_state.get("mr_more") == code
@@ -992,17 +1120,8 @@ if _my_team:
 # only once the guest has gone, and everything between walked as little as
 # possible. Room-code order looks tidy but sends somebody past the same
 # service elevator three times and knocks on a door at ten past ten that is
-# not empty until noon.
-_plan, _seatmap = {}, {}
-for _g, _r in shown_rooms:
-    _plan.setdefault(str(_g.get("housekeeper", "")), []).append(_r)
-for _hk in list(_plan):
-    try:
-        _blocks = _day.plan_day(_plan[_hk])
-    except Exception:
-        _blocks = []          # an unmappable room must never blank the page
-    _plan[_hk] = _blocks
-    _seatmap[_hk] = {b["room"]: (i, b) for i, b in enumerate(_blocks)}
+# not empty until noon. (_plan and _seatmap are worked out above the header,
+# which states the finish time.)
 
 
 def _seat(item):
@@ -1084,11 +1203,45 @@ def _day_strip(blocks):
 _flat = sorted(shown_rooms, key=_seat)
 _mixed = len({g.get("housekeeper") for g, _ in _flat}) > 1
 
+def _when_for(g, r):
+    blk = _seatmap.get(str(g.get("housekeeper", "")), {}).get(
+        str(r.get("room", "")).strip().upper(), (999, None))[1]
+    return (T("rooms.by") + " " + _day.hhmm(blk["end"])) if blk else None
+
+
+def _is_done(r):
+    return _rst.is_clean((statuses.get(str(r.get("room", ""))) or {}).get("status"))
+
+
+# One person's own rooms: the day strip, the room to do next on its own card,
+# the rest still to do, then what is finished under "Done" -- still countable,
+# out of the way. The walking order is kept inside each group.
+if not _mixed:
+    _hk0 = str(_flat[0][0].get("housekeeper", "")) if _flat else ""
+    _strip = _day_strip(_plan.get(_hk0) or [])
+    if _strip:
+        st.markdown(_strip, unsafe_allow_html=True)
+    _todo = [(g, r) for g, r in _flat if not _is_done(r)]
+    _done = [(g, r) for g, r in _flat if _is_done(r)]
+    for _i, (_g, _r) in enumerate(_todo):
+        _room_row(_g, _r, "mr", _g.get("housekeeper") or mine,
+                  when=_when_for(_g, _r),
+                  # Only for the person cleaning: an RQS looking at one
+                  # housekeeper is not the one who goes to that room next.
+                  next_up=_i == 0 and bool(my_rooms))
+    if _done:
+        st.markdown(f'<div class="m3sec">'
+                    f'{e(_t("rooms.done_list", "Done · {n}").replace("{n}", str(len(_done))))}'
+                    f'</div>', unsafe_allow_html=True)
+        for _g, _r in _done:
+            _room_row(_g, _r, "mr", _g.get("housekeeper") or mine,
+                      when=_when_for(_g, _r))
+
 # The day's shape goes above the rooms it describes. An RQS looking at a whole
 # team gets one strip per person, so a chart that cannot finish is visible from
 # the top of the page instead of at three in the afternoon.
 _drawn = set()
-for _g, _r in _flat:
+for _g, _r in (_flat if _mixed else []):
     _hk = str(_g.get("housekeeper", ""))
     if _hk not in _drawn:
         _drawn.add(_hk)

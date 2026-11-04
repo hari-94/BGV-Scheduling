@@ -755,6 +755,22 @@ id's weight. Below 820px the menu is a grid, three across on a phone; above, one
 1050px bar on every page but the Schedule page, whose sidebar takes part of the
 window. A page-wide rule for rows or columns can't reach it, and doesn't need to.
 
+**On a phone the menu is a Material 3 top app bar, and a bottom bar** (HP, 4
+Nov). The grid above took the whole first screen. Below 821px `ui._phone_nav`
+draws a top bar (`bgvnavm`: page title, language, a ☰ popover with every page
+and Sign out) and, for four pages or fewer, a fixed bottom bar (`bgvnavb`);
+the grid is hidden. Both are drawn on every page and hidden by CSS on a
+computer. Three things bit while building it: Streamlit's empty header strip
+covered the top bar and swallowed taps on ☰ (it is height 0 and
+`pointer-events:none` on a phone now); every markdown block that only holds a
+`<style>` still took a 15px row gap (hidden now, app-wide); and Dashboard,
+Admin and Roster Import set `flex-direction:column` on every row, so the bar's
+rules set `row` back. My Rooms and My Home follow the same look: tonal
+surfaces, Roboto Flex, the room to do next on its own card ("Up next", only
+for the person cleaning it), finished rooms as one-line rows under "Done", and
+each room's status button kept beside its card on a phone (the
+`st-key-tkrow_` container per row) instead of on a row of its own.
+
 **My Home finds a person by name, and a first name alone is not a person.**
 `roster_import.match_person` used to fall back to the first sheet row with the
 same first name: "Luis Rendon" got Luis Urbina's week, "David Galeano" David

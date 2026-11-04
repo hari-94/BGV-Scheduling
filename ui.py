@@ -5,6 +5,7 @@ One horizontal navigation bar for every page, so moving between them never
 changes where the menu lives. The Cleaning Schedule page keeps its sidebar,
 but only for the attendance controls — its navigation comes from here too.
 """
+import html as _html
 import streamlit as st
 import auth
 import i18n
@@ -163,6 +164,86 @@ CHROME_CSS = """
     padding:7px 8px !important;font-size:.76rem !important;}
 }
 
+/* ── The menu on a phone (Material 3, HP 4 Nov) ──
+   The grid above took the first screen of every page on a phone -- five rows
+   of buttons before any content. Below 821px it gives way to a top app bar
+   (page title, language, a menu button holding every page and sign out) and,
+   for anyone with four pages or fewer -- housekeepers, RQS -- a bottom bar
+   like the Android app's tabs. Both are their own keyed containers, with the
+   id-weighted selectors the grid uses, so no page's column rules reach them. */
+@media (min-width:821px){ %NAVM%,%NAVB%{display:none !important;} }
+/* A markdown block that only carries a stylesheet draws nothing, but each
+   still took a row gap -- three or four of them stacked an empty band under
+   the menu. A <style> applies whether or not its box is displayed. */
+[data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"] [data-testid="stMarkdownContainer"] > style:only-child){
+  display:none !important;}
+@media (max-width:820px){
+  %NAV%{display:none !important;}
+  /* The hidden menu's and the fixed bar's wrappers would each keep a gap. */
+  [data-testid="stVerticalBlock"] > :has(%NAV%){display:none !important;}
+  [data-testid="stVerticalBlock"] > :has(%NAVB%){position:absolute !important;
+    width:0 !important;height:0 !important;overflow:visible !important;}
+  /* Streamlit's empty header strip sat over the top of the page and hid the
+     top app bar once the gaps above it were gone. The sidebar button inside
+     it is fixed in place on its own, so it stays. */
+  header[data-testid="stHeader"]{background:transparent !important;height:0 !important;
+    min-height:0 !important;pointer-events:none !important;}
+  /* flex-direction too: Dashboard, Admin and Roster Import turn every row on
+     a phone into a column, which stacked the title over its two buttons. */
+  %NAVM% [data-testid="stHorizontalBlock"],%NAVB% [data-testid="stHorizontalBlock"]{
+    flex-direction:row !important;}
+  %NAVM% [data-testid="stHorizontalBlock"]{
+    flex-wrap:nowrap !important;align-items:center !important;gap:2px !important;
+    margin:-4px 0 10px !important;text-align:left !important;}
+  %NAVM% [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{
+    min-width:0 !important;flex:0 0 auto !important;width:auto !important;}
+  %NAVM% [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child{
+    flex:1 1 auto !important;}
+  .navm-title{font-size:22px;font-weight:500;color:#191c20;line-height:48px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  %NAVM% .stButton>button,%NAVM% [data-testid="stPopover"] button{
+    width:48px !important;height:48px !important;min-height:48px !important;
+    padding:0 !important;border:none !important;border-radius:24px !important;
+    background:transparent !important;color:#43474e !important;box-shadow:none !important;
+    font-weight:600 !important;font-size:.8rem !important;}
+  %NAVM% .stButton>button:hover,%NAVM% [data-testid="stPopover"] button:hover{
+    background:#e7e8ef !important;}
+  /* Streamlit's chevron beside a popover's label. */
+  %NAVM% [data-testid="stPopover"] button [data-testid="stIconMaterial"]:last-child:not(:first-child){
+    display:none !important;}
+
+  %NAVB%{position:fixed !important;left:0 !important;right:0 !important;bottom:0 !important;
+    z-index:999990 !important;background:#eceef4 !important;padding:10px 4px 14px !important;
+    box-shadow:0 -1px 0 #dde1ea !important;}
+  %NAVB% [data-testid="stHorizontalBlock"]{flex-wrap:nowrap !important;gap:0 !important;}
+  %NAVB% [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{
+    min-width:0 !important;flex:1 1 0 !important;width:auto !important;}
+  %NAVB% [data-testid="stElementContainer"]:has(.navactive){display:none !important;}
+  %NAVB% [data-testid="stPageLink"] a{
+    display:flex !important;flex-direction:column !important;align-items:center !important;
+    gap:4px !important;padding:0 !important;background:transparent !important;
+    text-decoration:none !important;color:#43474e !important;}
+  %NAVB% [data-testid="stPageLink"] a > span:first-child{
+    width:64px;height:32px;border-radius:16px;margin:0 !important;
+    display:flex !important;align-items:center;justify-content:center;}
+  %NAVB% [data-testid="stPageLink"] a [data-testid="stIconMaterial"]{font-size:24px !important;}
+  %NAVB% [data-testid="stPageLink"] a p{font-size:12px !important;font-weight:500 !important;
+    margin:0 !important;white-space:nowrap !important;}
+  %NAVB% [data-testid="stColumn"]:has(.navactive) [data-testid="stPageLink"] a{color:#191c20 !important;}
+  %NAVB% [data-testid="stColumn"]:has(.navactive) [data-testid="stPageLink"] a > span:first-child{
+    background:#d6e3ff !important;color:#001b3e !important;}
+  %NAVB% [data-testid="stColumn"]:has(.navactive) [data-testid="stPageLink"] a p{font-weight:700 !important;}
+  /* Room for the bar under the last thing on the page. */
+  body:has(%NAVB%) .block-container{padding-bottom:110px !important;}
+}
+/* Pages listed in the phone menu: rows a thumb can hit. */
+[data-testid="stPopoverBody"] [data-testid="stPageLink"] a{min-height:40px !important;
+  border-radius:12px !important;padding:6px 12px !important;}
+/* Thirteen pages and Sign out, on one phone screen without scrolling. */
+[data-testid="stPopoverBody"]:has([data-testid="stPageLink"]) [data-testid="stVerticalBlock"]{
+  gap:0 !important;}
+[data-testid="stPopoverBody"]:has([data-testid="stPageLink"]) .stButton{margin-top:6px;}
+
 /* Tabs: a soft raised pill on a light track.
    The radius is repeated on the selected state and the inner wrapper —
    Streamlit paints the highlight on a child, so a radius set only on the
@@ -273,7 +354,14 @@ CHROME_CSS = """
 """
 #: The menu's own container, and the weight its rules carry (see the CSS).
 NAV_KEY = "bgvnav"
-CHROME_CSS = CHROME_CSS.replace("%NAV%", f":is(.st-key-{NAV_KEY},#{NAV_KEY})")
+NAV_PHONE_KEY = "bgvnavm"      # the phone's top app bar
+NAV_BOTTOM_KEY = "bgvnavb"     # the phone's bottom bar, for short menus
+CHROME_CSS = (CHROME_CSS
+              .replace("%NAVM%", f":is(.st-key-{NAV_PHONE_KEY},#{NAV_PHONE_KEY})")
+              .replace("%NAVB%", f":is(.st-key-{NAV_BOTTOM_KEY},#{NAV_BOTTOM_KEY})")
+              .replace("%NAV%", f":is(.st-key-{NAV_KEY},#{NAV_KEY})"))
+#: At most this many pages and the phone gets a bottom bar as well as the menu.
+BOTTOM_BAR_MAX = 4
 
 #: Widths: one narrow slot per link, a spacer that soaks up the middle, then
 #: the person and the way out. Without the spacer the links spread across the
@@ -387,3 +475,36 @@ def topnav(active: str = "", hide_sidebar: bool = True):
                      use_container_width=True):
             auth.logout()
             st.switch_page("cleaning_scheduler.py")
+    _phone_nav(items, active)
+
+
+def _phone_nav(items, active):
+    """The same menu for a phone: a top app bar, and a bottom bar when the
+    menu is short. Drawn on every page and hidden on a computer by the CSS,
+    since the server cannot tell a phone from a computer."""
+    title = next((i18n.t(tkey) for _p, label, _i, _pm, tkey in items if label == active),
+                 active)
+    bar = st.container(key=NAV_PHONE_KEY)
+    c_title, c_lang, c_menu = bar.columns([6, 1, 1], vertical_alignment="center")
+    c_title.markdown(f'<div class="navm-title">{_html.escape(title)}</div>',
+                     unsafe_allow_html=True)
+    with c_lang:
+        code, label = i18n.other()
+        if st.button(code.upper(), key=f"navm_lang_{active or 'x'}", help=label):
+            i18n.set_lang(code)
+            st.rerun()
+    with c_menu:
+        with st.popover(":material/menu:", help=i18n.t("nav.menu")):
+            for path, label, icon, _perm, tkey in items:
+                st.page_link(path, label=i18n.t(tkey), icon=icon)
+            if st.button(i18n.t("nav.sign_out"), key=f"navm_signout_{active or 'x'}",
+                         icon=":material/logout:", use_container_width=True):
+                auth.logout()
+                st.switch_page("cleaning_scheduler.py")
+    if len(items) <= BOTTOM_BAR_MAX:
+        bot = st.container(key=NAV_BOTTOM_KEY)
+        for col, (path, label, icon, _perm, tkey) in zip(bot.columns(len(items)), items):
+            with col:
+                if label == active:
+                    st.markdown('<span class="navactive"></span>', unsafe_allow_html=True)
+                st.page_link(path, label=i18n.t(tkey), icon=icon)

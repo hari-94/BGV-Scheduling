@@ -33,7 +33,7 @@ auth.require_login()
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,700&display=swap');
 :root{--bg:#f4f5f7;--border:#e4e8ee;--indigo:#2563a8;
   --txt:#1f2733;--txt2:#5b6675;--txt3:#8a93a1;}
 *{box-sizing:border-box;}
@@ -107,6 +107,50 @@ section[data-testid="stSidebar"]{background:#fff!important;border-right:1px soli
   .hero h1{font-size:1.35rem}
   .dayrow{grid-template-columns:repeat(2,1fr)}
   .day{min-height:98px}
+}
+
+/* ── Material 3 (HP chose it, 4 Nov), matching My Rooms ──
+   Tonal surfaces, one type family, and on a phone the week as a list -- one
+   short row a day -- instead of a grid of tall cards, and the counts two by
+   two instead of one full-width card each. Last, so it wins. */
+html,body,[class*="css"]{font-family:'Roboto Flex',Roboto,system-ui,sans-serif!important;}
+.stApp{background:#f9f9ff!important;}
+.hero{background:#ecedf5;color:#191c20;box-shadow:none;border-radius:28px;padding:20px 22px}
+.hero:after{display:none}
+.hero h1{font-family:inherit;font-weight:500;letter-spacing:0;font-size:1.5rem}
+.hero p{color:#43474e;opacity:1}
+.hero .role{background:#d6e3ff;color:#001b3e}
+.sec,.lbl,.day .dow,.kpi .l{font-family:inherit!important;letter-spacing:.06em}
+.sec{font-size:.75rem;font-weight:500;border-bottom:none;margin:1.2rem 4px .6rem}
+.day{border:none;border-radius:16px;box-shadow:0 1px 2px rgba(25,28,32,.08)}
+.day .num{font-family:inherit;font-weight:500}
+.day.today{box-shadow:0 0 0 2px #005ac1}
+.nextup{background:#d6e3ff;border:none;border-radius:16px;color:#001b3e}
+.kpi{border:none;border-radius:20px;box-shadow:0 1px 2px rgba(25,28,32,.08)}
+.kpi .n{font-family:inherit;font-weight:500}
+@media (max-width:560px){
+  .dayrow{display:flex;flex-direction:column;gap:0;background:#fff;border-radius:20px;
+    overflow:hidden;box-shadow:0 1px 2px rgba(25,28,32,.08)}
+  .day{flex-direction:row;align-items:center;gap:12px;min-height:52px;padding:8px 16px;
+    border-radius:0;box-shadow:none;border-top:1px solid #eef0f5}
+  .day:first-child{border-top:none}
+  .day:hover{transform:none;box-shadow:none}
+  .day.today{box-shadow:inset 4px 0 0 #005ac1;background:#eef4fb}
+  .day .dow{width:96px;flex:0 0 auto;font-size:.8rem;color:#43474e;white-space:nowrap}
+  .day .num{order:-1;width:28px;flex:0 0 auto;margin:0;font-size:1.15rem}
+  .day .what{display:inline-block}
+  .day .means{display:none}
+  .day.empty{background:#fff;border-style:none}
+  .kpi{padding:12px 14px}
+  .kpi .n{font-size:1.5rem}
+  /* The four counts, and the four figures under the period, two by two. */
+  :is(.st-key-mhkpi,.st-key-mhmet) [data-testid="stHorizontalBlock"]{
+    flex-wrap:wrap !important;gap:8px !important}
+  :is(.st-key-mhkpi,.st-key-mhmet) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{
+    min-width:calc(50% - 4px) !important;flex:1 1 calc(50% - 4px) !important;width:auto !important;
+    max-width:calc(50% - 4px) !important}
+  .st-key-mhkpi [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{margin-bottom:0 !important}
+  .st-key-mhkpi .kpi{margin-bottom:8px}
 }
 </style>""", unsafe_allow_html=True)
 
@@ -320,7 +364,7 @@ def tally(start, end):
     done = [r for r in span if r["date"] <= t_iso]
     return len(span), len(done), len(span) - len(done)
 
-cols = st.columns(4)
+cols = st.container(key="mhkpi").columns(4)
 cards = [(*tally(wk_s, wk_e), "days this week"),
          (*tally(mo_s, mo_e), "days this month"),
          (*tally(yr_s, yr_e), "days this year"),
@@ -383,7 +427,7 @@ s_sel = ri.summarise_person(sel, pid=mine)
 if not sel:
     st.info("Nothing recorded for that period.")
 else:
-    m = st.columns(4)
+    m = st.container(key="mhmet").columns(4)
     done_sel = sum(1 for r in s_sel["worked"] if r["date"] <= t_iso)
     m[0].metric("Days worked", s_sel["n_worked"],
                 delta=(f"{done_sel} so far" if s_sel["n_worked"] != done_sel else None),
