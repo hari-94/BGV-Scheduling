@@ -586,6 +586,15 @@ the key carries a token derived from the parsed file.
 
 ## Traps — each of these has already bitten
 
+**No OR-Tools means quietly worse charts, not an error.** `fcsolve` and
+`_ds_fill` are CP-SAT; without `ortools` they log "exact solve skipped ...
+No module named 'ortools'" and fall back. The office PC's `.venv` (the web
+app on 8502) never had it until 4 Nov, so a Generate pressed there gave Daily
+Service rounds of 455/420/290 and an unstaffed 255 where the 5 AM build --
+the agent's system Python, which has it -- gives 460/460/460/40. Every Python
+that runs the Schedule page needs `requirements.txt` installed, ortools
+included; check with `python -c "import ortools"`.
+
 **Never name a module after an installed package.** The agent's alert checker
 was `watchdog.py`. Streamlit installs the `watchdog` package and its file
 watcher does `from watchdog import events`; the repo root is first on
