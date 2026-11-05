@@ -12,6 +12,7 @@ so a day is located by the DATES INSIDE each sheet, never by the sheet name.
 
 Nothing here imports streamlit, so it can be unit-tested on its own.
 """
+import xlsx_compat  # noqa: F401 -- opens workbooks the newest Excel saves (5 Nov)
 import io
 import re
 import datetime as _dt

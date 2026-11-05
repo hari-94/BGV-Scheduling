@@ -28,6 +28,7 @@ team's from the moment they touch it.
 `publish=False` runs everything with every database write stubbed out, for
 trying a build without touching the live day.
 """
+import xlsx_compat  # noqa: F401 -- opens workbooks the newest Excel saves (5 Nov)
 import ast
 import datetime as _dt
 import hashlib

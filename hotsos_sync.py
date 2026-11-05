@@ -19,6 +19,7 @@ This module is the part with no network and no Streamlit: picking the day's
 tab, reading it, matching names, and building the plan. That is so it can be
 tested against real workbooks on its own.
 """
+import xlsx_compat  # noqa: F401 -- opens workbooks the newest Excel saves (5 Nov)
 import datetime as _dt
 import re
 

@@ -27,6 +27,7 @@ Three things about the format, all of them learned the hard way:
 
 No Streamlit here, so it can be tested on its own.
 """
+import xlsx_compat  # noqa: F401 -- opens workbooks the newest Excel saves (5 Nov)
 import datetime
 import re
 

@@ -1,6 +1,7 @@
 """
 Cleaning Schedule Grouper v10
 """
+import xlsx_compat  # noqa: F401 -- opens workbooks the newest Excel saves (5 Nov)
 import re, html as _html
 import hashlib as _hashlib
 import pandas as pd

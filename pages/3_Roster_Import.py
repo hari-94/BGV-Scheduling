@@ -10,6 +10,7 @@ import sys, os, io, re, json, datetime
 import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import xlsx_compat  # noqa: F401 -- opens workbooks the newest Excel saves (5 Nov)
 import auth, db, clock, roster_import as ri
 import forecast
 import staffing

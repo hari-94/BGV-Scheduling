@@ -8,6 +8,7 @@ from storing something the page would not have.
 
 No Streamlit here.
 """
+import xlsx_compat  # noqa: F401 -- opens workbooks the newest Excel saves (5 Nov)
 import datetime
 import io
 

@@ -26,6 +26,7 @@ What counts, and why:
   * A name in the RQS column that belongs to a manager, a houseperson or a
     housekeeper is not an inspection by an RQS; it is left out, and listed.
 """
+import xlsx_compat  # noqa: F401 -- opens workbooks the newest Excel saves (5 Nov)
 import collections
 import datetime as _dt
 import hashlib
