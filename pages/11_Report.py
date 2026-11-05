@@ -30,7 +30,7 @@ import report_table                   # noqa: E402
 # A running app keeps the report_data it imported first -- a deploy doesn't
 # reload an imported module (CLAUDE.md) -- and this page calls what later
 # versions added. An old copy is reloaded rather than crashing the page.
-if getattr(rd, "VERSION", 0) < 3:
+if getattr(rd, "VERSION", 0) < 4:
     import importlib
     rd = importlib.reload(rd)
 
@@ -241,7 +241,7 @@ def _built(sync_token, roster_token, names_token, _weeks, _ov, _fixes, _aliases)
 # Its own tab, HP 18 Oct: "so we know if someone is not marking in timely
 # manner". It reads the HotSOS mirror, not the sheet, so it needs no sync.
 import report_timing as rtm           # noqa: E402
-if getattr(rtm, "VERSION", 0) < 3:
+if getattr(rtm, "VERSION", 0) < 4:
     import importlib
     rtm = importlib.reload(rtm)
 
@@ -349,7 +349,7 @@ def _tm_rqs_chart(recs, people):
     to inspected."""
     import plotly.graph_objects as go
     order = [p["name"] for p in people]
-    xs = [x for x in recs if x["rqs"] in order and rtm.full_clean(x)]
+    xs = [x for x in recs if x["rqs"] in order and rtm.inspection(x)]
     fig = go.Figure()
     for lo, hi, name, colour in ((None, rtm.WAIT_SOON, f"Within {rtm.WAIT_SOON} min", TM_GREEN),
                                  (rtm.WAIT_SOON, rtm.WAIT_LATE,
@@ -448,7 +448,7 @@ def timing_tab():
     timed = [x for x in recs if x["std"] > 0 and "dust" not in x["service"].lower()]
     n_tog = sum(1 for x in recs if x["together"])
     # The RQS figures are Full Clean inspections only (HP, 28 Oct).
-    fc = [x for x in recs if rtm.full_clean(x)]
+    fc = [x for x in recs if rtm.inspection(x)]
     waits = [x["wait"] for x in fc if x["wait"] is not None]
     still = [x for x in fc if x["waiting"] is not None]
     firsts = [p["first_avg"] for p in hks if p["first_avg"] is not None]
@@ -1073,6 +1073,8 @@ def _excel(who, start, end, token):
                              f"{lab}: {note.replace(chr(10), ' ')}")
     notes += ["", "Not counted for anyone in this period:",
               f"Full Clean rooms with no RQS named: {lo.get('in_none', 0)}",
+              "Not an inspection (P/U models, stayovers, deposited): " + ", ".join(
+                  f"{k} {v}" for k, v in sorted((lo.get('in_held') or {}).items(), key=lambda x: -x[1])),
               f"Rooms with no housekeeper named: {lo.get('cl_none', 0)}",
               "Inspected by staff who aren't RQS: " + ", ".join(
                   f"{k} {v}" for k, v in sorted((lo.get('in_other') or {}).items(), key=lambda x: -x[1])),
@@ -1127,6 +1129,8 @@ with st.expander(f"What these numbers leave out — {period}", expanded=False):
     st.markdown(
         f'<div class="rp-lo">'
         f'<b>Full Clean rooms with no RQS named:</b> {lo.get("in_none", 0):,}<br>'
+        f'<b>Not an inspection</b> (P/U models, stayovers, deposited -- never counted for an RQS): '
+        f'{_top(lo.get("in_held") or {})}<br>'
         f'<b>Inspected by staff who aren\'t RQS</b> (managers, leads, housekeepers): '
         f'{_top(lo.get("in_other") or {})}<br>'
         f'<b>Rooms with no housekeeper named:</b> {lo.get("cl_none", 0):,}<br>'

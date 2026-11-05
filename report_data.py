@@ -39,7 +39,7 @@ import hotsos_sync as hs
 
 #: Raised whenever the page needs something this module didn't have before:
 #: the page reloads an older copy that a running app is still holding.
-VERSION = 3
+VERSION = 4
 SYNC_KEY = "report_sync"              # {at, by, source, ..., checks, months: {YYYY-MM: hash}}
 MONTH_PREFIX = "report_days_"         # + YYYY-MM: {"days": {iso: {"tab", "rows"}}}
 REQUEST_KEY = "report_sync_request"   # {id, by, at}: the page's "Sync now"
@@ -69,6 +69,28 @@ def family(service) -> str:
         return ""
     if "full" in s or s.startswith(("check out", "checkout", "early out", "e/o", "eo ")):
         return FC
+    return ""
+
+
+_PU = re.compile(r"\bp\s*/\s*u\b|\bpu\s+models?\b|\bmodels?\b")
+_STAY = re.compile(r"\bstay\s*-?\s*overs?\b")
+
+
+def held(guest="", notes="", service="") -> str:
+    """Why a room is not an inspection to credit to an RQS, or "".
+
+    HP, 5 Nov: a P/U model is a walk-in check, not an inspection, and a
+    stayover or a deposited room ("Deposit, Deposit") is not one either. The
+    sheet still types them "Full Clean" with an RQS beside them -- 198 rows
+    over 54 tabs by 5 Nov -- so the Service cell alone can't tell. The same
+    tests the Schedule page uses to set those rooms aside."""
+    text = " ".join(" ".join(str(v or "").lower().split()) for v in (guest, notes, service))
+    if _PU.search(text):
+        return "P/U model"
+    if _STAY.search(text):
+        return "stayover"
+    if "deposit" in " ".join(str(guest or "").lower().split()):
+        return "deposit"
     return ""
 
 
@@ -172,6 +194,15 @@ def read_tab(rows):
     if "service" not in cols or not ({"rqs", "hskp"} & set(cols)):
         raise ValueError("no Service, HSKP or RQS column")
 
+    # Current Guest and Notes are only read for `held`; a tab without them
+    # just has nothing held.
+    for j, v in enumerate(header):
+        lab = _label(v)
+        if lab.startswith(("current guest", "guest")) and "guest" not in cols:
+            cols["guest"] = j
+        elif lab.startswith(("notes", "notas")) and "notes" not in cols:
+            cols["notes"] = j
+
     def cell(r, key):
         j = cols.get(key)
         return " ".join(str(r[j]).split()) if j is not None and j < len(r) and r[j] is not None else ""
@@ -182,7 +213,8 @@ def read_tab(rows):
         if not _ROOM.match(room):
             continue
         fam = family(cell(r, "service"))
-        row = [room, fam, cell(r, "hskp"), cell(r, "rqs")]
+        row = [room, fam, cell(r, "hskp"), cell(r, "rqs"),
+               held(cell(r, "guest"), cell(r, "notes"), cell(r, "service"))]
         key = (room, fam)
         if key in seen:                      # the same room and job twice
             repeats += 1
@@ -694,8 +726,13 @@ def build(days, roster, visiting, directory):
     for iso, day in days.items():
         at_work = working.get(iso, set())
         lo = {}
-        for room, fam, hskp, rqs_cell in day["rows"]:
-            if fam in INSPECTED or fam == DV:
+        for row in day["rows"]:
+            room, fam, hskp, rqs_cell = row[:4]
+            # A P/U model, stayover or deposited room is no RQS's inspection
+            # (rows synced before 5 Nov have no fifth field).
+            if len(row) > 4 and row[4] and fam in INSPECTED:
+                _bump(lo, "in_held", row[4])
+            elif fam in INSPECTED or fam == DV:
                 names = members(rqs_cell, first_only=True)
                 who = directory.who(names[0], rqs, at_work) if names else None
                 if who in rqs:

@@ -32,10 +32,11 @@ import datetime as _dt
 import statistics
 
 import clock
+import report_data
 
 #: Raised when the page needs something this module didn't have before: the
 #: page reloads an older copy a running app is still holding (CLAUDE.md).
-VERSION = 3
+VERSION = 4
 
 FIRST_START_LATE = _dt.time(10, 30)
 TOGETHER_MIN = 3           # start and done this close: marked after the fact
@@ -70,42 +71,48 @@ def load(db, start, end):
     plan = {}
     for iso in sorted({r["date"] for r in rows}):
         s = db.load_full_schedule(iso) or {}
-        plan[iso] = {str(r.get("room")): (str(r.get("service") or ""), int(float(r.get("time") or 0)))
+        plan[iso] = {str(r.get("room")): (str(r.get("service") or ""), int(float(r.get("time") or 0)),
+                                          report_data.held(r.get("guest"), r.get("notes"),
+                                                           r.get("service")))
                      for g in s.get("groups_data") or [] for r in g.get("rooms") or []}
     # Who inspected: the RQS the team typed on the sheet, as the 4 PM Report
     # sync read it, over the one the app planned at 5 AM. On 22 Oct the RQS
     # changed on 18 rooms after the push; through the day the office PC
     # carries such changes into the app (app_sync.from_sheet), and for any
     # day already synced the sheet itself is the record.
-    typed = _sheet_rqs(db, {r["date"] for r in rows})
+    typed, held = _sheet_rqs(db, {r["date"] for r in rows})
     for r in rows:
         name = typed.get((r["date"], str(r["room"])))
         if name:
             r["inspector"] = name
+        r["held"] = held.get((r["date"], str(r["room"])), "")
     return rows, plan
 
 
 def _sheet_rqs(db, days):
-    """{(iso, room): RQS full name} from the Report's synced day tabs."""
+    """({(iso, room): RQS full name}, {(iso, room): why it is no inspection})
+    from the Report's synced day tabs."""
     import staff_names
     try:
         aliases = staff_names.aliases()
     except Exception:
         aliases = {}
-    out = {}
+    out, held = {}, {}
     for month in sorted({d[:7] for d in days}):
         rec = db._load_key("report_days_" + month) or {}
         for iso, day in (rec.get("days") or {}).items():
             if iso not in days:
                 continue
             for row in day.get("rows") or []:
+                if len(row) > 4 and row[4]:
+                    held[(iso, str(row[0]))] = row[4]
                 if len(row) < 4 or not row[3]:
                     continue
                 first = str(row[3]).replace("+", "/").replace("&", "/").split("/")[0].strip()
                 if not first or first.lower().replace(" ", "").startswith(("rqs", "inspector")):
                     continue
                 out[(iso, str(row[0]))] = staff_names.resolve(first, aliases) or first
-    return out
+    return out, held
 
 
 def rooms(rows, plan, now=None):
@@ -113,7 +120,9 @@ def rooms(rows, plan, now=None):
     now = now or clock.now()
     out = []
     for r in rows:
-        svc, std = (plan.get(r["date"]) or {}).get(str(r["room"]), ("", 0))
+        # A plan cached before 5 Nov holds (service, minutes) without `held`.
+        svc, std, *rest = (plan.get(r["date"]) or {}).get(str(r["room"]), ("", 0, ""))
+        why = rest[0] if rest else ""
         start, done, insp = _t(r.get("started_at")), _t(r.get("cleaned_at")), _t(r.get("inspected_at"))
         dur = round((done - start).total_seconds() / 60) if start and done else None
         wait = round((insp - done).total_seconds() / 60) if done and insp else None
@@ -128,6 +137,8 @@ def rooms(rows, plan, now=None):
             "together": bool(timed and dur is not None and dur < TOGETHER_MIN),
             "left_open": bool(timed and dur is not None and dur > LONG_OPEN * std),
             "no_done": bool(insp and not done),
+            # P/U model, stayover, deposited: never an RQS's inspection.
+            "held": r.get("held") or why,
         })
     return out
 
@@ -188,6 +199,12 @@ def full_clean(x) -> bool:
     return x["service"].lower().startswith("full clean")
 
 
+def inspection(x) -> bool:
+    """A room an RQS is judged on: Full Clean, and not a P/U model, stayover
+    or deposited room (HP, 5 Nov: those are walk-in checks, not inspections)."""
+    return full_clean(x) and not x.get("held")
+
+
 def inspectors(recs):
     """Per RQS: how long their finished Full Clean rooms waited to be
     inspected. Full Clean only (HP, 28 Oct): the Daily Service and Dust n Vac
@@ -196,7 +213,7 @@ def inspectors(recs):
     by = collections.defaultdict(list)
     for x in recs:
         # "Inspector 3" is a chart nobody was found for, not a person.
-        if (x["rqs"] and not x["rqs"].startswith("Inspector ") and full_clean(x)
+        if (x["rqs"] and not x["rqs"].startswith("Inspector ") and inspection(x)
                 and (x["done"] or x["inspected"])):
             by[x["rqs"]].append(x)
     out = []
