@@ -36,7 +36,7 @@ import report_data
 
 #: Raised when the page needs something this module didn't have before: the
 #: page reloads an older copy a running app is still holding (CLAUDE.md).
-VERSION = 4
+VERSION = 5
 
 FIRST_START_LATE = _dt.time(10, 30)
 TOGETHER_MIN = 3           # start and done this close: marked after the fact
@@ -162,7 +162,7 @@ def housekeepers(recs):
     """Per housekeeper, over the days in `recs`."""
     by = collections.defaultdict(list)
     for x in recs:
-        if x["hk"]:
+        if x["hk"] and not (full_clean(x) and x.get("held")):
             by[x["hk"]].append(x)
     out = []
     for name, xs in by.items():
@@ -201,7 +201,8 @@ def full_clean(x) -> bool:
 
 def inspection(x) -> bool:
     """A room an RQS is judged on: Full Clean, and not a P/U model, stayover
-    or deposited room (HP, 5 Nov: those are walk-in checks, not inspections)."""
+    or deposited room (HP, 5 Nov: those are walk-in checks, not inspections;
+    `housekeepers` leaves them out too)."""
     return full_clean(x) and not x.get("held")
 
 

@@ -39,7 +39,7 @@ import hotsos_sync as hs
 
 #: Raised whenever the page needs something this module didn't have before:
 #: the page reloads an older copy that a running app is still holding.
-VERSION = 4
+VERSION = 5
 SYNC_KEY = "report_sync"              # {at, by, source, ..., checks, months: {YYYY-MM: hash}}
 MONTH_PREFIX = "report_days_"         # + YYYY-MM: {"days": {iso: {"tab", "rows"}}}
 REQUEST_KEY = "report_sync_request"   # {id, by, at}: the page's "Sync now"
@@ -728,11 +728,13 @@ def build(days, roster, visiting, directory):
         lo = {}
         for row in day["rows"]:
             room, fam, hskp, rqs_cell = row[:4]
-            # A P/U model, stayover or deposited room is no RQS's inspection
-            # (rows synced before 5 Nov have no fifth field).
+            # A P/U model, stayover or deposited room typed Full Clean is
+            # neither an RQS's inspection nor a housekeeper's clean (HP, 5
+            # Nov). Rows synced before 5 Nov have no fifth field.
             if len(row) > 4 and row[4] and fam in INSPECTED:
                 _bump(lo, "in_held", row[4])
-            elif fam in INSPECTED or fam == DV:
+                continue
+            if fam in INSPECTED or fam == DV:
                 names = members(rqs_cell, first_only=True)
                 who = directory.who(names[0], rqs, at_work) if names else None
                 if who in rqs:

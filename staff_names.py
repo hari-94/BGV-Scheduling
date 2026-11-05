@@ -73,6 +73,9 @@ def resolve(typed: str, table=None) -> str:
     t = " ".join(str(typed or "").split()).rstrip(".").strip()
     if not t:
         return ""
+    # "SAYRA. H", "MIGUE. C" (Oct): a dot after the first name, not the initial.
+    if "." in t:
+        t = " ".join(w.strip(".") for w in t.replace(".", ". ").split() if w.strip("."))
     low = {k.lower().rstrip("."): v for k, v in table.items()}
     if t.lower() in low:
         return low[t.lower()]

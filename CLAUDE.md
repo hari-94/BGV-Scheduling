@@ -895,7 +895,8 @@ the Service cell alone credited 182 of them to RQS. `report_data.held` reads
 Current Guest ("P/U Models", "Deposit, Deposit") and Notes ("Stayover") into a
 fifth field of each synced row; the Rooms tab lists them under what the
 numbers leave out (`in_held`), and the Timing tab's RQS side uses
-`report_timing.inspection`. Housekeepers' counts don't change.
+`report_timing.inspection`. They come off the housekeepers' counts too
+(Full Clean rows only: a Daily Service stayover is real work).
 
 ## Agreed but not built
 

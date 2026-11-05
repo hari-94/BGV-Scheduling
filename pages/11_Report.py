@@ -30,7 +30,7 @@ import report_table                   # noqa: E402
 # A running app keeps the report_data it imported first -- a deploy doesn't
 # reload an imported module (CLAUDE.md) -- and this page calls what later
 # versions added. An old copy is reloaded rather than crashing the page.
-if getattr(rd, "VERSION", 0) < 4:
+if getattr(rd, "VERSION", 0) < 5:
     import importlib
     rd = importlib.reload(rd)
 
@@ -241,7 +241,7 @@ def _built(sync_token, roster_token, names_token, _weeks, _ov, _fixes, _aliases)
 # Its own tab, HP 18 Oct: "so we know if someone is not marking in timely
 # manner". It reads the HotSOS mirror, not the sheet, so it needs no sync.
 import report_timing as rtm           # noqa: E402
-if getattr(rtm, "VERSION", 0) < 4:
+if getattr(rtm, "VERSION", 0) < 5:
     import importlib
     rtm = importlib.reload(rtm)
 
@@ -1073,7 +1073,7 @@ def _excel(who, start, end, token):
                              f"{lab}: {note.replace(chr(10), ' ')}")
     notes += ["", "Not counted for anyone in this period:",
               f"Full Clean rooms with no RQS named: {lo.get('in_none', 0)}",
-              "Not an inspection (P/U models, stayovers, deposited): " + ", ".join(
+              "Typed Full Clean but a P/U model, stayover or deposited room (no inspection, no clean): " + ", ".join(
                   f"{k} {v}" for k, v in sorted((lo.get('in_held') or {}).items(), key=lambda x: -x[1])),
               f"Rooms with no housekeeper named: {lo.get('cl_none', 0)}",
               "Inspected by staff who aren't RQS: " + ", ".join(
@@ -1129,7 +1129,7 @@ with st.expander(f"What these numbers leave out — {period}", expanded=False):
     st.markdown(
         f'<div class="rp-lo">'
         f'<b>Full Clean rooms with no RQS named:</b> {lo.get("in_none", 0):,}<br>'
-        f'<b>Not an inspection</b> (P/U models, stayovers, deposited -- never counted for an RQS): '
+        f'<b>Not counted for anyone</b> (typed Full Clean, but a P/U model, stayover or deposited room -- no inspection and no clean): '
         f'{_top(lo.get("in_held") or {})}<br>'
         f'<b>Inspected by staff who aren\'t RQS</b> (managers, leads, housekeepers): '
         f'{_top(lo.get("in_other") or {})}<br>'
