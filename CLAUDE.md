@@ -889,6 +889,14 @@ inspectors it read as the same job; someone who only did that round
 (David Serrano, 22-28 Oct) is no longer listed. The housekeepers' side and
 Every room still show every service.
 
+**P/U models, stayovers and deposited rooms are never an RQS's inspection**
+(HP, 5 Nov). The sheet types them "Full Clean" with an RQS beside them, so
+the Service cell alone credited 182 of them to RQS. `report_data.held` reads
+Current Guest ("P/U Models", "Deposit, Deposit") and Notes ("Stayover") into a
+fifth field of each synced row; the Rooms tab lists them under what the
+numbers leave out (`in_held`), and the Timing tab's RQS side uses
+`report_timing.inspection`. Housekeepers' counts don't change.
+
 ## Agreed but not built
 
 `docs/inspection-scoring.md` — the RQS inspection checklist and the per-housekeeper
