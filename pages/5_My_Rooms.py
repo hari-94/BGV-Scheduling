@@ -603,8 +603,11 @@ _my_team = sorted({g.get("housekeeper", "") for g in charts
                    and g.get("housekeeper")
                    and not str(g.get("housekeeper", "")).startswith("Need")
                    and g.get("housekeeper") != mine})
+# Only the charts this RQS inspects: a housekeeper's rooms can sit under two
+# RQS (the sheet splits a chart), and on 5 Nov Hari's list held all 18 of
+# Mayra's Dust n Vac round for the one room of it he was inspecting.
 _team_rooms = [(g, r) for g in charts
-               if g.get("housekeeper") in _my_team
+               if g.get("housekeeper") in _my_team and g.get("inspector") == _team_of
                for r in (g.get("rooms") or [])]
 #: Every room this person can act on, theirs and their team's.
 shown_rooms = my_rooms + _team_rooms
@@ -1126,8 +1129,7 @@ if _my_team:
                 f'{T("rooms.team_note")}</div>', unsafe_allow_html=True)
     _bars = ""
     for _hk in _my_team:
-        _rs = [r for g in charts if g.get("housekeeper") == _hk
-               for r in (g.get("rooms") or [])]
+        _rs = [r for g, r in _team_rooms if g.get("housekeeper") == _hk]
         _dn = sum(1 for r in _rs
                   if _rst.is_clean((statuses.get(str(r.get("room", "")))
                                     or {}).get("status")))

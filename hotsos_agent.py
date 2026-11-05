@@ -516,6 +516,8 @@ def sync_sheet(cfg):
     if out.get("changed"):
         log(f"sheet -> app ({tab}): RQS on {len(out['rqs'])} room(s), "
             f"{len(out['split'])} chart(s) split, {len(out['added'])} room(s) added"
+            + (f", now cleaned: {', '.join(f'{x[0]} {x[1]} -> {x[2]}' for x in out['reserviced'])}"
+               if out.get("reserviced") else "")
             + (f"; no housekeeper named, not placed: {', '.join(out['unplaced'])}"
                if out.get("unplaced") else ""))
     return out

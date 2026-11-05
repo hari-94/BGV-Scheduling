@@ -253,6 +253,32 @@ def from_sheet(rows, save=True):
         labels.add(lab)
         return lab
 
+    # 0. A Dust n Vac room the team found dirty: the sheet gives it a
+    # housekeeper and a cleaning service (HP, 5 Nov: 1224G, Dust n Vac at 5
+    # AM, Full Clean for Luis Urbina by 11). The room takes the sheet's
+    # service and minutes; it is then a stray in the round (`_kind`), and
+    # from_hotsos moves it to whoever holds it in HotSOS. Left as it was,
+    # it stayed on the round -- and in the RQS's list as one of its rooms.
+    reserviced = []
+    for g in fg:
+        if g.get("service_type") != "Dust n Vac":
+            continue
+        for r in g.get("rooms") or []:
+            line = sheet.get(r.get("room"))
+            if not line or not line["hskp"].strip() or not line["service"].strip() \
+                    or "dust" in line["service"].lower():
+                continue
+            svc = _service(line["service"])
+            if r.get("service") == svc:
+                continue
+            try:
+                t = int(float(line.get("time") or 0))
+            except ValueError:
+                t = 0
+            reserviced.append((r.get("room"), r.get("service"), svc))
+            r["service"] = svc
+            r["time"] = t or r.get("time", 0)
+
     # 1. The RQS on each room.
     rqs_changed, split, out = [], [], []
     for g in fg:
@@ -322,8 +348,8 @@ def from_sheet(rows, save=True):
     for g in fg:
         _recount(g)
 
-    summary = {"changed": bool(rqs_changed or added), "rqs": rqs_changed, "split": split,
-               "added": added, "unplaced": unplaced}
+    summary = {"changed": bool(rqs_changed or added or reserviced), "rqs": rqs_changed,
+               "split": split, "added": added, "unplaced": unplaced, "reserviced": reserviced}
     if not summary["changed"] or not save:
         return summary
     roles = {i.get("name"): i.get("role") for i in sched.get("inspectors_data") or []}
