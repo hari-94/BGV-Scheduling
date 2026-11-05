@@ -1822,7 +1822,9 @@ _TIME_RE = re.compile(r'\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', re.IGNORECASE)
 # not. Last, so "->" is still read as one arrow rather than a hyphen with a
 # stray ">" after it; and harmless, because the pattern demands a full room code
 # on both sides and is only ever run inside the Room Moves section.
-_ARROW = r'(?:[>\u2192\u21d2\u27a1\u00ae\u00e0]|-{1,2}>|=>|\u2013|\u2014|\bto\b|-)'
+# Arrows of any length: on 5 Nov the desk wrote "1321A ====> 2335A", and with
+# only "=>" known the leftover "===" broke the match and the move was dropped.
+_ARROW = r'(?:[>\u2192\u21d2\u27a1\u00ae\u00e0]|[-=]+>|\u2013|\u2014|\bto\b|-+)'
 _MOVE_RE = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*' + _ARROW +
                       r'\s*([1-9]\d{3}[A-Z]{1,4})', re.IGNORECASE)
 _BULLET = re.compile(r'^[\s\t]*(?:[*\u2022\u25e6\u2023\u2043\u00b7\-\u2013]+|\d+[.)])\s*')

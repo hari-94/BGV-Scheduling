@@ -46,7 +46,9 @@ TITLE = {"VIP": "VIP Inspections", "Room Move": "Room Moves", "Stayover": "Stayo
 
 _ROOM = re.compile(r'\b([1-9]\d{3}[A-Z]{1,4})\b')
 _TIME = re.compile(r'\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', re.I)
-_ARROW = r'(?:[>→⇒➡®à]|-{1,2}>|=>|–|—|\bto\b|-)'
+# Arrows of any length -- "1321A ====> 2335A" (5 Nov) was dropped when only
+# "=>" was known. Kept the same as the Schedule page's _ARROW.
+_ARROW = r'(?:[>→⇒➡®à]|[-=]+>|–|—|\bto\b|-+)'
 _MOVE = re.compile(r'([1-9]\d{3}[A-Z]{1,4})\s*' + _ARROW + r'\s*([1-9]\d{3}[A-Z]{1,4})', re.I)
 _BULLET = re.compile(r'^[\s\t]*(?:[*•◦‣⁃·\-–]+|\d+[.)])\s*')
 _CELEB = re.compile(r'^(Birthday|Anniver\w*|Misc\.?|Other)$', re.I)
