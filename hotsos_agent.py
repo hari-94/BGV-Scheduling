@@ -509,12 +509,100 @@ def sync_sheet(cfg):
     tab, rows = hs.read_workbook(path, clock.today())
     out = app_sync.from_sheet(rows, save=True)
     _SHEET_SEEN.update(mtime=mtime, day=clock.today_iso())
+    try:
+        follow_sheet(cfg, rows)
+    except Exception as ex:
+        log(f"sheet -> HotSOS: {type(ex).__name__}: {ex}")
     if out.get("changed"):
         log(f"sheet -> app ({tab}): RQS on {len(out['rqs'])} room(s), "
             f"{len(out['split'])} chart(s) split, {len(out['added'])} room(s) added"
             + (f"; no housekeeper named, not placed: {', '.join(out['unplaced'])}"
                if out.get("unplaced") else ""))
     return out
+
+
+#: app_settings: {"date", "cells": {room: HSKP cell as last seen}, "moves": [...],
+#: "skipped": [...]} -- today's housekeeper cells and what follow_sheet did.
+FOLLOW_KEY = "sheet_follow"
+#: app_settings: {"on": false} switches follow_sheet off; missing means on.
+FOLLOW_SWITCH_KEY = "sheet_follow_hotsos"
+#: More changed cells than this in one pass is a pasted or re-sorted tab,
+#: not a few rooms reassigned: nothing is sent and the pass says so.
+FOLLOW_MAX = 12
+
+
+def follow_sheet(cfg, rows):
+    """A housekeeper typed on today's tab after the push goes to HotSOS too
+    (HP, 5 Nov: a Dust n Vac room found dirty gets a housekeeper on the sheet,
+    and HotSOS kept it on the round until somebody moved it there by hand).
+
+    Only a cell that *changed* since the last pass is acted on, so a room
+    moved by hand in HotSOS is never pulled back to an older sheet name. The
+    first pass of a day only records the cells. A name goes through the same
+    match as the 5:30 push (hotsos_sync.build_plan) and must be one HotSOS
+    attendant; a blanked cell unassigns nothing; a room already cleaned or
+    inspected in HotSOS is left where it is. Runs on the mirror's thread, in
+    its HotSOS session."""
+    import roomstatus as rs
+    import staff_names
+    today = clock.today_iso()
+    rec = db._load_key(FOLLOW_KEY) or {}
+    cells = {r["room"]: " ".join(r["hskp"].split()) for r in rows}
+    if rec.get("date") != today:
+        db._upsert_key(FOLLOW_KEY, {"date": today, "cells": cells, "moves": [], "skipped": []})
+        return {"baseline": len(cells)}
+    seen = rec.get("cells") or {}
+    changed = [r for r in rows if r["hskp"].strip()
+               and " ".join(r["hskp"].split()) != seen.get(r["room"], "")]
+    if not changed:
+        if cells != seen:                         # a cell blanked, a room removed
+            db._upsert_key(FOLLOW_KEY, dict(rec, cells=cells))
+        return {"changed": 0}
+    if not (db._load_key(FOLLOW_SWITCH_KEY) or {}).get("on", True):
+        db._upsert_key(FOLLOW_KEY, dict(rec, cells=cells))
+        return {"off": True}
+    stamp, moves, skipped = clock.stamp(), [], []
+    if len(changed) > FOLLOW_MAX:
+        skipped = [{"at": stamp, "room": r["room"], "sheet": r["hskp"],
+                    "why": f"{len(changed)} cells changed at once"} for r in changed]
+        log(f"sheet -> HotSOS: {len(changed)} housekeeper cells changed in one pass "
+            f"(over {FOLLOW_MAX}) -- nothing sent; move them in HotSOS or press Push")
+    else:
+        try:
+            h = _status_session(cfg)
+            board, attendants = h.rooms(), h.attendants()
+        except Exception:
+            h = _status_session(cfg, fresh=True)
+            board, attendants = h.rooms(), h.attendants()
+        state = {code: rs.HOTSOS.get(x.get("status", "").upper(), "") for code, x in board.items()}
+        names = dict(db._load_key(hs.NAMES_KEY) or {}, **staff_names.aliases())
+        for line in hs.build_plan(changed, board, attendants, names):
+            room, why = line["room"], ""
+            if line["action"] == hs.ALREADY:
+                continue
+            if line["action"] in hs.SKIPPED:
+                why = line["action"]
+            elif state.get(room) in rs.READY + (rs.INSPECTED,):
+                why = f"already {state[room].replace('_', ' ')} in HotSOS"
+            if why:
+                skipped.append({"at": stamp, "room": room, "sheet": line["who"], "why": why})
+                log(f"sheet -> HotSOS: {room} ({line['who']}) not sent: {why}")
+                continue
+            st, body = h.assign([line["gid"]], line["person_id"])
+            ok = st in (200, 204, 207)
+            moves.append({"at": stamp, "room": room, "from": line["current"],
+                          "to": line["hotsos_name"], "sheet": line["who"],
+                          "result": "sent" if ok else f"HTTP {st}"})
+            log(f"sheet -> HotSOS: {room} {line['current'] or 'nobody'} -> "
+                f"{line['hotsos_name']}: HTTP {st}"
+                + ("" if ok else f" {str(body)[:200]}"))
+            if not ok:                            # tried again on the next pass
+                cells[room] = seen.get(room, "")
+                _SHEET_SEEN["mtime"] = None
+    db._upsert_key(FOLLOW_KEY, dict(rec, cells=cells,
+                                    moves=(rec.get("moves") or []) + moves,
+                                    skipped=(rec.get("skipped") or []) + skipped))
+    return {"changed": len(changed), "moves": moves, "skipped": skipped}
 
 
 # The mirror keeps one HotSOS browser signed in all day. Playwright allows one

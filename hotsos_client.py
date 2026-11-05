@@ -139,7 +139,7 @@ class HotSOS:
         return sorted(seen.values(), key=lambda a: a["label"])
 
     def rooms(self):
-        """{room code: {"gid", "service", "assigned_to"}} for the board."""
+        """{room code: {"gid", "service", "assigned_to", "status"}} for the board."""
         holder = {}
         for a in self.timeline():
             label = str(_pick(a, _PERSON_NAME, "attendant name"))
@@ -156,7 +156,8 @@ class HotSOS:
             # and a room it missed looked unassigned on every preview.
             out[code] = {"gid": _pick(r, _ROOM_GID, "room id"),
                          "service": str(next((r[k] for k in _ROOM_SVC if r.get(k)), "")),
-                         "assigned_to": str(r.get("assignedTo") or holder.get(code, ""))}
+                         "assigned_to": str(r.get("assignedTo") or holder.get(code, "")),
+                         "status": str(r.get("serviceStatusEnum") or "")}
         return out
 
     # ── write ──────────────────────────────────────────────────────────────

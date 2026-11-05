@@ -476,6 +476,18 @@ RQS) and rooms added under a housekeeper `staff_names.resolve` recognises.
 Who cleans a room still follows HotSOS. The Timing tab takes the RQS the 4
 PM Report sync read off the sheet for every synced day.
 
+**A housekeeper typed on the sheet after the push goes to HotSOS**
+(`hotsos_agent.follow_sheet`, HP 5 Nov). A Dust n Vac room found dirty got a
+housekeeper on the sheet, and HotSOS kept it on the round until somebody moved
+it by hand. On each sheet pass, a HSKP cell that *changed* since the last pass
+is sent to HotSOS (the 5:30 push's own name match and AssignRoom call), so a
+room moved by hand in HotSOS is never pulled back to an older sheet name. Not
+sent, and logged: an unmatched name, a room already cleaned or inspected in
+HotSOS, more than 12 cells at once (a pasted tab -- press Push). A blanked
+cell unassigns nothing. HotSOS's task (Departure Clean / Dust & Vac / No Task)
+is its own and does not change with the person. Record: `sheet_follow`
+(today's cells, moves, skipped); off switch: `sheet_follow_hotsos` {"on": false}.
+
 **A second PC stands in when the office PC is off.** `hotsos_agent.py backup`
 (Task Scheduler "BGV HotSOS Backup" on Hari's PC, `run_backup_agent.bat`)
 answers Preview and Push only while the office heartbeat is over three minutes
