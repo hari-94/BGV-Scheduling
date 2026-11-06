@@ -889,6 +889,19 @@ def _menu(code, g, owner, key_prefix, cur):
         if _rst.mirrored():
             st.markdown(f"**{e(_status_words(cur))}**")
             st.caption(T("rooms.from_hotsos"))
+            # Pilot: an allowed inspector can still sign a room off here, and
+            # the office PC carries it into HotSOS (hotsos_push). Everyone else
+            # only sees the mirrored status, as before.
+            try:
+                import hotsos_push
+                _pilot = hotsos_push.enabled_for(me_user)
+            except Exception:
+                _pilot = False
+            if _pilot and can_inspect and cur != INSPECTED:
+                st.button(f'{T(STATUS_KEY[INSPECTED])} ✅',
+                          key=f"mi{gen}_{key_prefix}_{code}",
+                          use_container_width=True, type="primary",
+                          on_click=_mark, args=(code, g, INSPECTED, owner))
         for target, icon in ([] if _rst.mirrored() else _OPTIONS):
             if target in _rst.RQS_ONLY and not can_inspect:
                 continue
