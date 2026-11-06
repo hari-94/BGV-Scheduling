@@ -157,6 +157,17 @@ def ensure_cookie() -> None:
         _extend(token)
 
 
+def _dbg(**kw) -> None:
+    """Leave a breadcrumb of what restore saw, for ?authdebug=1. Names and
+    booleans only -- never the token itself."""
+    try:
+        d = st.session_state.get("_authdbg") or {}
+        d.update(kw)
+        st.session_state["_authdbg"] = d
+    except Exception:
+        pass
+
+
 def restore() -> bool:
     """Bring back a signed-in session from the browser's cookie.
 
@@ -164,17 +175,25 @@ def restore() -> bool:
     unknown token, an expired one, a user since deleted -- simply means the
     login form, never an error.
     """
+    try:
+        seen = sorted(st.context.cookies.keys())
+    except Exception as ex:
+        seen = f"<err {ex}>"
     token = _cookie_token()
+    _dbg(cookies_seen=seen, has_bgv_session=bool(token), at=clock.stamp())
     if not token:
         return False
     try:
         rec = db.load_session(_hash(token))
     except Exception as ex:
         print(f"[session] lookup failed: {ex}")
+        _dbg(lookup_error=str(ex))
         return False
+    _dbg(record_found=bool(rec))
     if not rec:
         return False
     if _expired(rec):
+        _dbg(expired=True)
         try:
             db.delete_session(_hash(token))
         except Exception:
@@ -184,7 +203,9 @@ def restore() -> bool:
         user = db.get_user(rec.get("username", ""))
     except Exception as ex:
         print(f"[session] user lookup failed: {ex}")
+        _dbg(user_error=str(ex))
         return False
+    _dbg(user_found=bool(user))
     if not user:
         return False
     import auth
@@ -194,6 +215,7 @@ def restore() -> bool:
     _extend(token)
     _write_cookie(token)
     st.session_state["_session_renewed"] = True
+    _dbg(restored=True)
     return True
 
 

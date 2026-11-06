@@ -1370,6 +1370,21 @@ def _auto_apply_today(force=False):
 
 _init_state()
 auth.init_auth()
+# Reachable from any phone at ?authdebug=1 -- shows whether the browser's
+# session cookie reached the server and what restore() made of it. Names and
+# booleans only, never the token. Gated, so normal visitors never see it.
+if st.query_params.get("authdebug") == "1":
+    try:
+        _now_ck = sorted(st.context.cookies.keys())
+    except Exception as _e:
+        _now_ck = f"<err {_e}>"
+    st.title("Auth debug")
+    st.write({"logged_in": st.session_state.get("logged_in"),
+              "cookies_on_this_request": _now_ck,
+              "what_restore_saw": st.session_state.get("_authdbg")})
+    st.caption("Refresh this page a couple of times, then screenshot. "
+               "Remove ?authdebug=1 from the URL to use the app normally.")
+    st.stop()
 if st.session_state.get("logged_in"):
     _auto_apply_today()
 
