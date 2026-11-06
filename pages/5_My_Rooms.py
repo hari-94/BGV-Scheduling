@@ -926,6 +926,51 @@ def _menu(code, g, owner, key_prefix, cur):
             st.button(T("act.save"), key=f"nb{gen}_{key_prefix}_{code}",
                       type="primary", use_container_width=True,
                       on_click=_save_note, args=(code, g, owner, _nkey))
+        # Score sheet -- the RQS marks points per section and the housekeeper
+        # sees it on their room. Pilot: only the allowed scorer, who can inspect.
+        try:
+            import room_scores as _rscore
+            _can_score = _rscore.enabled_for(me_user) and can_inspect
+        except Exception:
+            _can_score = False
+        if _can_score:
+            _rb = _rscore.rubric()
+            _have = _rscore.score_of(code)
+            _lbl = (f'Score  {_have.get("total")}/{_have.get("max")} ✅'
+                    if _have else 'Score 📋')
+            with st.popover(_lbl, use_container_width=True):
+                st.caption(f"Points per section — total out of {_rb['max']}")
+                _skeys = []
+                for _i, _sec in enumerate(_rb["sections"]):
+                    _nm, _mx = _sec["name"], int(_sec.get("max", 0) or 0)
+                    _sk = f"sc{gen}_{key_prefix}_{code}_{_i}"
+                    _val = int((_have.get("sections") or {}).get(_nm, _mx))
+                    st.number_input(f"{_nm} (/{_mx})", min_value=0, max_value=_mx,
+                                    value=min(_val, _mx), step=1, key=_sk)
+                    _skeys.append((_nm, _sk))
+                _snk = f"scn{gen}_{key_prefix}_{code}"
+                st.text_input("Note to housekeeper (optional)", key=_snk,
+                              value=_have.get("note", ""))
+                st.button("Save score", key=f"scb{gen}_{key_prefix}_{code}",
+                          type="primary", use_container_width=True,
+                          on_click=_save_score, args=(code, g, owner, _skeys, _snk))
+
+
+def _save_score(code, g, owner, skeys, note_key):
+    """Store the room's section points. Values are read from the number inputs
+    at the moment Save is pressed, the same way notes are."""
+    import room_scores as _rscore
+    sections = {nm: st.session_state.get(sk, 0) for nm, sk in skeys}
+    note = str(st.session_state.get(note_key, "") or "").strip()
+    try:
+        _rscore.save_score(code, sections, by=me_user,
+                           by_name=me_display or me_user, note=note)
+        st.session_state["mr_flash"] = code
+        st.session_state["mr_gen"] = st.session_state.get("mr_gen", 0) + 1
+        _fresh.clear()
+    except Exception as ex:
+        print(f"[my_rooms] score failed for {code}: {ex}")
+        st.session_state["mr_error"] = code
 
 
 def _save_note(code, g, owner, note_key):
@@ -972,6 +1017,24 @@ def _detail_html(g, r, rec, owner):
     arr = str(r.get("arriving", "") or "").strip()
     note = str(rec.get("notes") or "").strip()
 
+    # The room's quality score, once the RQS has filled it in -- the housekeeper
+    # sees their total and the points for each section here.
+    _sc = {}
+    try:
+        import room_scores as _rscore
+        _sc = _rscore.score_of(str(r.get("room", "") or ""))
+    except Exception:
+        _sc = {}
+    score_html = ""
+    if _sc:
+        _secrows = "".join(_row(k, str(v)) for k, v in (_sc.get("sections") or {}).items())
+        score_html = (
+            f'<div class="dthead">{e(_t("rooms.score", "Score"))}</div>'
+            + _row(_t("rooms.score_total", "Total"), f'{_sc.get("total")}/{_sc.get("max")}')
+            + _secrows
+            + _row(T("act.note"), _sc.get("note"))
+            + _row(T("rooms.by_l"), _sc.get("by_name")))
+
     times = []
     for key, lbl in (("started_at", T("rooms.t_started")),
                      ("cleaned_at", T("rooms.t_ready")),
@@ -1002,6 +1065,7 @@ def _detail_html(g, r, rec, owner):
         + _row(T("rooms.by_l"), rec.get("updated_by"))
         + (f'<div class="dthead">{e(T("act.note"))}</div>'
            f'<div class="dtnote">{e(note)}</div>' if note else "")
+        + score_html
         + '</div>')
 
 
