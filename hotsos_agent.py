@@ -650,19 +650,23 @@ def push_inspections(cfg):
         if r.get("status") == "INSPECTED":
             log_lines.append(f"{clock.stamp()} inspect {room}: already inspected in HotSOS")
             continue
+        was = r.get("status") or "unknown"
         try:
-            st, body = h.set_clean_status([r["gid"]], "INSPECTED")
+            st, ok, failed = h.inspect([r["gid"]])
         except Exception as ex:
             log_lines.append(f"{clock.stamp()} inspect {room}: {type(ex).__name__}: {ex} -- will retry")
             remaining.append(it)
             continue
-        if st in (200, 204, 207):
-            msg = f"inspect -> HotSOS: {room} ({r.get('status') or 'unknown'} -> INSPECTED) by {it.get('by')}: HTTP {st}"
+        # Trust a fresh read over the response: HotSOS reports a no-op (already
+        # inspected) as failed, and we want the real end state either way.
+        now_status = (h.rooms().get(room) or {}).get("status")
+        if now_status == "INSPECTED":
+            msg = f"inspect -> HotSOS: {room} ({was} -> INSPECTED) by {it.get('by')}: HTTP {st}"
             log(msg)
             log_lines.append(f"{clock.stamp()} {msg}")
         else:
-            log(f"inspect -> HotSOS: {room}: HTTP {st} {str(body)[:200]} -- will retry")
-            log_lines.append(f"{clock.stamp()} inspect {room}: HTTP {st} -- will retry")
+            log(f"inspect -> HotSOS: {room}: HTTP {st} still {now_status} (ok={ok}, failed={failed}) -- will retry")
+            log_lines.append(f"{clock.stamp()} inspect {room}: HTTP {st} still {now_status} -- will retry")
             remaining.append(it)
     db._upsert_key(hotsos_push.QUEUE_KEY, {"items": remaining, "log": log_lines[-80:]})
     return {"done": len(items[:INSPECT_MAX]) - len([x for x in remaining if x in items[:INSPECT_MAX]]),

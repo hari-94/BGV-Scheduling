@@ -167,15 +167,29 @@ class HotSOS:
             "assignRoomPersonId": person_id})
         return st, d
 
-    def set_clean_status(self, room_gids, status):
-        """Set a room's clean/inspection status. `status` is a serviceStatus
-        string the board uses -- "INSPECTED", "TO_BE_INSPECTED",
-        "VACANT_CLEANED", ... -- the same values rooms() reads back. This is
-        the call HotSOS's own Room Assignment page makes (patchCleanStatus:
-        {roomGlobalIds, status})."""
-        st, d = self.call("PATCH", "/RoomAssignment/room/cleanStatus", {
-            "roomGlobalIds": list(room_gids), "status": status})
-        return st, d
+    #: HotSOS's assign-status id for "Inspected" (from InspectionTypeList; the
+    #: same 9 for Vacant-Clean and Occupied-Clean inspections on this property).
+    INSPECTED_STATUS_ID = 9
+
+    def inspect(self, room_gids):
+        """Sign rooms off as Inspected, exactly as the Room Assignment page's
+        status control does: PATCH /RoomAssignment/{type} with type STATUS and
+        the room-assignment-update body (patchRoomAssignments -> assignStatus).
+
+        Returns (http_status, ok_gids, failed_gids). A room already inspected
+        comes back failed -- it has nowhere to transition -- so the caller
+        confirms against a fresh read rather than trusting ok alone."""
+        import datetime as _dt
+        now = _dt.datetime.now(_dt.timezone.utc).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")
+        st, d = self.call("PATCH", "/RoomAssignment/STATUS", {
+            "roomGlobalIds": list(room_gids), "shift": self.shift,
+            "assignStatus": self.INSPECTED_STATUS_ID, "actionTime": now,
+            "isServiceRefusedEntireStay": False})
+        custom = (d or {}).get("custom") if isinstance(d, dict) else {}
+        ok = list((custom or {}).get("successfulJobSiteGlobalIds") or [])
+        failed = list((custom or {}).get("failedJobSiteGlobalIds") or [])
+        return st, ok, failed
 
     def close(self):
         for f in (getattr(self, "_browser", None) and self._browser.close,
