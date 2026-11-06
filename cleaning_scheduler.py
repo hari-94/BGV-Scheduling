@@ -5861,9 +5861,22 @@ with _inp_exp:
         # headcount while crossing no buildings and breaking no rules -- so
         # there is nothing left for a person to price.
         _can_gen = auth.can("can_generate")
+        # Once today's schedule is done, an RQS must not regenerate it. A
+        # regenerate after the morning push freezes the sheet->app sync for the
+        # rest of the day (HP, 6 Nov: bmolina regenerated at 8:06 and every
+        # sheet edit after that stopped reaching the app). Admins can still
+        # rebuild -- a genuinely broken day, e.g. someone off today holding a
+        # chart. A preview of another day is never saved, so it stays open.
+        _sched_locked = (_has_sched and not _previewing()
+                         and st.session_state.get("role") == "rqs")
         run = st.button("Generate", type="primary", use_container_width=True,
-                        disabled=not _can_gen,
-                        help="" if _can_gen else "Housekeeper role — view only")
+                        disabled=not _can_gen or _sched_locked,
+                        help=("Housekeeper role — view only" if not _can_gen
+                              else "Today's schedule is already done — ask an admin to "
+                                   "rebuild if it's wrong" if _sched_locked else ""))
+        if _sched_locked:
+            st.caption("✓ Today's schedule is set. To change a few rooms, edit them on "
+                       "the sheet or here — a full rebuild is an admin action.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SNAPSHOT
@@ -5899,7 +5912,12 @@ def _build_snapshot(fg, total_rooms, inspectors):
 # ══════════════════════════════════════════════════════════════════════════════
 if run:
     st.session_state["last_email"] = email_text
-    if not raw_input.strip():
+    if _has_sched and not _previewing() and st.session_state.get("role") == "rqs":
+        # Belt-and-suspenders: the button is already disabled in this case.
+        st.warning("Today's schedule is already done — ask an admin to rebuild it if "
+                   "something's wrong. Regenerating as RQS is turned off so the sheet "
+                   "stays in sync.")
+    elif not raw_input.strip():
         st.warning("Paste room data first.")
     elif not present_hk:
         st.warning("No housekeepers marked as present.")
