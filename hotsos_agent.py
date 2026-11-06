@@ -500,10 +500,22 @@ def sync_sheet(cfg):
     truth = db._load_key(hs.TRUTH_KEY) or {}
     if truth.get("date") != clock.today_iso():
         return None
-    gen = (db.load_full_schedule() or {}).get("generated_at")
-    if gen and _dt.datetime.fromisoformat(gen) > _dt.datetime.fromisoformat(truth["at"]):
-        return None
     mtime = Path(path).stat().st_mtime
+    gen = (db.load_full_schedule() or {}).get("generated_at")
+    if gen:
+        gen_dt = _dt.datetime.fromisoformat(gen)
+        # A schedule regenerated in-app after the morning push is the planner's
+        # new plan; don't let an unchanged, stale sheet clobber it. But the
+        # moment the team edits the sheet again (its mtime passes the
+        # regenerate), the sheet is the live word: resume, so the RQS marks,
+        # re-services and added rooms they type still reach the app AND HotSOS.
+        # Normally a regenerate is pushed right after, which rewrites the sheet
+        # and moves truth past gen, so we never get here. On 6 Nov a regenerate
+        # at 8:06 that was never pushed froze every later sheet edit out of
+        # both -- this is what resumes them.
+        if (gen_dt > _dt.datetime.fromisoformat(truth["at"])
+                and mtime <= gen_dt.timestamp()):
+            return None
     if _SHEET_SEEN.get("mtime") == mtime and _SHEET_SEEN.get("day") == clock.today_iso():
         return None
     tab, rows = hs.read_workbook(path, clock.today())
