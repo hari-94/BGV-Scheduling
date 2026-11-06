@@ -167,6 +167,16 @@ class HotSOS:
             "assignRoomPersonId": person_id})
         return st, d
 
+    def set_clean_status(self, room_gids, status):
+        """Set a room's clean/inspection status. `status` is a serviceStatus
+        string the board uses -- "INSPECTED", "TO_BE_INSPECTED",
+        "VACANT_CLEANED", ... -- the same values rooms() reads back. This is
+        the call HotSOS's own Room Assignment page makes (patchCleanStatus:
+        {roomGlobalIds, status})."""
+        st, d = self.call("PATCH", "/RoomAssignment/room/cleanStatus", {
+            "roomGlobalIds": list(room_gids), "status": status})
+        return st, d
+
     def close(self):
         for f in (getattr(self, "_browser", None) and self._browser.close,
                   getattr(self, "_pw", None) and self._pw.stop):

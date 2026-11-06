@@ -781,6 +781,16 @@ def _mark(room, chart, new_status, who=None):
     except Exception as ex:
         print(f"[my_rooms] save failed for {room}: {ex}")
         st.session_state["mr_error"] = room
+    # Pilot: when an allowed user signs a room off here, ask the office PC to
+    # mark it Inspected in HotSOS too, so the floor doesn't update both. Off
+    # until switched on, and only for the listed usernames (hotsos_push).
+    if new_status == INSPECTED:
+        try:
+            import hotsos_push
+            if hotsos_push.enabled_for(me_user):
+                hotsos_push.enqueue_inspection(room, me_user)
+        except Exception as ex:
+            print(f"[my_rooms] hotsos inspect enqueue failed for {room}: {ex}")
     # No st.rerun() here: this runs as a button callback, and Streamlit already
     # reruns after one. Calling it again threw the run away mid-flight.
 

@@ -619,6 +619,56 @@ def follow_sheet(cfg, rows):
     return {"changed": len(changed), "moves": moves, "skipped": skipped}
 
 
+INSPECT_MAX = 12
+
+
+def push_inspections(cfg):
+    """Pilot: mark in HotSOS the rooms an allowed user signed off in My Rooms.
+
+    The web app queues a room when the pilot is on (hotsos_push); here, on the
+    mirror thread that already holds the HotSOS session, each queued room is
+    PATCHed to INSPECTED. A room that is already inspected, or not on today's
+    board, is dropped; a send that fails stays queued for the next pass. At
+    most a handful a pass, so a stuck one never floods HotSOS."""
+    import hotsos_push
+    if not hotsos_push.config()["on"]:
+        return
+    q = db._load_key(hotsos_push.QUEUE_KEY) or {}
+    items = list(q.get("items") or [])
+    if not items:
+        return
+    h = _status_session(cfg)
+    board = h.rooms()
+    log_lines = list(q.get("log") or [])
+    remaining = list(items[INSPECT_MAX:])
+    for it in items[:INSPECT_MAX]:
+        room = str(it.get("room", "")).upper().strip()
+        r = board.get(room)
+        if not r:
+            log_lines.append(f"{clock.stamp()} inspect {room}: not on today's board, dropped")
+            continue
+        if r.get("status") == "INSPECTED":
+            log_lines.append(f"{clock.stamp()} inspect {room}: already inspected in HotSOS")
+            continue
+        try:
+            st, body = h.set_clean_status([r["gid"]], "INSPECTED")
+        except Exception as ex:
+            log_lines.append(f"{clock.stamp()} inspect {room}: {type(ex).__name__}: {ex} -- will retry")
+            remaining.append(it)
+            continue
+        if st in (200, 204, 207):
+            msg = f"inspect -> HotSOS: {room} ({r.get('status') or 'unknown'} -> INSPECTED) by {it.get('by')}: HTTP {st}"
+            log(msg)
+            log_lines.append(f"{clock.stamp()} {msg}")
+        else:
+            log(f"inspect -> HotSOS: {room}: HTTP {st} {str(body)[:200]} -- will retry")
+            log_lines.append(f"{clock.stamp()} inspect {room}: HTTP {st} -- will retry")
+            remaining.append(it)
+    db._upsert_key(hotsos_push.QUEUE_KEY, {"items": remaining, "log": log_lines[-80:]})
+    return {"done": len(items[:INSPECT_MAX]) - len([x for x in remaining if x in items[:INSPECT_MAX]]),
+            "queued": len(remaining)}
+
+
 # The mirror keeps one HotSOS browser signed in all day. Playwright allows one
 # of those per thread: on the loop's own thread, the next Preview, Push or
 # SharePoint read failed with "using Playwright Sync API inside the asyncio
@@ -646,6 +696,12 @@ def _mirror_loop():
                             rec["sheet"] = bool((sync_sheet(cfg) or {}).get("changed"))
                         except Exception as ex:
                             log(f"sheet -> app: {type(ex).__name__}: {ex}")
+                    # Pilot: carry My Rooms inspections into HotSOS (every pass,
+                    # ~2 min). Off unless switched on (hotsos_push).
+                    try:
+                        push_inspections(cfg)
+                    except Exception as ex:
+                        log(f"inspect -> HotSOS: {type(ex).__name__}: {ex}")
                 except Exception as ex:
                     rec = {"at": clock.stamp(), "error": f"{type(ex).__name__}: {ex}"}
                     log(f"room status sync failed: {rec['error']}")
