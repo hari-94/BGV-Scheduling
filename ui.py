@@ -429,6 +429,7 @@ def topnav(active: str = "", hide_sidebar: bool = True):
         try:
             import session
             session.ensure_cookie()
+            session.ensure_url_token()   # the cloud's only durable channel
         except Exception as ex:
             print(f"[ui] could not refresh the session cookie: {ex}")
     # The Android app draws its own tabs: no menu, phone margins, and only the

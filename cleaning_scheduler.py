@@ -1381,6 +1381,7 @@ if st.query_params.get("authdebug") == "1":
     st.title("Auth debug")
     st.write({"logged_in": st.session_state.get("logged_in"),
               "cookies_on_this_request": _now_ck,
+              "url_token_present": "k" in st.query_params,
               "what_restore_saw": st.session_state.get("_authdbg")})
     st.caption("Refresh this page a couple of times, then screenshot. "
                "Remove ?authdebug=1 from the URL to use the app normally.")

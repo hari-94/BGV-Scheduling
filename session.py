@@ -68,6 +68,53 @@ def _cookie_token():
     return v if isinstance(v, str) and v.strip() else None
 
 
+# On Streamlit Community Cloud the server never sees request cookies at all --
+# st.context.cookies comes back empty however the browser is set (proved on
+# the live app: a cookie the browser definitely sent showed up as nothing).
+# So the cookie alone can't carry a session across a refresh there. The URL
+# query string does reach the server, so the token rides there too: survives a
+# refresh, an app-switch that reloads the same URL, and the cloud proxy. The
+# stored token is a hash in the database, time-limited and revocable, so a URL
+# someone glimpses is a 30-day pass at worst, not a password.
+URL_KEY = "k"
+
+
+def _url_token():
+    try:
+        v = st.query_params.get(URL_KEY)
+    except Exception:
+        return None
+    return v if isinstance(v, str) and v.strip() else None
+
+
+def _set_url_token(token: str) -> None:
+    try:
+        if st.query_params.get(URL_KEY) != token:
+            st.query_params[URL_KEY] = token
+    except Exception:
+        pass
+
+
+def _clear_url_token() -> None:
+    try:
+        if URL_KEY in st.query_params:
+            del st.query_params[URL_KEY]
+    except Exception:
+        pass
+
+
+def ensure_url_token() -> None:
+    """Keep the token in the URL on every page while signed in.
+
+    st.switch_page and some navigations drop the query string, so writing it
+    once at sign-in isn't enough: each page re-adds it, so whatever URL the
+    browser reloads on a refresh still carries the token. Only writes when it's
+    missing, so there's no rerun loop."""
+    token = st.session_state.get("_session_token")
+    if token:
+        _set_url_token(token)
+
+
 def _expiry() -> str:
     import datetime
     return (clock.now() + datetime.timedelta(days=TTL_DAYS)).isoformat(timespec="seconds")
@@ -117,6 +164,7 @@ def remember(user: dict) -> None:
         return
     st.session_state["_session_token"] = token
     _write_cookie(token)
+    _set_url_token(token)       # the channel that actually survives on the cloud
 
 
 def ensure_cookie() -> None:
@@ -179,8 +227,11 @@ def restore() -> bool:
         seen = sorted(st.context.cookies.keys())
     except Exception as ex:
         seen = f"<err {ex}>"
-    token = _cookie_token()
-    _dbg(cookies_seen=seen, has_bgv_session=bool(token), at=clock.stamp())
+    # Cookie first (works off the cloud), then the URL token (the cloud's only
+    # channel, since the server never sees cookies there).
+    token = _cookie_token() or _url_token()
+    _dbg(cookies_seen=seen, has_bgv_session=bool(_cookie_token()),
+         has_url_token=bool(_url_token()), at=clock.stamp())
     if not token:
         return False
     try:
@@ -211,9 +262,10 @@ def restore() -> bool:
     import auth
     auth.login(user)
     st.session_state["_session_token"] = token
-    # Coming back on a cookie is itself a visit, so start its clock again.
+    # Coming back is itself a visit, so start its clock again.
     _extend(token)
     _write_cookie(token)
+    _set_url_token(token)       # keep it in the URL for the next refresh
     st.session_state["_session_renewed"] = True
     _dbg(restored=True)
     return True
@@ -230,3 +282,4 @@ def forget() -> None:
     st.session_state.pop("_session_token", None)
     st.session_state.pop("_session_renewed", None)
     _clear_cookie()
+    _clear_url_token()
