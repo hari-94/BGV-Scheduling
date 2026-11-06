@@ -686,6 +686,14 @@ def _mirror_loop():
             cfg = load_config(required=False)
             if cfg.get("hotsos_user") and clock.now().hour in STATUS_HOURS:
                 try:
+                    # Pilot: carry My Rooms sign-offs into HotSOS first, so a
+                    # room just marked reads back as inspected in this same pass
+                    # instead of flicking to its old status for one cycle. Off
+                    # unless switched on (hotsos_push); a no-op when idle.
+                    try:
+                        push_inspections(cfg)
+                    except Exception as ex:
+                        log(f"inspect -> HotSOS: {type(ex).__name__}: {ex}")
                     rec = sync_room_status(cfg)
                     rec["reconciled"] = reconcile_charts()
                     # On this thread, after the reconcile, so the two never
@@ -696,12 +704,6 @@ def _mirror_loop():
                             rec["sheet"] = bool((sync_sheet(cfg) or {}).get("changed"))
                         except Exception as ex:
                             log(f"sheet -> app: {type(ex).__name__}: {ex}")
-                    # Pilot: carry My Rooms inspections into HotSOS (every pass,
-                    # ~2 min). Off unless switched on (hotsos_push).
-                    try:
-                        push_inspections(cfg)
-                    except Exception as ex:
-                        log(f"inspect -> HotSOS: {type(ex).__name__}: {ex}")
                 except Exception as ex:
                     rec = {"at": clock.stamp(), "error": f"{type(ex).__name__}: {ex}"}
                     log(f"room status sync failed: {rec['error']}")
