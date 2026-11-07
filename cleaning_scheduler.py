@@ -1401,6 +1401,13 @@ if _appmode.active():
 # LOGIN GATE
 # ══════════════════════════════════════════════════════════════════════════════
 if not st.session_state.get("logged_in"):
+    # A browser that still holds a token, opened without it in the URL
+    # (shortcut, new tab, Android reopening a dropped tab): put it back.
+    try:
+        import session as _session_bridge
+        _session_bridge.bridge()
+    except Exception as _ex:
+        print(f"[app] session bridge failed: {_ex}")
     st.markdown("""<style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400&display=swap');
 /* Hide the entire sidebar + nav on the login screen */

@@ -39,9 +39,12 @@ def _write_cookie(token: str, days: int = TTL_DAYS) -> None:
     Secure because the app is also served over plain http on the property.
     """
     age = int(days * 24 * 3600)
+    # localStorage too: the cloud never shows the server the cookie, but the
+    # page can still read either one back (see bridge).
     components.html(
         f"<script>try{{parent.document.cookie="
         f"'{COOKIE}={token}; path=/; max-age={age}; SameSite=Lax';}}"
+        f"catch(e){{}}try{{parent.localStorage.setItem('{COOKIE}','{token}');}}"
         f"catch(e){{}}</script>", height=0, width=0)
 
 
@@ -49,6 +52,7 @@ def _clear_cookie() -> None:
     components.html(
         f"<script>try{{parent.document.cookie="
         f"'{COOKIE}=; path=/; max-age=0; SameSite=Lax';}}"
+        f"catch(e){{}}try{{parent.localStorage.removeItem('{COOKIE}');}}"
         f"catch(e){{}}</script>", height=0, width=0)
 
 
@@ -115,6 +119,49 @@ def ensure_url_token() -> None:
         _set_url_token(token)
 
 
+_bridge_component = None
+
+
+def _bridge_value():
+    """What components/token_bridge found in this browser: a token, "" for
+    none, or None before it has answered."""
+    global _bridge_component
+    if _bridge_component is None:
+        import os
+        _bridge_component = components.declare_component(
+            "token_bridge",
+            path=os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "components", "token_bridge"))
+    return _bridge_component(key="_token_bridge", default=None)
+
+
+def bridge() -> None:
+    """On the sign-in screen: if the URL arrived without a token but this
+    browser still holds one, sign back in with it.
+
+    The URL token alone was not enough on phones: opening the app from a
+    home-screen shortcut, a bookmark or a new tab starts from the bare address,
+    and Android drops a backgrounded tab and reopens it the same way -- each of
+    those went to the sign-in form (HP, 7 Nov: "logging out issue"). The token
+    is also kept in the browser (cookie and localStorage, written from the
+    page). The server can't read those on the cloud, but the page can, so a
+    small component reads it and hands it back.
+
+    Tried once per tab: a stale token just leaves the form. Never after
+    signing out in this tab -- the clearing script may not have run yet."""
+    if st.session_state.get("logged_in") or st.session_state.get("_signed_out"):
+        return
+    if _url_token() or st.session_state.get("_bridge_tried"):
+        return
+    tok = _bridge_value()
+    if tok is None:
+        return                         # not answered yet; it reruns the page when it does
+    st.session_state["_bridge_tried"] = True
+    _dbg(bridge_token=bool(tok))
+    if isinstance(tok, str) and tok.strip() and restore(tok.strip()):
+        st.rerun()
+
+
 def _expiry() -> str:
     import datetime
     return (clock.now() + datetime.timedelta(days=TTL_DAYS)).isoformat(timespec="seconds")
@@ -163,6 +210,7 @@ def remember(user: dict) -> None:
         print(f"[session] could not store session: {ex}")
         return
     st.session_state["_session_token"] = token
+    st.session_state.pop("_signed_out", None)
     _write_cookie(token)
     _set_url_token(token)       # the channel that actually survives on the cloud
 
@@ -216,7 +264,7 @@ def _dbg(**kw) -> None:
         pass
 
 
-def restore() -> bool:
+def restore(token: str = None) -> bool:
     """Bring back a signed-in session from the browser's cookie.
 
     Returns True if somebody was signed back in. Any failure -- no cookie, an
@@ -229,7 +277,7 @@ def restore() -> bool:
         seen = f"<err {ex}>"
     # Cookie first (works off the cloud), then the URL token (the cloud's only
     # channel, since the server never sees cookies there).
-    token = _cookie_token() or _url_token()
+    token = token or _cookie_token() or _url_token()
     _dbg(cookies_seen=seen, has_bgv_session=bool(_cookie_token()),
          has_url_token=bool(_url_token()), at=clock.stamp())
     if not token:
@@ -281,5 +329,6 @@ def forget() -> None:
             print(f"[session] could not delete session: {ex}")
     st.session_state.pop("_session_token", None)
     st.session_state.pop("_session_renewed", None)
+    st.session_state["_signed_out"] = True      # bridge() must not sign them back in
     _clear_cookie()
     _clear_url_token()

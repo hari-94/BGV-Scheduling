@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  The sign-in screen's token bridge (session.bridge): hands the server the
+  sign-in token this browser is keeping, when the URL arrived without one.
+
+  On the cloud the server never sees cookies, and a home-screen shortcut, a
+  new tab or Android reopening a dropped tab all start from the bare address.
+  The token is still in this browser -- written from the page into
+  localStorage and a cookie -- and this page can read it, so it sends it back
+  as the component's value. Nothing is shown.
+
+  It speaks Streamlit's component protocol by hand (componentReady, render,
+  setComponentValue), like components/report_table, so there is nothing to
+  build. It answers once per load; an empty string means "none here".
+-->
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<script>
+(function () {
+  "use strict";
+  var NAME = "bgv_session";
+
+  function send(type, extra) {
+    var msg = {isStreamlitMessage: true, type: type};
+    for (var k in extra) { msg[k] = extra[k]; }
+    window.parent.postMessage(msg, "*");
+  }
+
+  function token() {
+    var t = null;
+    try { t = localStorage.getItem(NAME); } catch (e) {}
+    if (!t) {
+      try {
+        var m = document.cookie.match(new RegExp("(?:^|; )" + NAME + "=([^;]+)"));
+        if (m) { t = m[1]; }
+      } catch (e) {}
+    }
+    return t || "";
+  }
+
+  var answered = false;
+  window.addEventListener("message", function (ev) {
+    var d = ev.data || {};
+    if (d.type !== "streamlit:render" || answered) { return; }
+    answered = true;
+    send("streamlit:setComponentValue", {value: token(), dataType: "json"});
+  });
+  send("streamlit:componentReady", {apiVersion: 1});
+  send("streamlit:setFrameHeight", {height: 0});
+})();
+</script>
+</body>
+</html>
