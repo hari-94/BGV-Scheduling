@@ -102,6 +102,11 @@ def init_auth():
     if fresh and not st.session_state["logged_in"]:
         try:
             import session
+            # A deploy doesn't reload an imported module (fresh.py): the live
+            # app ran the cookie-only session.py for a day after the URL-token
+            # fix was pushed, and phones kept being signed out (7 Nov).
+            import fresh as _fresh
+            _fresh.latest("session")
             session.restore()
         except Exception as ex:
             print(f"[auth] session restore failed: {ex}")

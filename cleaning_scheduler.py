@@ -1369,6 +1369,8 @@ def _auto_apply_today(force=False):
         return None
 
 _init_state()
+import session as _session_mod                 # so fresh.latest can find it
+fresh.latest("session", "auth")                # sign-in code as it is on disk (fresh.py)
 auth.init_auth()
 # Reachable from any phone at ?authdebug=1 -- shows whether the browser's
 # session cookie reached the server and what restore() made of it. Names and

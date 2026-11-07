@@ -794,6 +794,10 @@ function through `getattr(db, "name", None)` with a fallback, which is what
 `_stored_days` in `pages/1_Dashboard.py` does. Adding a `db` function and calling
 it from a page in the same commit is the shape to watch for.
 
+Sign-in is kept fresh the same way: the main page calls `fresh.latest("session", "auth")`
+before `auth.init_auth()`. The URL-token fix sat on disk for a day while the live
+process kept the cookie-only `session.py`, and phones kept being signed out (7 Nov).
+
 The menu is now kept fresh: every page calls `fresh.latest("i18n", "ui")` before
 `ui.topnav`, which reloads those two when their file changed since the process
 loaded them. That was the menu that went days without its Report link. Any other
