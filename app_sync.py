@@ -72,6 +72,13 @@ def _kind(g, r=None):
     own = (g.get("service_type"), bool(g.get("dv_rqs2")), bool(g.get("verify_group")))
     if r is not None and g.get("dv_rqs2") and r.get("service") and r.get("service") != g.get("service_type"):
         return (r.get("service"), False, False)
+    # A room held back to check that HotSOS has given somebody is being
+    # cleaned: it belongs in an ordinary chart of its own service. Moved with
+    # the held-back flag it became "CHECK-A·Lilliam" -- set aside, so no RQS
+    # and out of the counts, though someone was cleaning it (24 charts, 15 days
+    # through 6 Nov).
+    if r is not None and g.get("verify_group"):
+        return (r.get("service") or g.get("service_type"), False, False)
     return own
 
 
@@ -282,6 +289,12 @@ def from_sheet(rows, save=True):
     # 1. The RQS on each room.
     rqs_changed, split, out = [], [], []
     for g in fg:
+        # Held back to check: no RQS until somebody cleans them, and then they
+        # leave this chart for an ordinary one (from_hotsos / _kind). Split by
+        # RQS here they became charts both set aside and inspected.
+        if g.get("verify_group"):
+            out.append(g)
+            continue
         want = {}
         for r in g.get("rooms") or []:
             line = sheet.get(r.get("room"))

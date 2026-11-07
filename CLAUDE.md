@@ -910,6 +910,41 @@ numbers leave out (`in_held`), and the Timing tab's RQS side uses
 `report_timing.inspection`. They come off the housekeepers' counts too
 (Full Clean rows only: a Daily Service stayover is real work).
 
+## The rule check — `schedule_audit.py` and `tests/`
+
+Every hard rule, checked in one place on what actually came out: every room on
+exactly one chart, Full Clean chart rules (fcpack), an apartment never split
+between people, each **person's whole day** within its cap (Daily Service cap if
+they hold a Daily Service round, else 380), nobody's Full Clean in buildings 2
+and 3, no Daily Service round in 2 and 3 when there is more than one round, RQS
+rounds within 13 Full Clean rooms and off the 2/3 line, held-back charts with
+nobody on them. Findings are `rule` (a bug or a bad hand edit), `staff` (not
+enough people scheduled — not the plan's fault) or `note` (crossings the day
+needs). Its limits must match the page's; a test fails if they drift.
+
+It runs on every build: `daily_build.generate.audit` (5 AM build logs
+`rule check` / `RULE:` lines), the page's Generate (red "Rule broken" lines),
+the 9 PM card ("Rule check" section), the forecast (`rules` per day, logged),
+and the watchdog checks **today's saved charts every 10 minutes** 5:25–20:00, so
+a sheet edit, a HotSOS move or a hand change that breaks a rule is e-mailed.
+
+Born 6–7 Nov from three breaks nobody saw until HP read the evening card: Full
+Clean crossings to save one person (fcsolve step 3), a Daily Service round in
+2 and 3 (`_ds_fill`), and a side chart filled as if it were the person's day —
+705 minutes (`fill_from_unstaffed` now counts the person). The same sweep found
+the manager day-rules (`overflow_to_rqs12`, `move_inspections`, `leftover_to`)
+running *after* `assign_inspectors`' rule-23 repair with no check of their own,
+held-back rooms HotSOS gave somebody keeping the held-back flag (`app_sync._kind`),
+and `daily_build.generate` returning the page's already-loaded charts when the
+page refused to generate ("No housekeepers marked as present") — it now raises.
+
+Tests: `.venv\Scripts\python -m unittest discover -s tests -v` (~4 min; the
+packing tests run the page's own functions via `daily_build.borrow` /
+`forecast_sim.pack_day` on 7 and 8 Nov, guests pseudonymised in `tests/fixtures`).
+Run them after any change to packing or staffing. Solver limits: the wall clock
+must sit well above the deterministic limit (fcsolve `STEP_WALL`, `_ds_fill`
+uses `interleave_search`), or a busy PC changes the charts.
+
 ## Agreed but not built
 
 `docs/inspection-scoring.md` — the RQS inspection checklist and the per-housekeeper

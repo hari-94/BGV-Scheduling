@@ -246,13 +246,23 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         generate.leftover = []
         generate.swapped = []
         generate.moved_insp = []
+        generate.audit = []
 
         def run_generate():
+            stamp = at.session_state["_gen_stamp"] if "_gen_stamp" in at.session_state else 0
             at.text_area(key="room_input").set_value(room_text)
             at.text_area(key="email_input").set_value(arrival_text or "")
             next(b for b in at.button if b.label == "Generate").click()
             at.run()
             _raise(at, "Generate")
+            # The page refusing to generate leaves the charts it had loaded --
+            # today's saved ones -- in place. Read back, those looked like a
+            # fresh build (6 Nov, 10 PM: nobody present, today's charts
+            # returned unchanged).
+            now = at.session_state["_gen_stamp"] if "_gen_stamp" in at.session_state else 0
+            if now == stamp:
+                warn = "; ".join(w.value for w in at.warning) or "no reason given"
+                raise RuntimeError(f"Generate did not run: {warn}")
             fg = at.session_state["groups_data"] if "groups_data" in at.session_state else None
             if not fg:
                 warn = "; ".join(w.value for w in at.warning) or "no charts came back"
@@ -290,6 +300,22 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
                                                                 if "moved_insp" in at.session_state else [])]
         generate.roles = {k: (at.session_state[k] if k in at.session_state else "")
                           for k in ("rqs1", "rqs2")}
+        # The hard rules, checked on what came out (schedule_audit). Rooms the
+        # page set aside as out of service are meant to be on no chart, and
+        # people borrowed from another duty are working though off the roster.
+        try:
+            import schedule_audit as sa
+            off = {str(x[0]).strip().upper() for x in generate.blocked if x}
+            rooms_in = [l.split("\t")[0] for l in room_text.splitlines()
+                        if l.strip() and l.split("\t")[0].strip().lower() != "room"]
+            rooms_in = [r for r in rooms_in if r.strip().upper() not in off]
+            hk = at.session_state["hk_roster"] if "hk_roster" in at.session_state else {}
+            present = {n for n, v in hk.items() if v.get("present")} | {b[0] for b in generate.borrowed}
+            generate.audit = sa.check(fg, day=day or clock.today(), rooms_in=rooms_in,
+                                      present=present, rqs2=generate.roles.get("rqs2") or None)
+        except Exception as ex:
+            generate.audit = [{"kind": "rule", "code": "audit_failed",
+                               "msg": f"the rule check itself failed: {type(ex).__name__}: {ex}"}]
         return fg
 
 

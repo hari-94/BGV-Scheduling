@@ -52,7 +52,10 @@ W_DEFICIT = 1        # per minute a short chart sits under LOW_MIN
 # from the layout that just saved a person, and 7 Nov needed ~12 to go from
 # 12 crossing charts to the 2 the leftovers actually require (6 left it at 12).
 STEP_DET = (6.0, 6.0, 12.0, 2.5)
-STEP_WALL = (4.0, 4.0, 15.0, 3.5)
+# The wall clock only guards a host that is far too slow; it must sit well
+# above STEP_DET, or on a busy PC it stops a step first and the same sheet
+# gives different charts depending on the load (steps 1-2 were 4s against 6).
+STEP_WALL = (20.0, 20.0, 40.0, 10.0)
 WORKERS = 4
 
 

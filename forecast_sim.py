@@ -50,12 +50,13 @@ def simulate(ssrs_xlsx: bytes, day: _dt.date) -> dict:
     return simulate_text(*room_text(ssrs_xlsx), day)
 
 
-def simulate_text(room_text: str, n_rooms: int, day: _dt.date) -> dict:
+def pack_day(room_text: str, day: _dt.date) -> list:
+    """The day's charts as the Schedule page packs them -- nobody on them yet
+    (stand-ins H1, H2 ...). What simulate_text counts, and what the tests check."""
     f = _funcs()
     df = f["parse_rooms"](room_text)
     if df.empty:
-        return {"hskp": 0, "hskp_fc": 0, "hskp_ds": 0, "rqs": 0, "rqs_fc": 0,
-                "fc_rooms": 0, "check_rooms": 0, "check_minutes": 0, "rooms": 0}
+        return []
     rds = []
     for r in df.to_dict("records"):
         late = str(r.get("LateCheckout") or "").strip()
@@ -73,8 +74,19 @@ def simulate_text(room_text: str, n_rooms: int, day: _dt.date) -> dict:
     fg = [g for g in f["build_all_groups"](rds, weekend=day.weekday() >= 5) if g["rooms"]]
     for i, g in enumerate(fg):
         g["label"] = f"G{i + 1}"
-        g["housekeeper"] = f"H{i + 1}"
+        # Rooms held back to check have nobody, as on the page; a stand-in
+        # there read as "held back but somebody on it" to the rule check.
+        g["housekeeper"] = "" if g.get("verify_group") else f"H{i + 1}"
         g["cross_bld"] = len(g["blds"]) > 1
+    return fg
+
+
+def simulate_text(room_text: str, n_rooms: int, day: _dt.date) -> dict:
+    f = _funcs()
+    fg = pack_day(room_text, day)
+    if not fg:
+        return {"hskp": 0, "hskp_fc": 0, "hskp_ds": 0, "rqs": 0, "rqs_fc": 0,
+                "fc_rooms": 0, "check_rooms": 0, "check_minutes": 0, "rooms": 0}
     live = [g for g in fg if not g.get("verify_group")]
     fc = [g for g in live if g.get("service_type") == f["SVC_FC"]]
     ih = [g for g in live if g.get("service_type") == f["SVC_IH"]]
@@ -102,7 +114,16 @@ def simulate_text(room_text: str, n_rooms: int, day: _dt.date) -> dict:
             k += 1
         rqs_fc = len({g.get("inspector") for g in fc})
     rqs2 = 1 if (ds or dv or ih) else 0
+    # The charts' own hard rules (schedule_audit) -- people are stand-ins
+    # here, one per chart, so this is the packing's rules, ahead of the day.
+    try:
+        import schedule_audit as sa
+        breaks = [f["msg"] for f in sa.rules(sa.check(fg, day=day))]
+    except Exception as ex:
+        breaks = [f"the rule check failed: {type(ex).__name__}: {ex}"]
     return {
+        "rules": len(breaks),
+        "rule_breaks": breaks[:6],
         "rooms": int(n_rooms),
         "hskp_fc": len(fc) + len(ih),
         "hskp_ds": len(ds),

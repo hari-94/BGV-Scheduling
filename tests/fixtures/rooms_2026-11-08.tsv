@@ -1,0 +1,133 @@
+Room	Service	Time	Pet	Current Guest or Status	Res Type	Late Checkout	Status	Notes	Arriving Guest
+1020A	Full Clean	120		Guest8, Test	Rental-Mktg		Pending		Guest155, Test
+1020B	Daily Service	20		Guest10, Test	Rental-Online Owner		Pending		
+1221A	Full Clean	120		Guest21, Test	Rental-Mktg		In House		Guest156, Test
+1221B	Full Clean	70		Guest21, Test	Rental-Mktg		In House		Guest157, Test
+1224E	Daily Service	40		Guest10, Test	Rental-Online Owner		Pending		
+1224F	Full Clean	70		Guest35, Test	Rental-Online Owner		Pending		Guest158, Test
+1224H	Full Clean	70		Guest38, Test	Rental-Mktg		Pending		Guest159, Test
+1226B	Daily Service	20		Guest41, Test	Rental-Mktg		In House		
+1320E	Full Clean	140		Guest160, Test	Owner-Points GC8 Saturday		In House		Guest161, Test
+1320G	Full Clean	70		Guest43, Test	Rental-Owner		Pending		Guest161, Test
+1320H	Full Clean	70		Guest44, Test	Rental-Mktg		In House		Guest161, Test
+1320I	Full Clean	70		Room, Walk	Rental-Mktg		Pending		Guest161, Test
+1323C	Full Clean	70		Guest57, Test	Rental-Mktg		In House		Guest53, Test
+1324G	Full Clean	70		Guest53, Test	Hold-COD		Pending		Guest162, Test
+1421B	Daily Service	20		Guest69, Test	Rental-OTA		Pending		
+1421C	Full Clean	70		Guest70, Test	Rental-Mktg		In House		Guest53, Test
+1421D	Full Clean	120		Guest163, Test	Owner-Float GC8 Saturday		In House		Guest53, Test
+1423B	Daily Service	20		Guest72, Test	Rental-OTA		Pending		
+1424G	Full Clean	70		Guest164, Test	Owner-Points GC8 Saturday		In House		Guest165, Test
+1426B	Full Clean	70		Guest166, Test	Owner-Points GC8 Saturday		In House		Guest167, Test
+2132F	Full Clean	70	X	Guest86, Test	Owner-Points GC8 Saturday		Pending		
+2134A	Full Clean	120		Guest88, Test	Rental-Online Owner		Pending		Guest53, Test
+2135A	Full Clean	120	X	Guest168, Test	Owner-Float GC8 Saturday		In House		Guest169, Test
+2136E	Full Clean	140	X	Guest90, Test	Rental-Mktg		In House		Guest53, Test
+2136G	Full Clean	70	X	Guest91, Test	Rental-Mktg		In House		Guest53, Test
+2136I	Full Clean	70	X	Guest92, Test	Rental-Mktg		In House		Guest170, Test
+2232E	Daily Service	40	X	Guest94, Test	Rental-Mktg		Pending		
+2232G	Full Clean	70		Guest171, Test	Owner-Points GC8 Saturday		In House		Guest172, Test
+2232H	Full Clean	70	X	Guest96, Test	Rental-Mktg		Pending		
+2233A	Full Clean	120	X	Guest97, Test	Rental-Mktg		In House		Guest173, Test
+2233B	Full Clean	70	X	Guest174, Test	Rental-Buyback		In House		Guest173, Test
+2233C	Full Clean	70		Guest98, Test	Exchange-Exchange GC8		In House		Guest173, Test
+2234A	Daily Service	35	X	Guest102, Test	Rental-Mktg		Pending		
+2236G	Daily Service	20		Guest109, Test	Rental-Mktg		Pending		
+2236H	Full Clean	70	X	Guest110, Test	Rental-Owner		Pending		
+2236I	Daily Service	20		Guest112, Test	Rental-Non-Owner		Pending		
+2336G	Full Clean	70		Guest123, Test	Owner-Points GC8 Saturday		Pending		Guest175, Test
+2336H	Full Clean	70		Guest124, Test	Rental-Mktg		In House		Guest175, Test
+2336I	Full Clean	70		Guest125, Test	Owner-Points GC8 Saturday		Pending		
+2432A	Full Clean	120		Guest176, Test	Owner-Points GC8 Saturday		In House		Guest177, Test
+2432B	Full Clean	70		Guest178, Test	Owner-Float GC8 Saturday		In House		Guest179, Test
+2433C	Daily Service	20		Guest132, Test	Rental-Mktg		Pending		
+3010A	Full Clean	120		Guest180, Test	Exchange-Exchange GC8		In House		
+3010B	Full Clean	70	X	Guest181, Test	Owner-Float GC8 Sunday		In House		
+3010C	Full Clean	70		Guest138, Test	Rental-Non-Owner		In House		
+3010D	Full Clean	120		Guest138, Test	Rental-Non-Owner		In House		
+3011A	Full Clean	120		Guest182, Test	Owner-Points GC8 Saturday		Pending		
+3011B	Full Clean	70		Room, Walk	Rental-Buyback		Pending		
+3013A	Full Clean	120	X	Guest183, Test	Owner-Float GC8 Sunday		In House		
+3015A	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		
+3017A	Full Clean	120		Guest139, Test	Rental-Mktg		In House		
+3020A	Full Clean	120		Guest184, Test	Owner-Points GC8 Sunday		In House		
+3020B	Full Clean	70		Guest184, Test	Owner-Points GC8 Sunday		In House		
+3020C	Full Clean	70		Guest140, Test	Rental-Mktg		In House		
+3020D	Full Clean	120		Guest185, Test	Owner-Points GC8 Sunday		In House		
+3021A	Full Clean	120	X	Guest186, Test	Owner-Float GC8 Sunday		Pending		
+3021B	Full Clean	70		Guest141, Test	Rental-Mktg		In House		
+3022A	Full Clean	120		Guest187, Test	Owner-Points GC8 Sunday		In House		
+3022B	Full Clean	70		Guest187, Test	Owner-Points GC8 Sunday		In House		
+3023A	Full Clean	120	X	Guest188, Test	Owner-Points GC8 Sunday		In House		
+3024A	Full Clean	120	X	Guest184, Test	Owner-Points GC8 Sunday		In House		
+3024B	Full Clean	70	X	Guest184, Test	Owner-Points GC8 Sunday		In House		
+3025A	Full Clean	120		Guest35, Test	Owner-Float GC8 Sunday		In House		
+3027A	Full Clean	120	X	Guest189, Test	Owner-Points GC8 Sunday		In House		
+3029E	Full Clean	140		Guest142, Test	Rental-Mktg		In House		
+3029F	Full Clean	70	X	Guest190, Test	Owner-Float GC8 Sunday		In House		
+3029G	Full Clean	70		Guest143, Test	Rental-Mktg		In House		
+3029H	Full Clean	70	X	Guest191, Test	Owner-Float GC8 Sunday		In House		
+3031E	Full Clean	140	X	Guest192, Test	Owner-Float GC8 Sunday		In House		
+3031F	Full Clean	70	X	Guest192, Test	Owner-Float GC8 Sunday		In House		
+3031G	Full Clean	70	X	Guest192, Test	Owner-Float GC8 Sunday		In House		
+3031H	Full Clean	70		Guest144, Test	Rental-Online Owner		In House		
+3140A	Full Clean			Unallocated	---		Pending		Guest193, Test
+3140B	Full Clean			Unallocated	---		Pending		Guest194, Test
+3140C	Full Clean			Unallocated	---		Pending		Guest195, Test
+3140D	Full Clean			Unallocated	---		Pending		Guest195, Test
+3141A	Full Clean			Unallocated	---		Pending		Guest196, Test
+3143A	Full Clean			Unallocated	---		Hold		Buyback, Buyback
+3144A	Full Clean			Unallocated	---		Pending		Guest197, Test
+3144B	Full Clean			Unallocated	---		Pending		Guest198, Test
+3145A	Full Clean			Unallocated	---		Pending		Guest86, Test
+3147A	Full Clean			Unallocated	---		Pending		Guest199, Test
+3149E	Full Clean	140	X	Guest146, Test	Rental-Owner		Pending		Guest200, Test
+3149F	Full Clean	70	X	Guest147, Test	Rental-Owner		Pending		Guest200, Test
+3149G	Full Clean			Unallocated	---		Pending		Guest200, Test
+3149H	Full Clean			Unallocated	---		Pending		Guest200, Test
+3240D	Full Clean			Unallocated	---		Pending		Deposit, Deposit
+3241A	Full Clean			Unallocated	---		Pending		Guest201, Test
+3241B	Full Clean			Unallocated	---		Pending		Guest201, Test
+3242A	Full Clean			Unallocated	---		Pending		Guest202, Test
+3243A	Full Clean			Unallocated	---		Pending		Guest53, Test
+3244A	Full Clean			Unallocated	---		Pending		Guest53, Test
+3245A	Full Clean			Unallocated	---		Hold		Buyback, Buyback
+3246E	Full Clean			Unallocated	---		Pending		Guest203, Test
+3246G	Full Clean			Unallocated	---		Pending		Guest203, Test
+3247A	Full Clean			Unallocated	---		Pending		Guest204, Test
+3249E	Full Clean			Unallocated	---		Pending		Guest205, Test
+3251E	Full Clean			Unallocated	---		Pending		Guest206, Test
+3251F	Full Clean			Unallocated	---		Pending		Guest207, Test
+3251G	Full Clean			Unallocated	---		Pending		Guest206, Test
+3340A	Full Clean	120		Guest208, Test	Owner-Points GC8 Sunday		In House		Guest209, Test
+3340B	Full Clean	70		Guest208, Test	Owner-Points GC8 Sunday		In House		Guest210, Test
+3341A	Full Clean	120		Guest211, Test	Exchange-Exchange GC8		In House		Guest212, Test
+3341B	Full Clean	70		Guest213, Test	Owner-Points GC8 Sunday		In House		Guest212, Test
+3342A	Full Clean	120		Guest148, Test	Rental-Mktg		In House		Guest153, Test
+3342B	Full Clean	70		Guest214, Test	Exchange-Exchange GC8		In House		Guest153, Test
+3343A	Full Clean	120		Guest215, Test	Exchange-Exchange GC8		In House		Guest216, Test
+3343B	Full Clean	70		Guest217, Test	Rental-Owner		In House		Guest216, Test
+3344A	Full Clean	120		Guest218, Test	Owner-Float GC8 Sunday		In House		
+3344B	Full Clean	70		Guest218, Test	Owner-Float GC8 Sunday		In House		Guest219, Test
+3346E	Full Clean	140		Guest220, Test	Owner-Float GC8 Sunday		In House		Guest221, Test
+3346G	Full Clean	70		Guest220, Test	Owner-Float GC8 Sunday		In House		Guest221, Test
+3346H	Full Clean	70		Guest98, Test	Exchange-Exchange GC8		In House		Guest222, Test
+3346I	Full Clean	70	X	Guest149, Test	Rental-Mktg		In House		Guest223, Test
+3349E	Full Clean	140		Guest150, Test	Rental-Non-Owner		Pending		Deposit, Deposit
+3349F	Full Clean	70		Guest224, Test	Rental-Owner		In House		
+3349G	Full Clean	70		Guest151, Test	Rental-Owner		Pending		Guest225, Test
+3349H	Full Clean	70		Guest152, Test	Rental-Mktg		Pending		
+3351E	Full Clean	140		Guest153, Test	Rental-Online Owner		In House		Guest226, Test
+3351F	Full Clean	70		Guest153, Test	Rental-Online Owner		In House		
+3351G	Full Clean	70		Guest154, Test	Rental-Mktg		In House		
+3351H	Full Clean	70		Guest227, Test	Owner-Float GC8 Sunday		In House		
+3440A	Full Clean	120		Guest98, Test	Exchange-Exchange GC8		In House		Guest228, Test
+3440B	Full Clean	70		Guest98, Test	Exchange-Exchange GC8		In House		Guest229, Test
+3449E	Full Clean	140		Guest98, Test	Exchange-Exchange GC8		In House		Guest230, Test
+3449F	Full Clean	70		Guest231, Test	Owner-Float GC8 Sunday		In House		Buyback, Buyback
+3449G	Full Clean	70		Guest98, Test	Exchange-Exchange GC8		In House		Guest230, Test
+3449H	Full Clean	70		Guest232, Test	Exchange-Exchange GC8		In House		Guest233, Test
+3451E	Full Clean	140		Guest234, Test	Owner-Float GC8 Sunday		In House		Guest235, Test
+3451F	Full Clean	70		Guest234, Test	Owner-Float GC8 Sunday		In House		Buyback, Buyback
+3451G	Full Clean	70		Guest234, Test	Owner-Float GC8 Sunday		In House		Guest235, Test
+3451H	Full Clean (IH)	70		Guest236, Test	Owner-Points GC8 Sunday		Pending		Guest236, Test

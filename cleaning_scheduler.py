@@ -3140,8 +3140,11 @@ def _ds_fill(rooms, cap):
                     touch.setdefault(key_of, []).append(y)
         sv = cp_model.CpSolver()
         sv.parameters.num_workers = 8
+        # Same sheet, same rounds, whatever else the PC is doing: interleaved
+        # search with a deterministic limit, the wall clock only a guard.
+        sv.parameters.interleave_search = True
         sv.parameters.max_deterministic_time = 8
-        sv.parameters.max_time_in_seconds = 20
+        sv.parameters.max_time_in_seconds = 30
 
         def run(objective):
             m.Minimize(objective)
@@ -4554,8 +4557,15 @@ def overflow_to_rqs12(groups, inspectors, rqs1, rqs2):
     load = {n: sum(len(g.get("rooms") or []) for g in groups
                    if g.get("inspector") == n and g.get("service_type") == SVC_FC) for n in who}
     moved = {n: [] for n in who}
+
+    def sides(n):
+        return {b for g in groups if g.get("inspector") == n and g.get("service_type") == SVC_FC
+                for b in g.get("blds") or []}
     for g in sorted((g for g in groups if g.get("inspector") in holes), key=_chart_place):
-        n = min(who, key=lambda x: load[x])
+        # Whichever of the two the chart doesn't put in buildings 2 and 3 (this
+        # runs after assign_inspectors' repair, so nothing else would catch it).
+        ok = [x for x in who if not rule23.mixes(sides(x) | set(g.get("blds") or []))]
+        n = min(ok or who, key=lambda x: load[x])
         g["inspector"] = n
         load[n] += len(g.get("rooms") or [])
         moved[n].append(g)
@@ -4671,9 +4681,15 @@ def move_inspections(groups, inspectors, moves):
         # and 2) handed her 4 Full Clean rooms to Ana Caisa but keeps the
         # Daily Service and in-house rounds that are RQS 2's by design.
         svc = mv.get("service")
+        def b_sides():
+            return {x for h in groups if h.get("inspector") == b and h.get("service_type") == SVC_FC
+                    for x in h.get("blds") or []}
         for g in sorted((g for g in groups if g.get("inspector") == a and not g.get("dv_rqs2")
                          and (not svc or g.get("service_type") == svc)),
                         key=lambda g: -len(g.get("rooms") or [])):
+            # Never into buildings 2 and 3 for `b`: this runs after the repair.
+            if g.get("service_type") == SVC_FC and rule23.mixes(b_sides() | set(g.get("blds") or [])):
+                continue
             if rooms_of(b) + len(g.get("rooms") or []) <= upto:
                 g["inspector"] = b
                 moved.append(g["label"])
@@ -4723,7 +4739,7 @@ def swap_inspectors(groups, inspectors, pairs):
     return groups, inspectors, done
 
 
-def leftover_to(groups, names, cap=DS_CAP_WEEKEND):
+def leftover_to(groups, names, cap=None):
     """Charts nobody could staff go to the people a manager named for the day
     (borrow_off "leftover_to"), as on 18 October: "the left over studio room
     can be assigned to Adrian" -- 2432B, 70 minutes, beside his Daily Service.
@@ -4734,12 +4750,27 @@ def leftover_to(groups, names, cap=DS_CAP_WEEKEND):
     def day(n):
         return sum(int(g.get("time") or 0) for g in groups
                    if g.get("housekeeper") == n and not g.get("verify_group"))
+
+    def cap_of(n):
+        # A Daily Service housekeeper is capped at the Daily Service day (460
+        # weekdays); anyone else at a Full Clean day. A flat 510 let a weekday
+        # round run to 510 and a Full Clean person to 510.
+        if cap is not None:
+            return cap
+        ds = any(g.get("housekeeper") == n and g.get("service_type") == SVC_DS for g in groups)
+        return (DS_CAP_WEEKEND if _sched_weekend() else DS_CAP) if ds else MAX_FC
+
+    def fc_sides(n):
+        return {b for g in groups if g.get("housekeeper") == n
+                and g.get("service_type") in (SVC_FC, SVC_IH) for b in g.get("blds") or []}
     who = [n for n in names if any(g.get("housekeeper") == n for g in groups)]
     given = []
     open_ = [g for g in groups if not g.get("verify_group") and not g.get("dv_rqs2")
              and str(g.get("housekeeper") or "").startswith((NO_HK_LABEL, NEED_HK_PREFIX))]
     for g in sorted(open_, key=lambda g: int(g.get("time") or 0)):
-        fits = [n for n in who if day(n) + int(g.get("time") or 0) <= cap]
+        gb = set(g.get("blds") or []) if g.get("service_type") in (SVC_FC, SVC_IH) else set()
+        fits = [n for n in who if day(n) + int(g.get("time") or 0) <= cap_of(n)
+                and not rule23.mixes(fc_sides(n) | gb)]
         if not fits:
             continue
         n = min(fits, key=day)
@@ -6292,6 +6323,11 @@ if run:
 
                     # Store fresh result in session state
                     st.session_state["groups_data"] = fg
+                    # A stamp per real generation: daily_build reads it to tell
+                    # a Generate that ran from one the page refused ("No
+                    # housekeepers marked as present"), which used to hand back
+                    # whatever charts were already loaded as if just built.
+                    st.session_state["_gen_stamp"] = st.session_state.get("_gen_stamp", 0) + 1
                     st.session_state["total_rooms"] = len(df)
                     st.session_state["inspectors_data"] = inspectors
                     st.session_state["used_hk_set"] = used_hk_set
@@ -6319,6 +6355,19 @@ if run:
                     _loader.empty()
                     st.success(f"Schedule generated — {len(fg)} groups from {len(df)} rooms."
                                + (" Preview only — not saved." if _previewing() else ""))
+                    # The hard rules, checked on what just came out
+                    # (schedule_audit): a break is said here, not found later.
+                    try:
+                        import schedule_audit as _sa
+                        _sd = _datetime.strptime(st.session_state.get("sched_day") or _today_iso(),
+                                                 "%Y-%m-%d").date()
+                        _found = _sa.check(fg, day=_sd, present=set(present_hk),
+                                           rqs2=rqs2 or None)
+                        st.session_state["rule_check"] = _found
+                        for _f in _sa.rules(_found):
+                            st.error(f"Rule broken: {_f['msg']}")
+                    except Exception as _ex:
+                        print(f"[app] rule check failed: {_ex}")
                     for _n, _w in (st.session_state.get("ds_auto") or {}).items():
                         st.info(f"Daily Service: nobody is marked for it in the staff "
                                 f"schedule, so **{_n}** takes it — {_w}.")

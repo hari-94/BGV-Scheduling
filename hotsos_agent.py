@@ -270,6 +270,9 @@ def refresh_forecast():
                 "pulled_at": clock.stamp(), "arrival": arr.name if arr else None,
                 "arrival_text": daily_build.read_arrival_report(arr) if arr else ""})
             d.update(forecast_sim.simulate_text(text, n, day), method="simulated")
+            if d.get("rules"):
+                log(f"forecast {d['date']}: {d['rules']} rule break(s) in the packing -- "
+                    + "; ".join(d.get("rule_breaks") or [])[:300])
             done += 1
         except Exception as ex:
             log(f"forecast simulation {d['date']}: {type(ex).__name__}: {ex}")
@@ -961,6 +964,18 @@ def run_build(cfg, day=None, by="5 AM", publish=True):
         log(f"built {day}: {out['rooms']} rooms, {out['charts']} charts, tab {out['tab']} "
             f"{out['outcome']}; GC8 Inspections 2026: {out.get('big_tab')}; "
             f"arrival report {'found' if arr else 'MISSING'}")
+        # The build's own rule check (daily_build.generate.audit); the
+        # watchdog also checks the saved charts all day.
+        try:
+            import schedule_audit as sa
+            found = getattr(daily_build.generate, "audit", None) or []
+            status["rules"] = sa.summary(found)
+            status["rule_breaks"] = [f["msg"] for f in sa.rules(found)]
+            log(f"rule check {day}: {status['rules']}")
+            for m in status["rule_breaks"]:
+                log(f"  RULE: {m}")
+        except Exception as ex:
+            log(f"rule check {day}: {type(ex).__name__}: {ex}")
     except Exception as ex:
         status.update(status="error", error=f"{type(ex).__name__}: {ex}")
         log(f"build failed: {traceback.format_exc()}")
@@ -1730,7 +1745,13 @@ def evening_preview(cfg, day=None, test=False):
                  and str(g.get("inspector") or "").startswith("Inspector "))
     fc = next((d for d in ((db._load_key(hs.FORECAST_KEY) or {}).get("days") or [])
                if d.get("date") == iso), {})
+    import schedule_audit as sa
+    found = getattr(daily_build.generate, "audit", None) or []
+    broken = sa.rules(found)
+    crossing = [f["msg"] for f in found if f["code"] in ("fc_cross", "ds_one_round")]
     extra = {
+        "Rule check": ([f"⚠ {f['msg']}" for f in broken] or ["All rules kept ✓"])
+                      + crossing,
         "Anyone extra": ([f"Housekeepers with no rooms: {', '.join(spare_hk)}"] if spare_hk else [])
                         + ([f"RQS not needed: {', '.join(spare_rqs)}"] if spare_rqs else []),
         "Light duty": [f"{n}: {what}" for n, what in getattr(daily_build.generate, "light_duty", [])],
@@ -1752,6 +1773,7 @@ def evening_preview(cfg, day=None, test=False):
     log(f"evening preview {iso} -> {'personal' if hooks.get('personal') else 'test'} chat: HTTP {st_}")
     rec.update(status="sent" if 200 <= st_ < 300 else "failed", http=st_,
                charts=len(groups), spare_hk=spare_hk, spare_rqs=spare_rqs,
+               rules=sa.summary(found), rule_breaks=[f["msg"] for f in broken],
                report=arr_name, why=None if 200 <= st_ < 300 else body[:200])
     if not test:
         db._upsert_key(tn.PREVIEW_KEY, rec)

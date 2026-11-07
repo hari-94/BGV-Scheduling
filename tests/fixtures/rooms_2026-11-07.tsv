@@ -1,0 +1,142 @@
+Room	Service	Time	Pet	Current Guest or Status	Res Type	Late Checkout	Status	Notes	Arriving Guest
+1010A	Full Clean	120	X	Guest1, Test	Exchange-Exchange GC8		In House		Guest2, Test
+1010B	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest2, Test
+1010C	Full Clean	70		Guest3, Test	Exchange-Exchange GC8		In House		Guest2, Test
+1010D	Full Clean	120		Guest3, Test	Exchange-Exchange GC8		In House		Guest4, Test
+1012A	Full Clean	120		Guest5, Test	Owner-Float GC8 Saturday		In House		Guest6, Test
+1012B	Dust n Vac			Unallocated	---		Pending		Guest7, Test
+1020A	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest8, Test
+1020B	Full Clean	70		Guest9, Test	Exchange-Exchange GC8		In House		Guest10, Test
+1020C	Full Clean	70		Guest11, Test	Owner-Float GC8 Saturday		In House		Guest12, Test
+1020D	Full Clean	120		Guest13, Test	Rental-Comp		In House		Guest12, Test
+1022A	Full Clean	120		Guest14, Test	Exchange-Exchange GC8		In House		Guest15, Test
+1022B	Full Clean	70		Guest14, Test	Exchange-Exchange GC8		In House		Guest15, Test
+1220E	Full Clean	140		Guest16, Test	Exchange-Exchange GC8		In House		Guest17, Test
+1220G	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest17, Test
+1220H	Full Clean	70	X	Guest18, Test	Owner-Self Rental GC8 Saturday		In House		Guest19, Test
+1220I	Full Clean	70	X	Guest20, Test	Owner-Points GC8 Saturday		In House		Guest2, Test
+1221A	Daily Service	35		Guest21, Test	Rental-Mktg		In House		
+1221B	Daily Service	20		Guest21, Test	Rental-Mktg		In House		
+1221D	Full Clean	120	X	Guest22, Test	Rental-Online Owner		In House		
+1222E	Full Clean	140	X	Guest23, Test	Owner-Float GC8 Saturday		In House		Guest24, Test
+1222F	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest24, Test
+1222G	Full Clean	70	X	Guest23, Test	Owner-Float GC8 Saturday		In House		Guest25, Test
+1222H	Full Clean	70		Guest26, Test	Owner-Points GC8 Saturday		In House		Guest27, Test
+1223A	Full Clean	120		Guest28, Test	Exchange-Exchange GC8		In House		Guest29, Test
+1223B	Full Clean	70		Guest28, Test	Exchange-Exchange GC8		In House		Guest29, Test
+1223C	Full Clean	70	X	Guest30, Test	Owner-Float GC8 Saturday		In House		Guest31, Test
+1223D	Full Clean	120		Guest30, Test	Exchange-Exchange GC8		In House		Guest32, Test
+1224E	Full Clean	140	X	Guest33, Test	Rental-Comp		In House		Guest10, Test
+1224F	Full Clean	70		Guest34, Test	Rental-Online Owner		Pending		Guest35, Test
+1224G	Full Clean	70		Guest36, Test	Rental-Non-Owner		In House		Guest37, Test
+1224H	Daily Service	20		Guest38, Test	Rental-Mktg		In House		
+1226A	Full Clean	120	X	Guest39, Test	Owner-Float GC8 Saturday		In House		Guest40, Test
+1226B	Daily Service	20		Guest41, Test	Rental-Mktg		In House		
+1320G	Full Clean	70		Guest42, Test	Owner-Float GC8 Saturday		In House		Guest43, Test
+1320H	Daily Service	20		Guest44, Test	Rental-Mktg		In House		
+1320I	Daily Service	20		Room, Walk	Rental-Mktg		Pending		
+1321A	Full Clean	120		Guest45, Test	Rental-Online Owner		In House		Guest46, Test
+1321B	Full Clean	70		Guest45, Test	Rental-Online Owner		In House		Guest47, Test
+1321C	Full Clean	70		Guest45, Test	Rental-Online Owner		In House		Guest48, Test
+1321D	Full Clean (IH)	120		Guest49, Test	Owner-Float GC8 Saturday		Pending		Guest49, Test
+1322E	Dust n Vac			Unallocated	---		Pending		Guest50, Test
+1322F	Full Clean	70		Guest51, Test	Rental-Comp		In House		Guest50, Test
+1322G	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest52, Test
+1322H	Full Clean	70		Guest53, Test	Hold-COD		Pending		Guest54, Test
+1323A	Full Clean	120		Guest55, Test	Exchange-Exchange GC8		In House		Guest56, Test
+1323B	Full Clean	70		Guest55, Test	Exchange-Exchange GC8		In House		Guest56, Test
+1323C	Daily Service	20		Guest57, Test	Rental-Mktg		In House		
+1323D	Full Clean	120		Guest58, Test	Owner-Float GC8 Saturday		In House		Guest59, Test
+1324E	Full Clean	140		Guest24, Test	Rental-Online Owner		In House		Guest60, Test
+1324G	Full Clean	70		Guest61, Test	Owner-Float GC8 Saturday		In House		Guest53, Test
+1324H	Full Clean (IH)	70		Deposit, Deposit	Exchange-Exchange GC8		Pending		Deposit, Deposit
+1326A	Full Clean	120		Guest62, Test	Exchange-Exchange GC8		In House		Guest63, Test
+1326B	Dust n Vac			Guest64, Test	Exchange-Exchange GC8		Pending		Guest63, Test
+1420A	Full Clean	120		Guest65, Test	Exchange-Exchange GC8		In House		Guest66, Test
+1420B	Full Clean	70		Guest65, Test	Exchange-Exchange GC8		In House		Guest66, Test
+1421A	Full Clean	120		Guest67, Test	Owner-Float GC8 Saturday		In House		Guest68, Test
+1421B	Dust n Vac			Guest64, Test	Exchange-Exchange GC8		Pending		Guest69, Test
+1421C	Daily Service	20		Guest70, Test	Rental-Mktg		In House		
+1423A	Full Clean (IH)	120		Guest71, Test	Exchange-Exchange GC8		In House		Guest71, Test
+1423B	Dust n Vac			Guest64, Test	Exchange-Exchange GC8		Pending		Guest72, Test
+1423C	Dust n Vac			Guest64, Test	Exchange-Exchange GC8		Pending		Guest73, Test
+1423D	Full Clean	120		Guest74, Test	Exchange-Exchange GC8		In House		Guest73, Test
+1424E	Full Clean	140		Guest75, Test	Exchange-Exchange GC8		In House		Guest76, Test
+1424F	Full Clean	70		Guest77, Test	Rental-Owner		In House		Guest78, Test
+1424H	Full Clean	70		Guest79, Test	Owner-Points GC8 Saturday		In House		Deposit, Deposit
+1426A	Full Clean	120		Guest80, Test	Exchange-Exchange GC8		In House		Guest81, Test
+1523A	Full Clean			Unallocated	---		Pending		Guest82, Test
+1523B	Full Clean			Unallocated	---		Pending		Guest82, Test
+1524E	Full Clean			Unallocated	---		Pending		Guest83, Test
+1524F	Full Clean			Unallocated	---		Pending		Guest53, Test
+1524G	Full Clean			Unallocated	---		Pending		Guest83, Test
+1524H	Full Clean			Unallocated	---		Pending		Deposit, Deposit
+2132E	Full Clean	140		Guest84, Test	Owner-Float GC8 Saturday		In House		Guest85, Test
+2132F	Full Clean	70		Guest84, Test	Owner-Float GC8 Saturday		In House		Guest86, Test
+2132G	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest85, Test
+2132H	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest85, Test
+2134A	Full Clean	120	X	Guest87, Test	Owner-Float GC8 Saturday		In House		Guest88, Test
+2134B	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest89, Test
+2136E	Daily Service	40	X	Guest90, Test	Rental-Mktg		In House		
+2136G	Daily Service	20	X	Guest91, Test	Rental-Mktg		In House		
+2136H	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest85, Test
+2136I	Daily Service	20	X	Guest92, Test	Rental-Mktg		In House		
+2232E	Full Clean	140	X	Guest93, Test	Rental-Mktg		In House		Guest94, Test
+2232F	Full Clean	70		Guest95, Test	Rental-OTA		In House		Deposit, Deposit
+2232H	Daily Service	20	X	Guest96, Test	Rental-Mktg		Pending		
+2233A	Daily Service	35	X	Guest97, Test	Rental-Mktg		In House		
+2233C	Daily Service	20		Guest98, Test	Exchange-Exchange GC8		In House		
+2233D	Full Clean	120		Guest99, Test	Rental-Owner		In House		Guest100, Test
+2234A	Full Clean	120		Guest101, Test	Owner-Float GC8 Saturday		In House		Guest102, Test
+2234B	Full Clean	70		Guest103, Test	Rental-Owner		In House		
+2235A	Full Clean	120		Guest104, Test	Exchange-Exchange GC8		In House		Guest105, Test
+2235B	Full Clean	70		Guest104, Test	Exchange-Exchange GC8		In House		Guest106, Test
+2236E	Full Clean	140		Guest107, Test	Owner-Points GC8 Saturday		In House		Guest108, Test
+2236G	Full Clean	70		Guest107, Test	Owner-Points GC8 Saturday		In House		Guest109, Test
+2236H	Full Clean	70		Guest107, Test	Owner-Points GC8 Saturday		In House		Guest110, Test
+2236I	Full Clean	70	X	Guest111, Test	Owner-Points GC8 Saturday		In House		Guest112, Test
+2331A	Full Clean (IH)	120		Guest113, Test	Exchange-Exchange GC8		In House		Guest113, Test
+2331B	Full Clean	70		Guest113, Test	Exchange-Exchange GC8		In House		Deposit, Deposit
+2332E	Full Clean	140		Guest114, Test	Owner-Float GC8 Saturday		In House		Guest115, Test
+2332F	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest115, Test
+2332G	Full Clean	70		Guest114, Test	Owner-Float GC8 Saturday		In House		Guest115, Test
+2332H	Full Clean	70		Guest116, Test	Owner-Float GC8 Saturday		In House		Guest115, Test
+2333A	Full Clean	120		Guest117, Test	Owner-Points GC8 Saturday		In House		Guest75, Test
+2333B	Full Clean	70		Guest117, Test	Owner-Points GC8 Saturday		In House		Deposit, Deposit
+2333C	Full Clean	70		Guest117, Test	Owner-Points GC8 Saturday		In House		Deposit, Deposit
+2333D	Full Clean	120		Guest118, Test	Exchange-Exchange GC8		In House		Guest119, Test
+2335A	Full Clean	120		Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest53, Test
+2335B	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest120, Test
+2336E	Full Clean	140		Guest121, Test	Owner-Float GC8 Saturday		In House		Guest122, Test
+2336G	Full Clean	70		Guest121, Test	Owner-Float GC8 Saturday		In House		Guest123, Test
+2336H	Daily Service	20		Guest124, Test	Rental-Mktg		In House		
+2336I	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest125, Test
+2431A	Full Clean	120		Guest126, Test	Exchange-Exchange GC8		In House		Guest127, Test
+2431B	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest127, Test
+2433A	Full Clean	120		Guest128, Test	Exchange-Exchange GC8		In House		Guest129, Test
+2433B	Full Clean	70		Guest130, Test	Rental-Online Owner		In House		Guest129, Test
+2433C	Full Clean	70		Guest131, Test	Rental-Non-Owner		In House		Guest132, Test
+2433D	Full Clean	120		Guest131, Test	Rental-Non-Owner		In House		Guest133, Test
+2434A	Full Clean	120		Guest134, Test	Rental-Non-Owner		In House		Guest135, Test
+2434B	Dust n Vac			Deposit, Deposit	Exchange-Exchange GC8		Pending		Guest135, Test
+2435A	Full Clean	120		Guest136, Test	Owner-Points GC8 Saturday		In House		Guest137, Test
+2435B	Full Clean	70		Guest136, Test	Owner-Points GC8 Saturday		In House		Deposit, Deposit
+3010C	Daily Service	20		Guest138, Test	Rental-Non-Owner		In House		
+3010D	Daily Service	35		Guest138, Test	Rental-Non-Owner		In House		
+3017A	Daily Service	35		Guest139, Test	Rental-Mktg		In House		
+3020C	Daily Service	20		Guest140, Test	Rental-Mktg		In House		
+3021B	Daily Service	20		Guest141, Test	Rental-Mktg		In House		
+3029E	Daily Service	40		Guest142, Test	Rental-Mktg		In House		
+3029G	Daily Service	20		Guest143, Test	Rental-Mktg		In House		
+3031H	Daily Service	20		Guest144, Test	Rental-Online Owner		In House		
+3149E	Full Clean	140	X	Guest145, Test	Owner-Float GC8 Sunday		In House		Guest146, Test
+3149F	Full Clean	70	X	Guest145, Test	Owner-Float GC8 Sunday		In House		Guest147, Test
+3342A	Daily Service	35		Guest148, Test	Rental-Mktg		In House		
+3346H	Daily Service	20		Guest98, Test	Exchange-Exchange GC8		In House		
+3346I	Daily Service	20	X	Guest149, Test	Rental-Mktg		In House		
+3349E	Dust n Vac			Unallocated	---		Pending		Guest150, Test
+3349G	Full Clean (IH)	70		Guest151, Test	Rental-Owner		In House		Guest151, Test
+3349H	Daily Service	20		Guest152, Test	Rental-Mktg		Pending		
+3351E	Daily Service	40		Guest153, Test	Rental-Online Owner		In House		
+3351F	Daily Service	20		Guest153, Test	Rental-Online Owner		In House		
+3351G	Daily Service	20		Guest154, Test	Rental-Mktg		In House		

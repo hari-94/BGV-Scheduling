@@ -110,6 +110,22 @@ def problems(cfg) -> list:
                        "Forward the front desk's e-mail to yourself with 'Arrival' in the subject, "
                        "then rebuild today from the HotSOS page if you need its late checkouts.")
 
+    # today's charts against the hard rules (schedule_audit) -- the 5 AM build
+    # and everything that changed them since: the sheet, HotSOS, hand edits.
+    # Every rule in it was broken unnoticed until someone read the evening
+    # card (7-8 Nov); this says so within ten minutes instead.
+    if (now.hour, now.minute) >= (5, 25) and now.hour < 20:
+        try:
+            import schedule_audit as sa
+            sched = db.load_full_schedule() or {}
+            found = sa.rules(sa.check(sched.get("groups_data") or [], day=today))
+            for f in found[:8]:
+                out.append(f"Today's charts break a rule: {f['msg'][:150]}")
+            if len(found) > 8:
+                out.append(f"Today's charts break {len(found) - 8} more rule(s) -- open the Schedule page.")
+        except Exception as ex:
+            out.append(f"The rule check on today's charts failed: {type(ex).__name__}: {str(ex)[:100]}")
+
     # the next Arrival Report, from 21:30 until the 5 AM build reads it. Until
     # 4 Nov this stopped at midnight; that night's report was sent at 21:55 to
     # *GC8 FrontDesk instead of *GC8OPS, the flow never saw it, and the last
