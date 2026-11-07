@@ -3101,34 +3101,84 @@ def _ds_fill(rooms, cap):
         loc = pmap.parse(str(r.get("room", "")).strip().upper())
         return (_bld(r), loc.level if loc else _flr(r))
 
-    m = cp_model.CpModel()
-    x = [[m.NewBoolVar(f"x{i}_{k}") for k in range(n)] for i in range(len(walk))]
-    for i in range(len(walk)):
-        m.AddExactlyOne(x[i])
-    load = [sum(mins[i] * x[i][k] for i in range(len(walk))) for k in range(n)]
-    for k in range(n):
-        m.Add(load[k] <= cap)
-    for k in range(n - 1):
-        m.Add(load[k] >= load[k + 1])            # fullest first
-    m.Add(x[0][0] == 1)                          # symmetry: the walk starts round 1
-    cost = [DS_W_FILL * (cap * (n - 1) - sum(load[:-1]))]
-    for key_of, w in ((_bld, DS_W_BLD), (level, DS_W_LEVEL)):
-        for v in {key_of(r) for r in walk}:
-            members = [i for i, r in enumerate(walk) if key_of(r) == v]
+    def solve(no23):
+        m = cp_model.CpModel()
+        x = [[m.NewBoolVar(f"x{i}_{k}") for k in range(n)] for i in range(len(walk))]
+        for i in range(len(walk)):
+            m.AddExactlyOne(x[i])
+        load = [sum(mins[i] * x[i][k] for i in range(len(walk))) for k in range(n)]
+        for k in range(n):
+            m.Add(load[k] <= cap)
+        for k in range(n - 1):
+            m.Add(load[k] >= load[k + 1])            # fullest first
+        # (There was also "the walk's first room is in round 1". With fullest-
+        # first that is two orderings at once, and it ruled out real layouts:
+        # 7 Nov, building 3 alone (455) as one round and 1+2 (470) as the
+        # other was illegal because the building-3 round is the lighter one.)
+        # Buildings 2 and 3 have no bridge: a round in both walks the whole of
+        # building 1 between them. Filling outranks walking, so without this
+        # 7 Nov filled Santos to the cap and handed Ana building 3's last five
+        # rooms beside her building 2 (HP: "cross between building 3 and 2").
+        if no23:
+            in2 = [i for i, r in enumerate(walk) if _bld(r) == 2]
+            in3 = [i for i, r in enumerate(walk) if _bld(r) == 3]
             for k in range(n):
-                y = m.NewBoolVar("")
-                for i in members:
-                    m.AddImplication(x[i][k], y)
-                cost.append(w * y)
-    m.Minimize(sum(cost))
-    sv = cp_model.CpSolver()
-    sv.parameters.num_workers = 8
-    sv.parameters.max_deterministic_time = 8
-    sv.parameters.max_time_in_seconds = 20
-    if sv.Solve(m) not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return None
-    charts = [[r for i, r in enumerate(walk) if sv.Value(x[i][k])] for k in range(n)]
-    return [c for c in charts if c]
+                h2, h3 = m.NewBoolVar(""), m.NewBoolVar("")
+                for i in in2:
+                    m.AddImplication(x[i][k], h2)
+                for i in in3:
+                    m.AddImplication(x[i][k], h3)
+                m.Add(h2 + h3 <= 1)
+        touch = {}
+        for key_of in (_bld, level):
+            for v in {key_of(r) for r in walk}:
+                members = [i for i, r in enumerate(walk) if key_of(r) == v]
+                for k in range(n):
+                    y = m.NewBoolVar("")
+                    for i in members:
+                        m.AddImplication(x[i][k], y)
+                    touch.setdefault(key_of, []).append(y)
+        sv = cp_model.CpSolver()
+        sv.parameters.num_workers = 8
+        sv.parameters.max_deterministic_time = 8
+        sv.parameters.max_time_in_seconds = 20
+
+        def run(objective):
+            m.Minimize(objective)
+            if sv.Solve(m) not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                return None
+            m.ClearHints()
+            for row in x:
+                for v in row:
+                    m.AddHint(v, sv.Value(v))
+            return int(round(sv.ObjectiveValue()))
+
+        # The headcount is already the fewest (n). Within it, the fewest
+        # buildings per round first, then fullest-first and fewest levels.
+        # Filling outranked walking (21 Oct, against a sixth person with 55
+        # minutes) -- but n is fixed by then, so filling round 1 to the brim
+        # buys no one and only walked people into a second building: 7 Nov
+        # filled Santos to 510 with building 3 and part of building 1, where
+        # building 3 alone (385+) was his and buildings 1+2 hers (HP).
+        blds = run(sum(touch[_bld]))
+        if blds is None:
+            return None
+        m.Add(sum(touch[_bld]) <= blds)
+        if run(DS_W_FILL * (cap * (n - 1) - sum(load[:-1]))
+               + DS_W_LEVEL * sum(touch[level])) is None:
+            return None
+        charts = [[r for i, r in enumerate(walk) if sv.Value(x[i][k])] for k in range(n)]
+        return [c for c in charts if c]
+
+    # The headcount comes first: if keeping 2 and 3 apart would need another
+    # person, the rounds go out as before rather than cost a shift.
+    has23 = any(_bld(r) == 2 for r in walk) and any(_bld(r) == 3 for r in walk)
+    got = solve(True) if has23 else None
+    if got is None:
+        if has23:
+            print("[ds] buildings 2 and 3 can't be kept apart at %d rounds" % n)
+        got = solve(False)
+    return got
 
 
 def _ds_by_building(rooms, cap):
@@ -4389,10 +4439,29 @@ def fill_from_unstaffed(groups, roster):
                 best = d if best is None else min(best, d)
         return best or 0
 
+    def others(g):
+        """The person's other charts that day (a Daily Service round, say)."""
+        p = g.get("housekeeper")
+        return [x for x in groups if x is not g and x.get("housekeeper") == p
+                and not x.get("verify_group") and not x.get("dv_rqs2")]
+
+    def room_for(g):
+        """What the person -- not just this chart -- can still take. A Daily
+        Service housekeeper's Full Clean side chart (ds_take_open) counts
+        against her Daily Service cap: filling it to MAX_FC as if it were a
+        whole day put Darling at 325 + 380 = 705 minutes on 8 Nov."""
+        rest = others(g)
+        if not rest:
+            return MAX_FC - g["time"]
+        day = g["time"] + sum(int(x.get("time") or 0) for x in rest)
+        cap = ((DS_CAP_WEEKEND if _sched_weekend() else DS_CAP)
+               if any(x.get("service_type") == SVC_DS for x in rest) else MAX_FC)
+        return min(MAX_FC - g["time"], cap - day)
+
     MAX_UNITS = 5                               # 5 x 70 is the most a chart holds
     NEAREST = 12                                # search the 12 closest units only
     for g in sorted(staffed, key=lambda g: g["time"]):
-        room = MAX_FC - g["time"]
+        room = room_for(g)
         if room < 70 or not pool:
             continue
         home = roster.get(g["housekeeper"], {}).get("building", 0)
@@ -4412,7 +4481,7 @@ def fill_from_unstaffed(groups, roster):
             for combo in itertools.combinations(cands, k):
                 add = [r for _, u in combo for r in u]
                 t = g["time"] + sum(r["time"] for r in add)
-                if t > MAX_FC:
+                if t > MAX_FC or t - g["time"] > room:
                     continue
                 rooms = g["rooms"] + add
                 if not fcpack.legal_rooms(rooms, blds(rooms), MAX_FC):
@@ -4433,9 +4502,12 @@ def fill_from_unstaffed(groups, roster):
     # the staffed charts to put each back on fewer floors: _fc_tighten never
     # gives a chart a building it did not have, so nobody's home-building rule
     # changes, and it never makes anybody short.
-    tight = _fc_tighten([g["rooms"] for g in staffed])
-    if len(tight) == len(staffed):
-        for g, rooms in zip(staffed, tight):
+    # Only charts that are somebody's whole day trade: a trade can move minutes
+    # onto a chart, and a side chart's owner has a Daily Service round as well.
+    solo = [g for g in staffed if not others(g)]
+    tight = _fc_tighten([g["rooms"] for g in solo])
+    if len(tight) == len(solo):
+        for g, rooms in zip(solo, tight):
             g.update(mk(rooms, SVC_FC))
             g["cross_bld"] = len(g["blds"]) > 1
 
