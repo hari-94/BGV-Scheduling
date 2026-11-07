@@ -366,9 +366,13 @@ def preview_card(day, groups, extra):
             for t, w in zip(cells, widths)]}
 
     order = {"Full Clean": 0, "Full Clean (IH)": 1, "Daily Service": 2, "Dust n Vac": 3}
+    # Each RQS's round together, its charts in walking order (FC-A, FC-B ...,
+    # FC-AA after FC-Z). Sorting on the housekeeper's name scattered every
+    # round down the card (HP, 7 Nov).
     real = sorted((g for g in groups if g.get("rooms") and not g.get("verify_group")),
                   key=lambda g: (order.get(g.get("service_type"), 9),
-                                 str(g.get("housekeeper") or "~"), g.get("label", "")))
+                                 str(g.get("inspector") or "~"),
+                                 len(str(g.get("label", ""))), str(g.get("label", ""))))
     checks = [g for g in groups if g.get("verify_group") and g.get("rooms")]
     n_rooms = sum(len(g.get("rooms") or []) for g in real)
     people = {g.get("housekeeper") for g in real if g.get("housekeeper")
@@ -382,13 +386,18 @@ def preview_card(day, groups, extra):
                      "Built tonight from the forecast's room list; the 5 AM build uses the "
                      "morning's and may differ."},
             row(["Housekeeper", "Rooms", "Min", "RQS"], bold=True, sep=True)]
+    prev = None
     for g in real:
         hk = str(g.get("housekeeper") or "")
         if not hk or hk.startswith(("Need", "No HK")):
             hk = "⚠ nobody" if not g.get("dv_rqs2") else "RQS 2 round"
         rooms = ", ".join(str(r.get("room", "")) for r in g.get("rooms") or [])
-        body.append(row([hk, f"{_SVC_SHORT.get(g.get('service_type'), '')} · {rooms}",
-                         str(mins(g)) if mins(g) else "—", str(g.get("inspector") or "—")]))
+        here = (g.get("service_type"), g.get("inspector"))
+        tag = g.get("label") or _SVC_SHORT.get(g.get("service_type"), "")
+        body.append(row([hk, f"{tag} · {rooms}",
+                         str(mins(g)) if mins(g) else "—", str(g.get("inspector") or "—")],
+                        sep=prev is not None and here != prev))
+        prev = here
     if checks:
         extra = dict(extra)
         extra.setdefault("Not on a chart", []).append(
