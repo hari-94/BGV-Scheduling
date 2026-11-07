@@ -316,6 +316,7 @@ def restore(token: str = None) -> bool:
     _set_url_token(token)       # keep it in the URL for the next refresh
     st.session_state["_session_renewed"] = True
     _dbg(restored=True)
+    st.session_state["_restored_now"] = True    # the entry page sends them home
     return True
 
 

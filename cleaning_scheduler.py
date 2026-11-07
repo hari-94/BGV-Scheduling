@@ -1372,6 +1372,12 @@ _init_state()
 import session as _session_mod                 # so fresh.latest can find it
 fresh.latest("session", "auth")                # sign-in code as it is on disk (fresh.py)
 auth.init_auth()
+# Signed back in from a saved session on the entry page (a refresh, a
+# shortcut, Android reopening the tab): go home, as a fresh sign-in does,
+# rather than to the Schedule (HP, 7 Nov). Not with ?authdebug=1.
+if (st.session_state.pop("_restored_now", False) and st.session_state.get("logged_in")
+        and st.query_params.get("authdebug") != "1"):
+    st.switch_page("pages/4_My_Home.py")
 # Reachable from any phone at ?authdebug=1 -- shows whether the browser's
 # session cookie reached the server and what restore() made of it. Names and
 # booleans only, never the token. Gated, so normal visitors never see it.

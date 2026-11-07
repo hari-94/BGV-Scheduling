@@ -147,6 +147,9 @@ def require_login():
     of it.
     """
     init_auth()
+    # Restored on an inner page: they stay there. Only the entry page sends a
+    # restored sign-in home, and this must not bounce a later visit to it.
+    st.session_state.pop("_restored_now", None)
     if st.session_state.get("logged_in"):
         return
     try:
