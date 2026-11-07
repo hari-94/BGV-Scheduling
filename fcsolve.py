@@ -8,12 +8,14 @@ heuristic used 894 housekeeper-days where 875 was provably enough under the
 very same rules, and was 1-2 people over on 14 of the 30.
 
 This states the problem to a constraint solver (OR-Tools CP-SAT) and asks for
-the answer, in three steps, each holding the one before it fixed:
+the answer, in four steps, each holding the ones before it fixed:
 
   1. the fewest charts -- a chart is a shift;
   2. at that count, the fewest charts under LOW_MIN -- a short chart is
      somebody sent home at two o'clock;
-  3. at both, the nearest-together day: fewest levels spanned, fewest floors
+  3. at both, the fewest buildings per chart -- when several buildings are
+     handed over together, only the leftovers that saved a person cross;
+  4. at all three, the nearest-together day: fewest levels spanned, fewest floors
      touched, the least corridor walked on a floor, and a short chart that is
      left anyway topped up as far as nearby rooms allow.
 
@@ -46,8 +48,11 @@ W_DEFICIT = 1        # per minute a short chart sits under LOW_MIN
 # runs to its limit. Where steps 1-2 kept the heuristic's count it has little
 # left to find by 2.5; where they saved a person the layout can still be
 # scattered, which is why the caller polishes with _fc_tighten afterwards.
-STEP_DET = (6.0, 6.0, 2.5)
-STEP_WALL = (4.0, 4.0, 3.5)
+# Step 3 (fewest crossings) gets the long limit: on a merged day it starts
+# from the layout that just saved a person, and 7 Nov needed ~12 to go from
+# 12 crossing charts to the 2 the leftovers actually require (6 left it at 12).
+STEP_DET = (6.0, 6.0, 12.0, 2.5)
+STEP_WALL = (4.0, 4.0, 15.0, 3.5)
 WORKERS = 4
 
 
@@ -218,11 +223,33 @@ def pack(rooms, cap, loc_of, low_min, hint=None):
             m.AddHint(v, sv.Value(v))
         return int(round(sv.ObjectiveValue()))
 
+    # A chart's buildings, for step 3. Priced only through levels, a crossing
+    # was left to the nearness step, which never proves and stops at its time
+    # limit; on a merged day it started from the layout that had just saved a
+    # person and stopped there. 7 Nov: buildings 1 and 2 merged to save one
+    # housekeeper and 12 of 24 charts crossed, where only the leftovers had to.
+    blds = sorted(set(B))
+    touch = []
+    if len(blds) > 1:
+        for j in range(K):
+            for b in blds:
+                hb = m.NewBoolVar("hb%d_%d" % (j, b))
+                for i in range(n):
+                    if B[i] == b:
+                        m.AddImplication(x[i, j], hb)
+                touch.append(hb)
+
     count = run(0, sum(y))
     m.Add(sum(y) <= count)
     shorts = run(1, sum(short))
     m.Add(sum(short) <= shorts)
-    run(2, sum(near) + W_DEFICIT * sum(deficit))
+    if touch:
+        # 3. at that count and short-count, the fewest buildings per chart --
+        #    i.e. the fewest charts that cross (HP, 7 Nov: "minimum travel and
+        #    max allocation for both RQS and housekeeper").
+        touched = run(2, sum(touch))
+        m.Add(sum(touch) <= touched)
+    run(3, sum(near) + W_DEFICIT * sum(deficit))
 
     charts = [[r for i in range(n) if sv.Value(x[i, j]) for r in buns[i].rooms]
               for j in range(K)]
