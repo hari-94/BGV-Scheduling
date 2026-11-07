@@ -146,6 +146,12 @@ def assignments(rows):
 
 def _who(room, assign):
     if room not in assign:
+        # A lock-off the plans know as one unit ("1222EF", 7 Nov) is on the
+        # sheet door by door: 1222E with one person, 1222F with another.
+        m = re.match(r'^([1-9]\d{3})([A-Z]{2,4})$', str(room))
+        doors = [m.group(1) + ch for ch in m.group(2)] if m else []
+        if doors and any(d in assign for d in doors):
+            return "; ".join(f"{d}: {_who(d, assign)}" for d in doors)
         return "not on today's sheet"
     h, r = assign[room]
     return f"HK {h or '—'} · RQS {r or '—'}"
