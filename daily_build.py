@@ -1132,7 +1132,11 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
     _gone, _kept = getattr(generate, "blocked", []), getattr(generate, "blocked_kept", [])
     if _gone:
         import blocked_rooms
-        note += f" · out of service, not on this sheet: {blocked_rooms.describe(_gone)}"
+        # Why and which doors, not just a count: the RQS reading the tab has
+        # to know which units to leave alone (HP, 7 Nov).
+        _why = "; ".join(dict.fromkeys(w for _, w in _gone if w))
+        note += (f" · out of service{f' ({_why})' if _why else ''}, not on this sheet: "
+                 f"{blocked_rooms.describe(_gone)}: {', '.join(r for r, _ in _gone)}")
     if _kept:
         note += " · blocked but a guest arrives, so on the sheet: " + ", ".join(r for r, _ in _kept)
     for _a, _b, _n in getattr(generate, "moved_insp", []):
