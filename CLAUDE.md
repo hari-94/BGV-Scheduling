@@ -848,6 +848,30 @@ half-translated to a Spanish-speaking team. The sheet's own words ("Daily
 service", "Building 2") and roster_import's task meanings are translated on
 the page, keyed by the English, so an older roster_import still gets them.
 
+**My Home and My Rooms were laid out again on 11 Nov** (HP: the app is the
+team's only place to see which days they work). My Home, in order: a Today
+card (keyed container `hmtoday`, so the My Rooms button sits inside it: the
+shift, the rooms, today's RQS 1 and 2 off the staff sheet, and Pico, a waving
+peak that is CSS on an inline SVG); the change notice, **shown once** -- it is
+marked seen as it is drawn, and "a new visit" is the full record's `mh_grain`
+radio having no state, since Streamlit drops widget state when another page is
+shown, so that radio must keep being drawn on every run; tomorrow and the next
+change; a calendar of every posted day over a day-by-day list from today; and
+the Work days counts (this week, next week, the month so far -- today counts as
+still to work). The counts are drawn twice, `hm-wide` in the left column and
+`hm-narrow` under the schedule, and CSS shows one. Three things to know before
+touching either page: **a markdown block eats the 15px gap under it**
+(Streamlit pulls its container up a rem), so every HTML card carries its own
+`margin-bottom:16px`; **a popover's button is named by
+`[data-testid="stPopoverButton"]`**, not `>div>button` -- Streamlit 1.62 nests
+it a level deeper, and My Rooms' status button had silently lost its styling;
+and the status button's key ends `_is-<status>`, which is how it takes the
+status's tint. On My Rooms, `_watch()` is called last so its line sits at the
+foot. **Opening My Home as a real account now uses up that person's change
+notice**: test with `db._upsert_key` stubbed (a throwaway entry script that
+sets the session and `st.switch_page`s, on another port, is the way to
+screenshot a page as somebody).
+
 **My Home finds a person by name, and a first name alone is not a person.**
 `roster_import.match_person` used to fall back to the first sheet row with the
 same first name: "Luis Rendon" got Luis Urbina's week, "David Galeano" David
