@@ -561,23 +561,37 @@ if _r1 or _r2:
         + "".join(f'<div><small>{e(k)}</small><b>{e(v)}</b></div>' for k, v in _cells)
         + f'</div><p>{e(T("home.rqs_ask"))}</p></div>', unsafe_allow_html=True)
 
-# 2. What changed on the sheet since this person last said "got it".
+# 2. What changed on the sheet for this person -- shown once (HP, 11 Nov). It
+# used to stay until "Got it" was pressed, and people who never pressed it saw
+# the same notice every time they opened the app. Now the notice is marked
+# seen the moment it is drawn. It stays through this visit's reruns (the week
+# switch, the language button) from a copy in the session, and is gone on the
+# next visit. A visit starts when the week switch has no state yet: Streamlit
+# drops a widget's state when another page is shown.
 _changed_days = set()
 if viewing_self:
     _seen_key = f"staffchg_seen_{me_user or me_display}"
-    try:
-        _log = (db._load_key("staff_changes") or {}).get("changes") or []
-        _seen_at = (db._load_key(_seen_key) or {}).get("at", "")
-    except Exception as _ex:
-        print(f"[my_home] change log: {_ex}")
-        _log, _seen_at = [], ""
-    _mine_chg = [c for c in _log
-                 if c.get("date", "") >= t_iso and str(c.get("at", "")) > _seen_at
-                 and ri.norm_name(str(c.get("name", "")).split(" · ")[0]) == _base(mine)]
-    # One line per day, the latest change to it.
-    _by_day = {}
-    for c in sorted(_mine_chg, key=lambda c: c["at"]):
-        _by_day[c["date"]] = c
+    if "hm_week" not in st.session_state or "hm_chg_shown" not in st.session_state:
+        try:
+            _log = (db._load_key("staff_changes") or {}).get("changes") or []
+            _seen_at = (db._load_key(_seen_key) or {}).get("at", "")
+        except Exception as _ex:
+            print(f"[my_home] change log: {_ex}")
+            _log, _seen_at = [], ""
+        _mine_chg = [c for c in _log
+                     if c.get("date", "") >= t_iso and str(c.get("at", "")) > _seen_at
+                     and ri.norm_name(str(c.get("name", "")).split(" · ")[0]) == _base(mine)]
+        # One line per day, the latest change to it.
+        _by_day = {}
+        for c in sorted(_mine_chg, key=lambda c: c["at"]):
+            _by_day[c["date"]] = c
+        st.session_state["hm_chg_shown"] = _by_day
+        if _by_day:
+            try:
+                db._upsert_key(_seen_key, {"at": max(c["at"] for c in _by_day.values())})
+            except Exception as _ex:
+                print(f"[my_home] could not store the read marker: {_ex}")
+    _by_day = st.session_state.get("hm_chg_shown") or {}
     if _by_day:
         _changed_days = set(_by_day)
 
@@ -592,15 +606,11 @@ if viewing_self:
                       for d, c in sorted(_by_day.items()))
             + '</div>', unsafe_allow_html=True)
 
-        def _got_it(at):
-            try:
-                db._upsert_key(_seen_key, {"at": at})
-            except Exception as ex:
-                print(f"[my_home] could not store the read marker: {ex}")
+        def _got_it():
+            st.session_state["hm_chg_shown"] = {}
 
         with st.container(key="hmgotit"):
-            st.button(T("home.got_it"), key="hm_gotit", on_click=_got_it,
-                      args=(max(c["at"] for c in _by_day.values()),))
+            st.button(T("home.got_it"), key="hm_gotit", on_click=_got_it)
 
 # 3. Tomorrow, and the next change of state: a day off if working, back on if not.
 _tom = today + datetime.timedelta(days=1)
