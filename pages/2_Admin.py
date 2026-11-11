@@ -8,6 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import db, auth
 import ui
 import fresh
+import account_links, staff_names
+fresh.latest("account_links")
 
 st.set_page_config(page_title="Admin · Cleaning Schedule", page_icon="GC8", layout="wide")
 
@@ -280,9 +282,36 @@ with tab_users:
         if del_clicked:
             ok, msg = db.delete_user(edit_user)
             if ok:
+                try:
+                    account_links.set_link(edit_user, "", cu["username"])
+                except Exception:
+                    pass
                 st.success(msg)
             else:
                 st.error(msg)
+
+        # Which row of the staff sheet this account is (account_links).
+        try:
+            _lk_people = list(account_links.sheet_people())
+            _lk_now = account_links.link_for(edit_user)
+        except Exception as _ex:
+            st.warning(f"Could not read the staff sheet: {_ex}")
+            _lk_people, _lk_now = [], ""
+        _lk_opts = [""] + sorted(set(_lk_people) | ({_lk_now} if _lk_now else set()), key=str.lower)
+        col_l, col_lb = st.columns([3, 1])
+        with col_l:
+            _lk_new = st.selectbox(
+                "Name on the staff schedule", _lk_opts, index=_lk_opts.index(_lk_now),
+                key=f"edit_link_sel_{edit_user}",
+                format_func=lambda n: n or "— not linked (guessed from the name) —")
+        with col_lb:
+            st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+            if st.button("Save Link", key="btn_save_link", use_container_width=True):
+                try:
+                    account_links.set_link(edit_user, _lk_new, cu["username"])
+                    st.success(f"{edit_user} → {_lk_new}" if _lk_new else f"{edit_user}: link removed.")
+                except Exception as _ex:
+                    st.error(str(_ex))
     else:
         st.info("No other users to edit.")
 
@@ -291,14 +320,44 @@ with tab_users:
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_create:
     st.markdown('<p class="sec">Create New User</p>', unsafe_allow_html=True)
+    # Who on the sheet has no account yet -- a new hire, usually by first name
+    # alone -- comes first in the picker, so the account is linked to its row
+    # as it is made and My Home / My Rooms never have to guess (11 Nov).
+    try:
+        _people = account_links.sheet_people()
+        _aliases = staff_names.aliases()
+        _open = account_links.unaccounted(db._client().table("app_users")
+                                          .select("username,display_name").execute().data,
+                                          _people, _aliases)
+    except Exception as _ex:
+        st.warning(f"Could not read the staff sheet: {_ex}")
+        _people, _open = {}, []
+    _open_names = [n for n, _ in _open]
+    _pick = [""] + _open_names + [n for n in _people if n not in _open_names]
+    if _open:
+        with st.expander(f"On the staff sheet with no account ({len(_open)})", expanded=False):
+            st.caption("From last week's sheet onward, nobody linked or matched to them. "
+                       "Managers, sales and the ice rink are on the sheet too -- not "
+                       "everyone here needs an account.")
+            st.markdown("\n".join(f"- **{_html.escape(n)}** · {_html.escape(s)}" for n, s in _open))
+
     with st.form("create_user_form"):
         c1, c2 = st.columns(2)
         with c1:
-            new_uname = st.text_input("Username")
+            new_uname = st.text_input("Username", help="Their work e-mail, e.g. krafael@grandtimber.com")
+            new_disp  = st.text_input("Display name", help="What the app greets them by. "
+                                      "Leave empty to use the schedule name.")
             new_role  = st.selectbox("Role", db.ROLES)
         with c2:
             new_pw    = st.text_input("Password", type="password")
             new_pw2   = st.text_input("Confirm Password", type="password")
+            new_link  = st.selectbox(
+                "Their name on the staff schedule", _pick,
+                format_func=lambda n: "— not on the schedule —" if not n else
+                (f"{n} · {_people.get(n, '')} · no account yet" if n in _open_names
+                 else f"{n} · {_people.get(n, '')}"),
+                help="Links the account to their row on the weekly staff sheet, so My Home "
+                     "shows their week and My Rooms their rooms.")
         submitted = st.form_submit_button("Create User", type="primary")
         if submitted:
             if new_pw != new_pw2:
@@ -307,6 +366,16 @@ with tab_create:
                 st.error("Password must be at least 6 characters.")
             else:
                 ok, msg = db.create_user(new_uname, new_pw, new_role)
+                if ok:
+                    try:
+                        _disp = new_disp.strip() or new_link
+                        if _disp:
+                            account_links.set_display_name(new_uname, _disp)
+                        if new_link:
+                            account_links.set_link(new_uname, new_link, cu["username"])
+                            msg += f" Linked to “{new_link}” on the schedule."
+                    except Exception as _ex:
+                        st.warning(f"Account made, but the link was not saved: {_ex}")
                 st.success(msg) if ok else st.error(msg)
 
     st.markdown("""

@@ -45,6 +45,7 @@ several of them read the *real* schedule to test against a real day.
 | `auth.py` | 155 | roles and permissions |
 | `roomstatus.py` | 105 | the one vocabulary for a room's state |
 | `assignments.py` | 92 | who is on which rooms today (shared by the page and the nav) |
+| `account_links.py` | 120 | which staff-sheet row an account is (`account_links` in app_settings): picked on Admin's Create User / Edit User, tried by My Home and My Rooms before any guess from the sign-in -- no Streamlit |
 | `pages/6_Property.py` | 300 | the property in 3-D, coloured by status — admin and RQS only |
 | `pages/11_Report.py` | 720 | rooms inspected and cleaned per person, beside their schedule days — managers only; its tables are drawn by `report_table.py` (a static component in `components/report_table/`: click a column name to sort) |
 | `report_data.py` | 870 | reads every GC8 Inspections day tab (office PC, 4 PM), matches typed names to people, counts — no Streamlit |
@@ -88,7 +89,7 @@ models, no-guest rooms — deliberately unassigned).
 `app_settings` — a TEXT key plus JSONB payload used for everything that has no table
 of its own: `roster`, `staffsched_*`, `lang_<user>`, `session_<hash>`,
 `noteseen_<user>`; for the Report, `report_sync`, `report_days_<YYYY-MM>`,
-`report_names` (its name fixes) and `staff_left` (people who no longer work here). The managers' answers to the Questions page are `mq_<username>`, one row each; a question's `key` in `manager_questions.py` never changes, since answers are stored under it.
+`report_names` (its name fixes) and `staff_left` (people who no longer work here). `account_links` is each account's row on the staff sheet, set on the Admin page. The managers' answers to the Questions page are `mq_<username>`, one row each; a question's `key` in `manager_questions.py` never changes, since answers are stored under it.
 
 `room_status` columns, and there are no others: `date, room, status, group_label,
 housekeeper, inspector, started_at, cleaned_at, inspected_at, marked_clean_at, notes,

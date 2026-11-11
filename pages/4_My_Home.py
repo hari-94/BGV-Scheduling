@@ -239,6 +239,14 @@ try:
                            aliases=_aliases)
 except TypeError:
     mine = ri.match_person(index, *[n for n in (_full, me_display) if n], me_user)
+# An admin's link from account to sheet row beats any guess: a new hire is a
+# first name on the sheet ("Janelly") and krafael@ is the sheet's "Enrique".
+try:
+    import account_links
+    fresh.latest("account_links")
+    mine = account_links.find_pid(index, account_links.link_for(me_user), _aliases) or mine
+except Exception as _ex:
+    print(f"[my_home] account link: {_ex}")
 # Only admins look up other people. RQS and housekeepers see themselves —
 # this page is personal, and the roster pages already cover the whole team.
 can_browse = auth.can("can_manage_users")
@@ -424,6 +432,13 @@ st.markdown("""<style>
   padding:12px 14px;margin-top:14px;color:#191c20}
 .hm-rooms b{display:block;font-size:1rem;font-weight:500}
 .hm-rooms span{display:block;font-size:.82rem;color:#43474e}
+.hm-rqs{background:#e0f4ef;border-radius:20px;padding:14px 18px;margin:8px 0 4px;color:#00382d}
+.hm-rqs .hm-over{color:#00513f}
+.hm-rqs-row{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px}
+.hm-rqs-row div{background:#fff;border-radius:12px;padding:8px 12px;flex:1 1 180px}
+.hm-rqs-row small{display:block;font-size:.72rem;font-weight:600;letter-spacing:.06em;color:#00513f}
+.hm-rqs-row b{display:block;font-size:1.02rem;font-weight:500;color:#191c20}
+.hm-rqs p{font-size:.82rem;margin:8px 0 0;color:#2b4a42}
 .st-key-hmrooms [data-testid="stPageLink"],.st-key-hmrooms [data-testid="stPageLink"] a{
   width:100% !important;max-width:none !important}
 .st-key-hmrooms [data-testid="stPageLink"] a{background:#005ac1 !important;border-radius:16px !important;
@@ -510,6 +525,35 @@ if _rt and viewing_self:
     with st.container(key="hmrooms"):
         st.page_link("pages/5_My_Rooms.py", label=T("home.open_rooms"), icon=":material/bed:",
                      width="stretch")
+
+
+# 1b. Who is RQS 1 and RQS 2 today, for everyone (HP, 11 Nov): a housekeeper or
+# houseperson who needs help on the floor knows whom to ask. Read off the staff
+# sheet with the in-app edits, the same way the Schedule page fills its RQS
+# 1 / RQS 2 boxes ("RQS 1 + RQS 2" is one person doing both).
+@st.cache_data(ttl=300, show_spinner=False)
+def _rqs_today(iso, _token):
+    wk = ri.find_week_key(db.staff_week_keys(), iso)
+    if not wk:
+        return "", ""
+    upd = ri.day_roster(db.load_staff_week(wk), db.load_staff_overrides(), wk, iso)
+    return (upd["rqs1"] or "", upd["rqs2"] or "") if upd else ("", "")
+
+
+try:
+    _r1, _r2 = _rqs_today(t_iso, f'{meta.get("uploaded_at", "")}|{len(overrides)}')
+except Exception as _ex:
+    print(f"[my_home] rqs today: {_ex}")
+    _r1 = _r2 = ""
+if _r1 or _r2:
+    _none = T("home.rqs_none")
+    _cells = ([(T("home.rqs_both"), _r1)] if _r1 == _r2 else
+              [("RQS 1", _r1 or _none), ("RQS 2", _r2 or _none)])
+    st.markdown(
+        f'<div class="hm-rqs"><span class="hm-over">{e(T("home.rqs_title"))}</span>'
+        '<div class="hm-rqs-row">'
+        + "".join(f'<div><small>{e(k)}</small><b>{e(v)}</b></div>' for k, v in _cells)
+        + f'</div><p>{e(T("home.rqs_ask"))}</p></div>', unsafe_allow_html=True)
 
 # 2. What changed on the sheet since this person last said "got it".
 _changed_days = set()

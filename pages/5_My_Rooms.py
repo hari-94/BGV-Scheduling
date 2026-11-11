@@ -464,9 +464,18 @@ if not charts:
 
 hk_names = assignments.housekeepers(charts)
 
-# Sign-in names rarely match the schedule exactly, so try the display name and
-# then the username.
-mine = assignments.match_name(hk_names, me_display, me_user)
+# Sign-in names rarely match the schedule exactly, so try the admin's link to
+# the sheet first (account_links), then the display name and the username.
+# The charts carry the name directory's full name, so the link goes through it.
+try:
+    import account_links, staff_names
+    fresh.latest("account_links")
+    _link = account_links.link_for(me_user)
+    _link = staff_names.full(_link) if _link else ""
+except Exception as _ex:
+    print(f"[my_rooms] account link: {_ex}")
+    _link = ""
+mine = assignments.match_name(hk_names, *[n for n in (_link, me_display) if n], me_user)
 
 # ── carpet and stripping: the housepersons' own rooms (duties) ───────────────
 # A houseperson on carpets or stripping is on no chart, and the housekeeper
@@ -490,7 +499,8 @@ def _housepersons(day_iso):
 
 
 _drooms = _duty_rooms(_dday, st.session_state.get("duty_tick", 0))
-_dme = assignments.match_name(_duties.people(_drooms), me_display, me_user) if _drooms else None
+_dme = (assignments.match_name(_duties.people(_drooms), *[n for n in (_link, me_display) if n],
+                               me_user) if _drooms else None)
 
 
 def _duty_label(duty):
