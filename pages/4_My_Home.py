@@ -330,6 +330,12 @@ _SHIFT_T = {"Daily Service": T("home.kind_daily"), "Room cover": T("home.shift_c
             "Other duty": T("home.kind_other"), "Regular": T("home.shift_regular")}
 
 
+def _es_time(txt):
+    """Spanish says "a la 1:15" but "a las 2:15"; the phrases are written
+    with "las", so one o'clock is put right here."""
+    return re.sub(r"las (1:\d\d)", r"la ", txt) if _ES else txt
+
+
 def _day_name(d):
     """'Wed, Nov 4' / 'mié 4 nov'."""
     return (f"{_DOW[d.weekday()]} {d.day} {_MON[d.month - 1]}" if _ES
@@ -356,9 +362,31 @@ _LEGEND_ES = {
 #: The sheet's own words for a day, where they are words rather than codes.
 _RAW_ES = {"daily service": "Servicio diario", "daily services": "Servicio diario",
            "vto": "VTO", "sick": "Enfermo/a", "vacation": "Vacaciones",
-           "training": "Entrenamiento", "projects": "Proyectos", "garages": "Garajes",
+           "training": "Entrenamiento", "training with": "Entrenamiento", "projects": "Proyectos", "garages": "Garajes",
            "touch up": "Retoques", "deep clean": "Limpieza profunda", "maps": "Mapas",
            "stripping linen": "Quitar ropa de cama", "breck inn": "Breck Inn"}
+
+_TRAIN_RE = re.compile(r"^training\s+(with|in)\s+(.+)$", re.I)
+_TRAIN_ES = {"new employees": "empleados nuevos", "daily services": "servicio diario",
+             "daily service": "servicio diario"}
+
+
+def _raw_t(raw):
+    """A sheet cell in the reader's language where it is words, not a code:
+    "Training with Grace" reads "Entrenamiento con Grace"; "ON" and "R/OFF"
+    stay as the sheet has them."""
+    raw = str(raw or "")
+    if not _ES:
+        return raw
+    low = raw.strip().lower()
+    if low in _RAW_ES:
+        return _RAW_ES[low]
+    m = _TRAIN_RE.match(raw.strip())
+    if m:
+        what = _TRAIN_ES.get(m.group(2).strip().lower(), m.group(2).strip())
+        return f"Entrenamiento {'con' if m.group(1).lower() == 'with' else 'en'} {what}"
+    return raw
+
 
 #: A cell that names units is a deep clean of those units ("3141A + 3242B").
 _UNITS_RE = re.compile(r"\b\d{4}[A-Ia-i]\b")
@@ -374,7 +402,7 @@ def _say(r):
     meaning = ri.legend_for(r, raw)
     if _ES:
         meaning = _LEGEND_ES.get(meaning, meaning)
-        raw = _RAW_ES.get(raw.lower(), raw)
+        raw = _raw_t(raw)
     if not meaning and _UNITS_RE.search(raw):
         meaning = T("home.deep_clean")
     return raw or _KIND_T[r["kind"]], meaning
@@ -421,76 +449,187 @@ def _hhmm(stamp):
 
 viewing_self = mine == _me_pid
 r_today = by_date.get(t_iso)
+# ── The page's own cards (laid out again 11 Nov, HP: "the metrics should make
+# sense", "looks very close") ──
+# Phone: one column in the order people need it. Computer: Today and what is
+# coming on the left, the week on the right, the day counts across the bottom.
+# A markdown block eats the 15px gap under it (Streamlit pulls its container up
+# by a rem), so every card that is plain HTML carries its own gap.
 st.markdown("""<style>
-.hm-today{background:#d6e3ff;border-radius:28px;padding:18px 20px;margin:0 0 4px;color:#001b3e}
-.hm-top{display:flex;align-items:center;gap:8px}
+.hm-chg,.hm-next,.hm-list,.hm-sum{margin:0 0 16px !important}
 .hm-over{font-size:.75rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#00458f}
-.hm-chip{margin-left:auto;font-size:.75rem;font-weight:600;background:#fff;padding:4px 10px;border-radius:8px}
-.hm-head{font-size:1.55rem;font-weight:400;margin-top:10px;line-height:1.25}
+
+/* Today: the shift, the rooms and the way to them, and who the RQS is -- one
+   card. A keyed container rather than one block of HTML, so the My Rooms
+   button can sit inside it. */
+.st-key-hmtoday{background:#d6e3ff;border-radius:28px;padding:18px 18px 16px;
+  gap:12px !important;color:#001b3e;margin-bottom:1px}
+.st-key-hmtoday [data-testid="stMarkdownContainer"]{margin-bottom:0 !important}
+.hm-top{display:flex;align-items:center;gap:8px}
+.hm-chip{margin-left:auto;font-size:.75rem;font-weight:600;background:#fff;padding:4px 10px;
+  border-radius:8px;color:#001b3e}
+.hm-head{font-size:1.55rem;font-weight:400;margin-top:10px;line-height:1.25;color:#001b3e}
 .hm-mean{font-size:.88rem;color:#2e4772;margin-top:2px}
 .hm-rooms{display:flex;align-items:center;gap:12px;background:#fff;border-radius:16px;
   padding:12px 14px;margin-top:14px;color:#191c20}
 .hm-rooms b{display:block;font-size:1rem;font-weight:500}
 .hm-rooms span{display:block;font-size:.82rem;color:#43474e}
-.hm-rqs{background:#e0f4ef;border-radius:20px;padding:14px 18px;margin:8px 0 4px;color:#00382d}
-.hm-rqs .hm-over{color:#00513f}
-.hm-rqs-row{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px}
-.hm-rqs-row div{background:#fff;border-radius:12px;padding:8px 12px;flex:1 1 180px}
-.hm-rqs-row small{display:block;font-size:.72rem;font-weight:600;letter-spacing:.06em;color:#00513f}
-.hm-rqs-row b{display:block;font-size:1.02rem;font-weight:500;color:#191c20}
-.hm-rqs p{font-size:.82rem;margin:8px 0 0;color:#2b4a42}
 .st-key-hmrooms [data-testid="stPageLink"],.st-key-hmrooms [data-testid="stPageLink"] a{
   width:100% !important;max-width:none !important}
 .st-key-hmrooms [data-testid="stPageLink"] a{background:#005ac1 !important;border-radius:16px !important;
   min-height:48px !important;justify-content:center !important}
-.st-key-hmgotit{align-items:flex-end}
-.st-key-hmweek [data-testid="stHorizontalBlock"]{flex-direction:row !important;flex-wrap:nowrap !important}
-.st-key-hmweek [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{
-  min-width:0 !important;flex:1 1 auto !important;width:auto !important}
-.st-key-hmweek [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child{flex:0 0 auto !important}
 .st-key-hmrooms [data-testid="stPageLink"] a *{color:#fff !important;font-weight:500 !important}
-.hm-chg{background:#ffefc8;border-radius:16px;padding:12px 14px;color:#4a3300}
-.hm-chg b{display:block;font-size:.92rem}
-.hm-chg div{font-size:.85rem;margin-top:2px}
-.st-key-hmgotit button{min-height:36px !important;border:none !important;background:transparent !important;
-  color:#4a3300 !important;font-weight:600 !important;margin-top:-6px}
-.hm-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.hm-tile{background:#fff;border-radius:20px;padding:14px;box-shadow:0 1px 2px rgba(25,28,32,.08)}
-.hm-tile small{display:block;font-size:.78rem;color:#43474e}
-.hm-tile b{display:block;font-size:1.2rem;font-weight:500;margin-top:4px}
+/* Who to ask on the floor today. */
+.hm-rqs{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.62);
+  border-radius:16px;padding:10px 14px;color:#191c20}
+.hm-rqs svg{flex:0 0 auto}
+.hm-rqs .who{flex:1 1 auto;min-width:0}
+.hm-rqs small{display:block;font-size:.7rem;font-weight:600;letter-spacing:.07em;
+  text-transform:uppercase;color:#00458f}
+.hm-rqs b{display:block;font-size:1rem;font-weight:500;overflow-wrap:anywhere}
+.hm-rqs b i{font-style:normal;font-size:.72rem;font-weight:600;color:#00458f;background:#d6e3ff;
+  border-radius:6px;padding:1px 6px;margin-right:6px;white-space:nowrap}
+.hm-rqs .ask{display:block;font-size:.78rem;color:#43474e;margin-top:1px}
+
+.hm-chg{background:#ffefc8;border-radius:20px;padding:12px 16px;color:#4a3300}
+.hm-chg b{display:block;font-size:.92rem;font-weight:600}
+.hm-chg div{font-size:.86rem;margin-top:2px}
+
+/* Tomorrow and the next change, one card, a line each. */
+.hm-next{background:#fff;border-radius:20px;padding:2px 16px;box-shadow:0 1px 2px rgba(25,28,32,.08)}
+.hm-next > div{display:flex;align-items:center;gap:12px;min-height:50px;padding:8px 0;
+  border-top:1px solid #eef0f5}
+.hm-next > div:first-child{border-top:none}
+.hm-next span{font-size:.86rem;color:#43474e}
+.hm-next b{margin-left:auto;font-size:.98rem;font-weight:500;text-align:right;color:#191c20}
+.hm-pill{font-style:normal;font-size:.82rem;font-weight:600;padding:3px 10px;border-radius:8px;
+  display:inline-block;overflow-wrap:anywhere}
+.hm-next .hm-pill{margin-left:auto;text-align:right}
+
+/* The calendar: one square a day, the sheet's Sunday-first week. */
+.hm-cal{background:#fff;border-radius:20px;padding:14px 14px 12px;margin:0 0 16px !important;
+  box-shadow:0 1px 2px rgba(25,28,32,.08)}
+.hm-calh{display:flex;align-items:baseline;gap:8px;margin:0 2px 10px}
+.hm-calh b{font-size:1.05rem;font-weight:500;color:#191c20}
+.hm-calh span{margin-left:auto;font-size:.78rem;color:#43474e;text-align:right}
+.hm-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.hm-dow{font-size:.66rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+  color:#5b6170;text-align:center;padding-bottom:2px}
+.hm-cell{position:relative;aspect-ratio:1/1;max-height:62px;min-width:0;border-radius:12px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center}
+.hm-cell b{font-size:1rem;font-weight:500;line-height:1;font-variant-numeric:tabular-nums}
+.hm-cell i{font-style:normal;font-size:.5rem;line-height:1;height:.5rem;margin-top:3px;font-weight:700}
+.hm-cell u{position:absolute;top:3px;left:0;right:0;text-align:center;text-decoration:none;
+  font-size:.5rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.8}
+.hm-cell.past{opacity:.5}
+.hm-cell.none{background:transparent;color:#8a93a1;box-shadow:inset 0 0 0 1px #e1e4ec}
+.hm-cell.today{box-shadow:0 0 0 2px #fff,0 0 0 4px #005ac1}
+.hm-cell.today b{font-weight:700}
+.hm-leg{display:flex;flex-wrap:wrap;gap:6px 14px;margin:12px 2px 0;font-size:.76rem;color:#43474e}
+.hm-leg span{display:inline-flex;align-items:center;gap:6px}
+.hm-leg i{width:16px;height:16px;border-radius:5px;display:inline-flex;align-items:center;
+  justify-content:center;font-style:normal;font-size:.5rem;font-weight:700}
+.hm-leg i.none{box-shadow:inset 0 0 0 1px #c9cedb}
+.hm-sec{font-size:.95rem;font-weight:500;margin:2px 4px 8px;color:#191c20}
+.hm-row.wk{border-top:6px solid #f3f4fa}
+
+/* Pico. */
+.hm-headrow{display:flex;align-items:center;gap:8px;margin-top:6px}
+.hm-headrow .hm-head{flex:1 1 auto;min-width:0;margin-top:0}
+.hm-pico{flex:0 0 auto;overflow:visible;cursor:pointer;touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;user-select:none}
+.hm-pico .jump{transform-box:fill-box;transform-origin:50% 100%;
+  transition:transform .8s cubic-bezier(.28,1.9,.42,1)}
+.hm-pico:active .jump{transform:translateY(-10px) rotate(-8deg) scale(1.07);transition:transform .07s ease-out}
+.hm-pico .bd{transform-box:fill-box;transform-origin:50% 100%;animation:picobreath 3.6s ease-in-out infinite}
+.hm-pico .arm{transform-box:view-box;transform-origin:57px 43px;animation:picowave 5.5s ease-in-out infinite}
+.hm-pico .eye{transform-box:fill-box;transform-origin:50% 50%;animation:picoblink 4.6s infinite}
+.hm-pico .mouth{transform-box:fill-box;transform-origin:50% 0;transition:transform .5s ease}
+.hm-pico:active .mouth{transform:scale(1.35,1.6);transition:transform .07s}
+.hm-pico .spark{transform-box:fill-box;transform-origin:50% 50%;opacity:0;transform:scale(.3) rotate(0deg);
+  transition:opacity .9s ease-out,transform .9s ease-out}
+.hm-pico:active .spark{opacity:1;transform:scale(1.25) rotate(40deg);transition:opacity .05s,transform .12s}
+@media (hover:hover){
+  .hm-pico:hover .jump{transform:translateY(-4px)}
+  .hm-pico:hover:active .jump{transform:translateY(-10px) rotate(-8deg) scale(1.07)}
+  .hm-pico:hover .arm{animation-duration:1.1s}
+  .hm-pico:hover .spark{opacity:.9;transform:scale(1) rotate(20deg)}
+}
+@keyframes picowave{0%,34%,100%{transform:rotate(0deg)}
+  5%,17%,29%{transform:rotate(-24deg)}11%,23%{transform:rotate(12deg)}}
+@keyframes picoblink{0%,45%,51%,100%{transform:scaleY(1)}48%{transform:scaleY(.08)}}
+@keyframes picobreath{0%,100%{transform:scale(1,1)}50%{transform:scale(1.015,.975)}}
+@media (prefers-reduced-motion:reduce){
+  .hm-pico *{animation:none !important;transition:none !important}}
+@media (max-width:420px){.hm-pico{width:64px;height:57px}}
+
+/* The day counts are drawn in both places; each width shows one. The whole
+   element goes where :has() is understood, so no empty gap is left. */
+@media (max-width:640px){.hm-wide{display:none}
+  [data-testid="stElementContainer"]:has(.hm-wide){display:none !important}}
+@media (min-width:641px){.hm-narrow{display:none}
+  [data-testid="stElementContainer"]:has(.hm-narrow){display:none !important}
+  .hm-wide .hm-days{grid-template-columns:1fr}}
 .hm-list{background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 1px 2px rgba(25,28,32,.08)}
 .hm-row{min-height:52px;padding:6px 16px;display:flex;align-items:center;gap:12px;border-top:1px solid #eef0f5}
-.hm-row:first-child{border-top:none}
+.hm-list > .hm-row:first-child{border-top:none}
 .hm-row .d{width:62px;flex:0 0 auto;font-size:.82rem;color:#43474e}
 .hm-row .d b{font-size:.95rem;font-weight:500;color:#191c20}
 .hm-row .w{flex:1 1 auto;min-width:0}
-.hm-row .w i{font-style:normal;font-size:.82rem;font-weight:600;padding:3px 10px;border-radius:8px;
-  display:inline-block;overflow-wrap:anywhere}
 .hm-row .w small{display:block;font-size:.75rem;color:#43474e;margin-top:2px}
-.hm-row.past{opacity:.6}
 .hm-row.today{background:#eef4fb;box-shadow:inset 4px 0 0 #005ac1}
 .hm-tag{font-size:.68rem;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap}
 .hm-tag.t{color:#00458f}
 .hm-tag.c{color:#6b4a00;background:#ffefc8}
-.hm-sum{background:#fff;border-radius:20px;padding:14px 16px;box-shadow:0 1px 2px rgba(25,28,32,.08)}
-.hm-sumh{display:flex;align-items:center;font-size:.95rem;font-weight:500}
-.hm-sumh span{margin-left:auto;font-size:.82rem;font-weight:400;color:#43474e}
-.hm-figs{display:grid;gap:8px;
-  margin-top:12px;text-align:center}
-.hm-figs div{background:#f3f4fa;border-radius:14px;padding:14px 6px;min-width:0;overflow-wrap:anywhere}
-.hm-figs b{display:block;font-size:1.35rem;font-weight:500;margin-bottom:4px}
-.hm-figs span{display:block;font-size:.8rem;font-weight:500;color:#191c20}
-.hm-figs small{display:block;font-size:.72rem;color:#5b6170;margin-top:2px}
-/* One gap between the page's cards (HP, 11 Nov: "looks very close"). A
-   markdown block brings no gap of its own here, so each card carries it. */
-.hm-today,.hm-rqs,.hm-chg,.hm-tiles,.hm-list,.hm-sum{margin:0 0 16px !important}
-.st-key-hmrooms,.st-key-hmgotit{margin-bottom:16px}
-.hm-sec{font-size:.95rem;font-weight:500;margin:6px 4px 0}
-.st-key-hmweek [data-testid="stButtonGroup"]{justify-content:flex-end}
+
+/* The day counts: a line each on a phone, side by side on a computer. */
+.hm-sum{background:#fff;border-radius:20px;padding:14px 16px 16px;box-shadow:0 1px 2px rgba(25,28,32,.08)}
+.hm-sumh{font-size:.95rem;font-weight:500}
+.hm-days{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin-top:10px}
+.hm-day{display:flex;align-items:center;gap:12px;background:#f3f4fa;border-radius:14px;
+  padding:10px 14px;min-width:0}
+.hm-day > div{flex:1 1 auto;min-width:0}
+.hm-day b{display:block;font-size:.9rem;font-weight:500;color:#191c20}
+.hm-day small{display:block;font-size:.76rem;color:#43474e;margin-top:1px}
+.hm-day .n{flex:0 0 auto;font-size:1.45rem;font-weight:500;color:#191c20;white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.hm-day .n i{font-style:normal;font-size:.78rem;font-weight:400;color:#43474e;margin-left:4px}
+.hm-day.warn{background:#ffe9e6}
+.hm-day.vto{background:#e7e9ff}
 @media (min-width:821px){.hm-head{font-size:1.8rem}}
 </style>""", unsafe_allow_html=True)
 
-# 1. Today: the shift, and the rooms with one tap to them.
+_cols = st.container(key="hmcols").columns(2, gap="medium")
+
+#: Pico, the little peak by the greeting (HP, 11 Nov: "a cute animated
+#: character near the title to wave at them"). Peak 8's own mountain: it
+#: waves and blinks by itself, lifts under a mouse, and hops when tapped --
+#: all CSS on an inline SVG, so there is no script and no frame to load.
+#: Each press hops again: the hop is a transition back from :active, not an
+#: animation that would only play once.
+_PICO = (
+    '<svg class="hm-pico" viewBox="0 0 76 68" width="76" height="68" role="img" aria-label="%HI%">'
+    '<title>%HI%</title>'
+    '<g transform="translate(9 16)"><path class="spark" d="M0-5 1.300-1.300 5 0 1.300 1.300 0 5-1.300 1.300-5 0-1.300-1.300Z" fill="#fff"/></g>'
+    '<g transform="translate(67 9)"><path class="spark s2" d="M0-4 1-1 4 0 1 1 0 4-1 1-4 0-1-1Z" fill="#fff"/></g>'
+    '<g transform="translate(71 40)"><path class="spark s3" d="M0-3.500 .900-.900 3.500 0 .900.900 0 3.500-.900.900-3.500 0-.900-.900Z" fill="#ffb300"/></g>'
+    '<ellipse cx="38" cy="64" rx="24" ry="3" fill="#00458f" opacity=".16"/>'
+    '<g class="jump"><g class="bd">'
+    '<path d="M17 47 8 53" stroke="#2f6fc4" stroke-width="5" stroke-linecap="round" fill="none"/>'
+    '<circle cx="7" cy="54" r="4.200" fill="#ffb300"/>'
+    '<g class="arm"><path d="M57 43 66 31" stroke="#2f6fc4" stroke-width="5" stroke-linecap="round" fill="none"/>'
+    '<circle cx="67" cy="29" r="4.400" fill="#ffb300"/></g>'
+    '<ellipse cx="28" cy="61.500" rx="6" ry="3" fill="#1f4f96"/><ellipse cx="48" cy="61.500" rx="6" ry="3" fill="#1f4f96"/>'
+    '<path d="M12 60Q7 60 10 55L32 14Q38 5 44 14L66 55Q69 60 64 60Z" fill="#2f6fc4"/>'
+    '<path d="M38 7.500Q41.500 8.500 44 14L66 55Q69 60 64 60L47 60Z" fill="#5a93e2" opacity=".5"/>'
+    '<path d="M32 14Q38 5 44 14L50 25 45 22 41 27 38 22 34 27 31 22 26 25Z" fill="#fff"/>'
+    '<g class="eye"><ellipse cx="31" cy="40" rx="2.700" ry="3.100" fill="#001b3e"/><circle cx="32" cy="38.900" r=".900" fill="#fff"/></g>'
+    '<g class="eye"><ellipse cx="45" cy="40" rx="2.700" ry="3.100" fill="#001b3e"/><circle cx="46" cy="38.900" r=".900" fill="#fff"/></g>'
+    '<circle cx="25" cy="46.500" r="3.200" fill="#ff8fa8" opacity=".8"/><circle cx="51" cy="46.500" r="3.200" fill="#ff8fa8" opacity=".8"/>'
+    '<path class="mouth" d="M33.500 46Q38 51.500 42.500 46" stroke="#001b3e" stroke-width="2.200" stroke-linecap="round" fill="none"/>'
+    '</g></g></svg>')
+
+# 1. Today: the shift, the rooms with one tap to them, and who the RQS is.
 _said, _means = _say(r_today)
 _head = T(_HEADLINE.get(r_today["kind"], "home.unknown_today")) if r_today else T("home.unknown_today")
 _rt = _rooms_today(info["label"].split(" · ")[0])
@@ -503,37 +642,7 @@ def _sect_t(s):
             .replace("Managers", "Gerentes"))
 
 
-_sect = _sect_t(now_section.get(mine) or info["sections"][0])
-_rooms_html = ""
-if _rt:
-    _arc = 100.5 * _rt["done"] / _rt["total"]
-    _sub = " · ".join(x for x in (T("home.next_room", room=_rt["next"]) if _rt["next"] else "",
-                                  T("home.finish", t=_rt["finish"]) if _rt["finish"] else "") if x)
-    _rooms_html = (
-        f'<div class="hm-rooms"><svg width="40" height="40" viewBox="0 0 40 40" role="img" '
-        f'aria-label="{e(T("home.rooms_line", done=_rt["done"], total=_rt["total"]))}">'
-        f'<circle cx="20" cy="20" r="16" fill="none" stroke="#d6e3ff" stroke-width="5"/>'
-        f'<circle cx="20" cy="20" r="16" fill="none" stroke="#005ac1" stroke-width="5" '
-        f'stroke-linecap="round" stroke-dasharray="{_arc:.1f} 101" transform="rotate(-90 20 20)"/></svg>'
-        f'<div><b>{e(T("home.rooms_line", done=_rt["done"], total=_rt["total"]))}</b>'
-        f'<span>{e(_sub)}</span></div></div>')
-st.markdown(
-    f'<div class="hm-today"><div class="hm-top">'
-    f'<span class="hm-over">{e(T("home.today"))} · {e(_day_name(today))}</span>'
-    f'<span class="hm-chip">{e(_sect)}{" · " + e(info["home"]) if info.get("home") else ""}</span></div>'
-    f'<div class="hm-head">{e(T("home.hi", name=greet))} — {e(_head)}</div>'
-    # What the cell says, unless it only says "ON" -- the headline already has.
-    + (f'<div class="hm-mean">{e(_said)}{" · " + e(_means) if _means else ""}</div>'
-       if r_today and r_today["kind"] != ri.KIND_OFF
-       and (_means or _said.strip().upper() not in ("ON", "ON AM", "ON PM")) else "")
-    + f'{_rooms_html}</div>', unsafe_allow_html=True)
-if _rt and viewing_self:
-    with st.container(key="hmrooms"):
-        st.page_link("pages/5_My_Rooms.py", label=T("home.open_rooms"), icon=":material/bed:",
-                     width="stretch")
-
-
-# 1b. Who is RQS 1 and RQS 2 today, for everyone (HP, 11 Nov): a housekeeper or
+# Who is RQS 1 and RQS 2 today, for everyone (HP, 11 Nov): a housekeeper or
 # houseperson who needs help on the floor knows whom to ask. Read off the staff
 # sheet with the in-app edits, the same way the Schedule page fills its RQS
 # 1 / RQS 2 boxes ("RQS 1 + RQS 2" is one person doing both).
@@ -551,27 +660,67 @@ try:
 except Exception as _ex:
     print(f"[my_home] rqs today: {_ex}")
     _r1 = _r2 = ""
+_rqs_html = ""
 if _r1 or _r2:
-    _none = T("home.rqs_none")
-    _cells = ([(T("home.rqs_both"), _r1)] if _r1 == _r2 else
-              [("RQS 1", _r1 or _none), ("RQS 2", _r2 or _none)])
-    st.markdown(
-        f'<div class="hm-rqs"><span class="hm-over">{e(T("home.rqs_title"))}</span>'
-        '<div class="hm-rqs-row">'
-        + "".join(f'<div><small>{e(k)}</small><b>{e(v)}</b></div>' for k, v in _cells)
-        + f'</div><p>{e(T("home.rqs_ask"))}</p></div>', unsafe_allow_html=True)
+    if _r1 == _r2:
+        _who = f'<b>{e(_r1)}</b>'
+    else:
+        _who = "".join(f'<b><i>{k}</i>{e(v or T("home.rqs_none"))}</b>'
+                       for k, v in (("RQS 1", _r1), ("RQS 2", _r2)))
+    _rqs_html = (
+        '<div class="hm-rqs"><svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true">'
+        '<circle cx="18" cy="18" r="18" fill="#d6e3ff"/><circle cx="18" cy="14" r="5" fill="#00458f"/>'
+        '<path d="M8 28c1.6-5 5.4-7 10-7s8.400 2 10 7z" fill="#00458f"/></svg>'
+        f'<div class="who"><small>{e(T("home.rqs_both" if _r1 == _r2 else "home.rqs_title"))}</small>'
+        f'{_who}<span class="ask">'
+        f'{e(T("home.rqs_ask" if (_r1 and _r2 and _r1 != _r2) else "home.rqs_ask1"))}</span></div></div>')
+
+_sect = _sect_t(now_section.get(mine) or info["sections"][0])
+_rooms_html = ""
+if _rt:
+    _arc = 100.5 * _rt["done"] / _rt["total"]
+    _sub = " · ".join(x for x in (T("home.next_room", room=_rt["next"]) if _rt["next"] else "",
+                                  _es_time(T("home.finish", t=_rt["finish"])) if _rt["finish"] else "") if x)
+    _rooms_html = (
+        f'<div class="hm-rooms"><svg width="40" height="40" viewBox="0 0 40 40" role="img" '
+        f'aria-label="{e(T("home.rooms_line", done=_rt["done"], total=_rt["total"]))}">'
+        f'<circle cx="20" cy="20" r="16" fill="none" stroke="#d6e3ff" stroke-width="5"/>'
+        f'<circle cx="20" cy="20" r="16" fill="none" stroke="#005ac1" stroke-width="5" '
+        f'stroke-linecap="round" stroke-dasharray="{_arc:.1f} 101" transform="rotate(-90 20 20)"/></svg>'
+        f'<div><b>{e(T("home.rooms_line", done=_rt["done"], total=_rt["total"]))}</b>'
+        f'<span>{e(_sub)}</span></div></div>')
+with _cols[0]:
+    with st.container(key="hmtoday"):
+        st.markdown(
+            f'<div class="hm-today"><div class="hm-top">'
+            f'<span class="hm-over">{e(T("home.today"))} · {e(_day_name(today))}</span>'
+            f'<span class="hm-chip">{e(_sect)}{" · " + e(info["home"]) if info.get("home") else ""}</span></div>'
+            f'<div class="hm-headrow"><div class="hm-head">{e(T("home.hi", name=greet))} — {e(_head)}</div>'
+            f'{_PICO.replace("%HI%", e(T("home.pico")))}</div>'
+            # What the cell says, unless it only says "ON" -- the headline already has.
+            + (f'<div class="hm-mean">{e(_said)}{" · " + e(_means) if _means else ""}</div>'
+               if r_today and r_today["kind"] != ri.KIND_OFF
+               and (_means or _said.strip().upper() not in ("ON", "ON AM", "ON PM")) else "")
+            + f'{_rooms_html}</div>', unsafe_allow_html=True)
+        if _rt and viewing_self:
+            with st.container(key="hmrooms"):
+                st.page_link("pages/5_My_Rooms.py", label=T("home.open_rooms"), icon=":material/bed:",
+                             width="stretch")
+        if _rqs_html:
+            st.markdown(_rqs_html, unsafe_allow_html=True)
 
 # 2. What changed on the sheet for this person -- shown once (HP, 11 Nov). It
 # used to stay until "Got it" was pressed, and people who never pressed it saw
 # the same notice every time they opened the app. Now the notice is marked
 # seen the moment it is drawn. It stays through this visit's reruns (the week
 # switch, the language button) from a copy in the session, and is gone on the
-# next visit. A visit starts when the week switch has no state yet: Streamlit
-# drops a widget's state when another page is shown.
+# next visit. A visit starts when the full record's period picker (mh_grain,
+# drawn on every run, further down) has no state yet: Streamlit drops a
+# widget's state when another page is shown.
 _changed_days = set()
 if viewing_self:
     _seen_key = f"staffchg_seen_{me_user or me_display}"
-    if "hm_week" not in st.session_state or "hm_chg_shown" not in st.session_state:
+    if "mh_grain" not in st.session_state or "hm_chg_shown" not in st.session_state:
         try:
             _log = (db._load_key("staff_changes") or {}).get("changes") or []
             _seen_at = (db._load_key(_seen_key) or {}).get("at", "")
@@ -596,9 +745,10 @@ if viewing_self:
         _changed_days = set(_by_day)
 
         def _cell(v):
-            return str(v).strip() or T("home.off")
+            return _raw_t(str(v).strip()) or T("home.off")
 
-        st.markdown(
+        # No "Got it" button any more: the notice is gone by itself next time.
+        _cols[0].markdown(
             f'<div class="hm-chg"><b>{e(T("home.changed"))}</b>'
             + "".join(f'<div>{e(_day_name(datetime.date.fromisoformat(d)))}: '
                       f'{e(_cell(c["old"]))} → {e(_cell(c["new"]))}'
@@ -606,55 +756,121 @@ if viewing_self:
                       for d, c in sorted(_by_day.items()))
             + '</div>', unsafe_allow_html=True)
 
-        def _got_it():
-            st.session_state["hm_chg_shown"] = {}
 
-        with st.container(key="hmgotit"):
-            st.button(T("home.got_it"), key="hm_gotit", on_click=_got_it)
+def _worked(n):
+    """'2 worked' / '1 trabajado': Spanish counts one differently."""
+    return T("home.worked_1") if n == 1 else T("home.worked_n", n=n)
 
-# 3. Tomorrow, and the next change of state: a day off if working, back on if not.
+
+def _pill(r):
+    """A day's cell as the coloured pill the week list uses."""
+    bg, fg, _lbl = KIND_STYLE[r["kind"]] if r else ("#f3f4fa", "#43474e", "")
+    return f'<i class="hm-pill" style="background:{bg};color:{fg}">{e(_say(r)[0])}</i>'
+
+
+# 3. Tomorrow, and the next change after it: the next day off if tomorrow is a
+# work day, back to work if it is not. It used to compare with today, so
+# somebody off tomorrow read "Tomorrow: Off" beside "Next day off: tomorrow".
 _tom = today + datetime.timedelta(days=1)
-_ahead = sorted(d for d in by_date if d > t_iso)
-_working_now = bool(r_today and r_today["worked"])
-_flip = next((d for d in _ahead if bool(by_date[d]["worked"]) != _working_now), None)
-st.markdown(
-    f'<div class="hm-tiles">'
-    f'<div class="hm-tile"><small>{e(T("home.tomorrow", d=_day_name(_tom)))}</small>'
-    f'<b>{e(_say(by_date.get(_tom.isoformat()))[0])}</b></div>'
-    f'<div class="hm-tile"><small>{e(T("home.next_off" if _working_now else "home.back_on"))}</small>'
+_r_tom = by_date.get(_tom.isoformat())
+_tom_on = bool(_r_tom and _r_tom["worked"])
+_after = sorted(d for d in by_date if d > _tom.isoformat())
+_flip = next((d for d in _after if bool(by_date[d]["worked"]) != _tom_on), None)
+_cols[0].markdown(
+    f'<div class="hm-next">'
+    f'<div><span>{e(T("home.tomorrow", d=_day_name(_tom)))}</span>{_pill(_r_tom)}</div>'
+    f'<div><span>{e(T("home.next_off" if _tom_on else "home.back_on"))}</span>'
     f'<b>{e(_day_name(datetime.date.fromisoformat(_flip)) if _flip else T("home.none_ahead"))}</b></div>'
     f'</div>', unsafe_allow_html=True)
 
-# 4. The schedule, a week at a time, each code with what it means.
+# 4. The schedule: every day that is posted (HP, 11 Nov: "this is going to be
+# their only source to see on which day they are working ... show as many
+# dates as possible"). It was one week at a time behind a switch. Now a
+# calendar gives the shape of it -- this month from its first week to the
+# last day posted, a work day and a rest day told apart at a glance -- and
+# under it every day from today on with what the sheet says.
 this_sun = today - datetime.timedelta(days=(today.weekday() + 1) % 7)
-_wk_opts = ["this", "next"]
-with st.container(key="hmweek"):
-    _c1, _c2 = st.columns([1, 2], vertical_alignment="center")
-    _c1.markdown(f'<div class="hm-sec">{e(T("home.schedule"))}</div>', unsafe_allow_html=True)
-    with _c2:
-        _which = st.segmented_control(
-            T("home.schedule"), _wk_opts, default="this", key="hm_week",
-            format_func=lambda k: T("home.this_week" if k == "this" else "home.next_week"),
-            label_visibility="collapsed") or "this"
-_start = this_sun + datetime.timedelta(days=7 if _which == "next" else 0)
-_rows_html = ""
-for i in range(7):
-    d = _start + datetime.timedelta(days=i)
-    iso = d.isoformat()
+_first = today.replace(day=1)
+_cal_start = _first - datetime.timedelta(days=(_first.weekday() + 1) % 7)
+_posted = [d for d in by_date if d >= _cal_start.isoformat()]
+_last_day = max([datetime.date.fromisoformat(max(_posted))] if _posted else [], default=today)
+_last_day = max(_last_day, today)
+_cal_end = _last_day + datetime.timedelta(days=(5 - _last_day.weekday()) % 7)   # its Saturday
+# Never more than ten weeks: a sheet with a stray far-off date must not
+# draw a year of empty squares.
+_cal_end = min(_cal_end, _cal_start + datetime.timedelta(days=69))
+
+#: (mark in the square, legend words) per kind of day. The mark is there for
+#: anyone who cannot tell the colours apart.
+_CAL = {ri.KIND_WORKING: ("●", "home.lg_work"), ri.KIND_DAILY: ("●", "home.lg_daily"),
+        ri.KIND_OTHER: ("◆", "home.lg_other"), ri.KIND_VTO: ("V", "home.lg_vto"),
+        ri.KIND_NOCALL: ("!", "home.lg_nocall"), ri.KIND_OFF: ("", "home.lg_off"),
+        ri.KIND_UNKNOWN: ("?", "home.lg_unknown")}
+_dow_sun = [_DOW[6]] + _DOW[:6]                    # the sheet's week starts on Sunday
+_cells = "".join(f'<div class="hm-dow">{e(x)}</div>' for x in _dow_sun)
+_kinds_seen, _unposted = [], False
+_d = _cal_start
+while _d <= _cal_end:
+    iso = _d.isoformat()
     r = by_date.get(iso)
-    said, means = _say(r)
-    bg, fg, _lbl = KIND_STYLE[r["kind"]] if r else ("#f3f4fa", "#43474e", "")
-    cls = "hm-row" + (" today" if iso == t_iso else " past" if iso < t_iso else "")
+    cls = "hm-cell" + (" today" if iso == t_iso else " past" if iso < t_iso else "")
+    # The month's name on a square that belongs to another month.
+    _mo_tag = (f'<u>{e(_MON[_d.month - 1])}</u>'
+               if _d.month != today.month and (_d.day == 1 or _d == _cal_start) else "")
+    if r:
+        bg, fg, _lbl = KIND_STYLE[r["kind"]]
+        if r["kind"] not in _kinds_seen:
+            _kinds_seen.append(r["kind"])
+        _cells += (f'<div class="{cls}" style="background:{bg};color:{fg}" '
+                   f'title="{e(_day_name(_d))}: {e(_say(r)[0])}">{_mo_tag}<b>{_d.day}</b>'
+                   f'<i>{_CAL[r["kind"]][0]}</i></div>')
+    else:
+        _unposted = _unposted or iso > t_iso
+        _cells += (f'<div class="{cls} none" title="{e(_day_name(_d))}: {e(T("home.lg_none"))}">'
+                   f'{_mo_tag}<b>{_d.day}</b><i></i></div>')
+    _d += datetime.timedelta(days=1)
+_legend = "".join(
+    f'<span><i style="background:{KIND_STYLE[k][0]};color:{KIND_STYLE[k][1]}">{_CAL[k][0]}</i>'
+    f'{e(T(_CAL[k][1]))}</span>'
+    for k in (ri.KIND_WORKING, ri.KIND_DAILY, ri.KIND_OTHER, ri.KIND_OFF, ri.KIND_VTO,
+              ri.KIND_NOCALL, ri.KIND_UNKNOWN) if k in _kinds_seen)
+if _unposted:
+    _legend += f'<span><i class="none"></i>{e(T("home.lg_none"))}</span>'
+_cal_title = _MONTH[today.month - 1].title()
+if _posted and _last_day.month != today.month:
+    _cal_title += " – " + _MONTH[_last_day.month - 1].title()
+_ahead = sorted(d for d in by_date if d >= t_iso)
+_cols[1].markdown(
+    f'<div class="hm-cal"><div class="hm-calh"><b>{e(_cal_title)}</b>'
+    + (f'<span>{e(T("home.posted_to", d=_day_name(datetime.date.fromisoformat(_ahead[-1]))))}</span>'
+       if _ahead else "")
+    + f'</div><div class="hm-grid">{_cells}</div><div class="hm-leg">{_legend}</div></div>',
+    unsafe_allow_html=True)
+
+# Every day from today to the last one posted, with what the sheet says.
+_rows_html = ""
+for iso in _ahead:
+    d = datetime.date.fromisoformat(iso)
+    r = by_date[iso]
+    means = _say(r)[1]
     tag = (f'<span class="hm-tag t">{e(T("home.today_tag"))}</span>' if iso == t_iso else
-           f'<span class="hm-tag c">{e(T("home.changed_tag"))}</span>' if iso in _changed_days else
-           '<span aria-label="✓">✓</span>' if iso < t_iso and r and r["worked"] else "")
-    _rows_html += (f'<div class="{cls}"><span class="d"><b>{e(_DOW[d.weekday()])}</b> {d.day}</span>'
-                   f'<span class="w"><i style="background:{bg};color:{fg}">{e(said)}</i>'
+           f'<span class="hm-tag c">{e(T("home.changed_tag"))}</span>' if iso in _changed_days else "")
+    # A rule above each Sunday, where the sheet's week turns.
+    _rows_html += (f'<div class="hm-row{" today" if iso == t_iso else ""}'
+                   f'{" wk" if d.weekday() == 6 and iso != _ahead[0] else ""}">'
+                   f'<span class="d"><b>{e(_DOW[d.weekday()])}</b> {d.day}'
+                   + (f' {e(_MON[d.month - 1])}' if d.month != today.month else "")
+                   + f'</span><span class="w">{_pill(r)}'
                    + (f'<small>{e(means)}</small>' if means else "")
                    + f'</span>{tag}</div>')
-st.markdown(f'<div class="hm-list">{_rows_html}</div>', unsafe_allow_html=True)
+if _rows_html:
+    _cols[1].markdown(f'<div class="hm-sec">{e(T("home.from_today"))}</div>'
+                      f'<div class="hm-list">{_rows_html}</div>', unsafe_allow_html=True)
 
-# 5. This month, in three figures.
+# 5. The day counts people ask about (HP, 11 Nov): how many days this week,
+# how many next week, and how many worked this month so far. "7 Days off" was
+# read as seven days taken off, so rest days are no longer a headline here --
+# they are in the full record. VTO and no-call days show only when there are any.
 wk_s, mo_s, yr_s = ri.period_bounds(today)
 wk_e = (this_sun + datetime.timedelta(days=6)).isoformat()
 mo_e = ((today.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
@@ -662,39 +878,65 @@ mo_e = ((today.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
 yr_e = today.replace(month=12, day=31).isoformat()
 
 
-def tally(start, end):
+def tally(start, end, today_done=True):
     """Whole-period total, and how much of it has already happened.
 
     The headline is the FULL period: on a Wednesday "days this week" should be
     the four days you are down for, not the two you have already done.
+    `today_done=False` leaves today among the days still to work: at nine in
+    the morning "3 days, all worked" was wrong for somebody with rooms ahead.
     """
     span = [r for r in s_all["rows"] if start <= r["date"] <= end and r["worked"]]
-    done = [r for r in span if r["date"] <= t_iso]
+    done = [r for r in span if r["date"] < t_iso or (today_done and r["date"] == t_iso)]
     return len(span), len(done), len(span) - len(done)
+
+
+def _n_days(n):
+    return f'{n}<i>{e(T("home.day_1" if n == 1 else "home.day_n"))}</i>'
 
 
 _mo_rows = [r for r in s_all["rows"] if mo_s <= r["date"] <= mo_e]
 _mo = ri.summarise_person(_mo_rows, pid=mine)
-_mo_total, _mo_done, _mo_left = tally(mo_s, mo_e)
+_mo_total, _mo_done, _mo_left = tally(mo_s, mo_e, today_done=False)
+_wk_total, _wk_done, _wk_left = tally(wk_s, wk_e, today_done=False)
+_nx_s = this_sun + datetime.timedelta(days=7)
+_nx_e = this_sun + datetime.timedelta(days=13)
+_nx_posted = any(_nx_s.isoformat() <= r["date"] <= _nx_e.isoformat() for r in s_all["rows"])
+_nx_total = tally(_nx_s.isoformat(), _nx_e.isoformat())[0]
 # The month is only as long as the weeks posted: say where the sheet stops, so
-# "still to work" is not read as the whole month.
+# "more scheduled" is not read as the whole month.
 _mo_last = max((r["date"] for r in _mo_rows), default="")
-_figs = [(_mo_done, T("home.m_worked"), T("home.m_of", n=_mo_total)),
-         (_mo_left, T("home.m_left"),
-          T("home.m_through", d=_day_name(datetime.date.fromisoformat(_mo_last)))
-          if _mo_last and _mo_last < mo_e else ""),
-         (_mo["off"], T("home.m_rest"), T("home.m_rest_sub"))]
+_month = _MONTH[today.month - 1]
+_through = _day_name(datetime.date.fromisoformat(_mo_last)) if _mo_last else ""
+_days = [("", T("home.d_week"),
+          T("home.d_none") if not _wk_total else
+          f'{_worked(_wk_done)} · {T("home.left_n", n=_wk_left)}' if _wk_left else
+          T("home.d_all_done"),
+          _n_days(_wk_total)),
+         ("", T("home.d_next"),
+          f"{_day_name(_nx_s)} – {_day_name(_nx_e)}" if _nx_posted else T("home.d_not_posted"),
+          _n_days(_nx_total) if _nx_posted else "—"),
+         ("", T("home.d_month", month=_month),
+          T("home.d_more_1" if _mo_left == 1 else "home.d_more", n=_mo_left, d=_through)
+          if _mo_left and _through else "",
+          _n_days(_mo_done))]
 if _mo["n_paid_off"]:
-    _figs.append((_mo["n_paid_off"], T("home.m_vto"), ""))
-st.markdown(
-    f'<div class="hm-sum"><div class="hm-sumh">{e(_MONTH[today.month - 1].title())}'
-    f'<span>{e(T("home.week_line", n=tally(wk_s, wk_e)[0]))}</span></div>'
-    # One row however narrow the screen: a 2 + 1 wrap read as two groups.
-    f'<div class="hm-figs" style="grid-template-columns:repeat({len(_figs)},minmax(0,1fr))">'
-    + "".join(f'<div><b>{n}</b><span>{e(lbl)}</span>'
-              + (f'<small>{e(sub)}</small>' if sub else "") + '</div>'
-              for n, lbl, sub in _figs)
-    + '</div></div>', unsafe_allow_html=True)
+    _days.append(("vto", T("home.d_vto", month=_month), T("home.d_vto_sub"),
+                  _n_days(_mo["n_paid_off"])))
+if _mo["n_no_call"]:
+    _days.append(("warn", T("home.d_nocall", month=_month), T("home.d_nocall_sub"),
+                  _n_days(_mo["n_no_call"])))
+_days_html = (
+    f'<div class="hm-sumh">{e(T("home.d_title"))}</div><div class="hm-days">'
+    + "".join(f'<div class="hm-day {cls}"><div><b>{e(lbl[:1].upper() + lbl[1:])}</b>'
+              + (f'<small>{e(sub)}</small>' if sub else "") + f'</div><span class="n">{n}</span></div>'
+              for cls, lbl, sub, n in _days)
+    + '</div>')
+# Drawn twice and shown once: beside the schedule on a computer, where the
+# left column has the room, and under the schedule on a phone, where the
+# schedule comes first.
+_cols[0].markdown(f'<div class="hm-sum hm-wide">{_days_html}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="hm-sum hm-narrow">{_days_html}</div>', unsafe_allow_html=True)
 
 # 6. Everything else, for whoever wants it.
 _record = st.expander(T("home.full_record"))
@@ -766,7 +1008,7 @@ with _record:
         m[0].metric(T("home.m_worked"), s_sel["n_worked"],
                     delta=(T("home.n_so_far", n=done_sel) if s_sel["n_worked"] != done_sel else None),
                     delta_color="off")
-        m[1].metric(T("home.days_off"), s_sel["off"])
+        m[1].metric(T("home.m_rest"), s_sel["off"])
         m[2].metric(T("home.m_nocall"), s_sel["n_no_call"])
         m[3].metric(T("home.m_vto"), s_sel["n_paid_off"])
 

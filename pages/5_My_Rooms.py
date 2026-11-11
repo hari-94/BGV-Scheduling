@@ -57,6 +57,17 @@ def _date_str(d):
             else f"{_DOW[d.weekday()]}, {_MON[d.month - 1]} {d.day}")
 
 
+def _es_time(txt):
+    """Spanish says "a la 1:15" but "a las 2:15"; the phrases are written
+    with "las", so one o'clock is put right here."""
+    return re.sub(r"\blas (1:\d\d)", r"la \1", txt) if _ES else txt
+
+
+def _by(hhmm):
+    """'by 1:18pm' / 'para la 1:18pm' -- when a room should be finished."""
+    return _es_time(f'{T("rooms.by")} {hhmm}')
+
+
 # ── statuses ─────────────────────────────────────────────────────────────────
 # The words come from roomstatus so that a room marked here is the same room
 # the supervisor sees moving on the Live board. They used to be two private
@@ -274,8 +285,10 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 [data-testid="stPopoverBody"] .stButton>button[kind="primary"]{background:#eaf4ff !important;
   color:#12447e !important}
 
-/* The circle itself. */
-[class*="st-key-pop_"]>div>button,
+/* The circle itself. Streamlit 1.62 wraps a popover's button one level
+   deeper than it used to, so these rules name the button by its test id; the
+   old child selector had stopped matching and the button drew at 37px. */
+[class*="st-key-pop_"] [data-testid="stPopoverButton"],
 [class*="st-key-"][class*="_go_"] button{
   border-radius:50% !important;width:54px !important;height:54px !important;
   min-height:54px !important;padding:0 !important;
@@ -417,7 +430,7 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
   min-width:0 !important;flex:1 1 auto !important;width:auto !important}
 [class*="st-key-tkrow_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child{
   flex:0 0 52px !important}
-[class*="st-key-pop_"]>div>button{
+[class*="st-key-pop_"] [data-testid="stPopoverButton"]{
   width:52px !important;height:52px !important;min-height:52px !important;
   border-radius:16px !important;border:none !important;background:#e7eef8 !important;
   font-size:1.2rem !important}
@@ -432,7 +445,29 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 [class*="st-key-"][class*="_next_"] button{
   height:56px !important;border-radius:16px !important;font-size:1rem !important;
   font-weight:500 !important;background:#005ac1 !important;color:#fff !important;border:none !important}
+
+/* ── One header card (11 Nov): the count, the finish, the day as a bar and
+   the RQS. The bar loses its own card and heading inside it. ── */
+.mrhero.m3.day{display:block}
+.m3top{display:flex;align-items:center;gap:18px}
+.mrhero .m3top{flex:1 1 auto;min-width:0}
+.dayw.bare{background:transparent;border:none;border-radius:0;padding:0;margin:14px 0 0}
+.dayw.bare .daytrack{background:#dfe2eb}
+.dayw.bare .daysum{color:#43474e}
+.m3rqs{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:10px;
+  border-top:1px solid #d9dce6;font-size:.86rem;color:#43474e}
+.m3rqs b{font-weight:500;color:#191c20;font-size:.95rem}
+.mrlive{text-align:center;margin:14px 4px 4px}
+.tkfoot:empty{display:none}
 </style>""", unsafe_allow_html=True)
+# The status button in the status's own tint, so a list of rooms reads by
+# colour: untouched stays neutral, started / cleaned / inspected take theirs.
+st.markdown("<style>" + "".join(
+    f'[class*="st-key-pop_"][class*="_is-{_k}"] [data-testid="stPopoverButton"]'
+    f'{{background:{_v[0]} !important;'
+    f'color:{_v[1]} !important}}'
+    for _k, _v in STATUS_STYLE.items() if _k != NOT_STARTED) + "</style>",
+    unsafe_allow_html=True)
 
 cu = auth.current_user()
 me_display = cu.get("display_name") or ""
@@ -657,6 +692,83 @@ def _ring(done, total):
             f'fill="#191c20">{done}/{total}</text></svg>')
 
 
+def _day_strip(blocks, bare=False):
+    """The whole day as one proportional bar, with the deadlines drawn on it.
+    `bare` is the bar inside the header card, which already says when the day
+    ends: no heading of its own and no card around it."""
+    if not blocks:
+        return ""
+    s = _day.summary(blocks)
+    begin = _day._mins(_day.DAY_START)
+    finish = s["finish"]
+    span = max(finish, _day._mins(_day.CHECKIN)) - begin
+    if span <= 0:
+        return ""
+
+    def pct(m):
+        return 100.0 * m / span
+
+    segs, cur = "", begin
+    for b in blocks:
+        if b["travel"] > 0:
+            segs += f'<i class="go" style="width:{pct(b["travel"]):.3f}%"></i>'
+        if b["wait"] > 0:
+            segs += f'<i class="wait" style="width:{pct(b["wait"]):.3f}%"></i>'
+        # The lightest segment carries dark text; the three darker ones carry
+        # white. Room numbers on a bar are only worth putting there if they can
+        # be read at arm's length in a corridor.
+        if b["release"] is not None:
+            klass = "job late"
+        elif b["urgency"] >= 100:
+            klass = "job u3"
+        elif b["urgency"] >= 50:
+            klass = "job u2"
+        else:
+            klass = "job u0"
+        segs += (f'<i class="{klass}" style="width:{pct(b["minutes"]):.3f}%" '
+                 f'title="{e(b["room"])} · {b["minutes"]:.0f}m · done by '
+                 f'{_day.hhmm(b["end"])}"><b>{e(b["room"])}</b></i>')
+        cur = b["end"]
+
+    tgt = pct(_day._mins(_day.TARGET_END) - begin)
+    chk = pct(_day._mins(_day.CHECKIN) - begin)
+    # Pacing lands most charts exactly on the target, where the overrun is a
+    # rounding sliver. Half a minute is not late; showing "0m over" is.
+    over = s["over"] > 0.5
+    fin_txt = _day.hhmm(finish) + (" · " + _tf("day.over", "{m}m over", m="%.0f" % s["over"])
+                                   if over else " ✓")
+    return (
+        f'<div class="dayw{" bare" if bare else ""}">'
+        + ("" if bare else
+           f'<div class="dayh"><b>{e(T("rooms.yourday"))}</b>'
+           f'<span class="fin{" over" if over else ""}">{e(_es_time(fin_txt))}</span></div>')
+        + f'<div class="daytrack">{segs}'
+        f'<span class="daymark soft" style="left:{tgt:.2f}%"></span>'
+        f'<span class="daymark" style="left:{chk:.2f}%"></span>'
+        f'</div>'
+        f'<div class="dayax"><span>{_day.hhmm(begin)}</span>'
+        f'<span>3:30 ▏ 4:00</span></div>'
+        f'<div class="daysum">'
+        + _tf("day.rooms", "{n} rooms", n=f'<b>{s["rooms"]}</b>') + " · "
+        + _tf("day.cleaning", "{m} cleaning", m=f'<b>{s["clean"]:.0f}m</b>') + " · "
+        + _tf("day.walking", "{m} walking", m=f'<b>{s["travel"]:.0f}m</b>')
+        # The sheet's minutes are standards the floor beats. Say by how much
+        # rather than silently quoting times nobody can trace back.
+        + (" · " + _tf("day.paced", "paced {p} under the sheet",
+                       p=f'<b>{(1 - s["pace"]) * 100:.0f}%</b>')
+           if s["pace"] < 0.995 else "")
+        + (" · " + _tf("day.waiting", "{m} waiting on a guest", m=f'<b>{s["wait"]:.0f}m</b>')
+           if s["wait"] > 0 else "")
+        + (" · " + _tf("day.late", "{n} late checkout(s)", n=f'<b>{s["late_rooms"]}</b>')
+           if s["late_rooms"] else "")
+        # Never present a guess as a plan: if the sheet carried no minutes for
+        # some rooms, the finish time is an estimate and has to say so.
+        + (" · " + _tf("day.untimed", "{n} with no time on the sheet, estimated",
+                       n=f'<b>{s["untimed"]}</b>')
+           if s["untimed"] else "")
+        + '</div></div>')
+
+
 _fin = ""
 _mine_plan = _plan.get(str(mine or "")) or []
 if _mine_plan:
@@ -664,17 +776,33 @@ if _mine_plan:
     if _s["over"] > 0.5:
         _over = "%.0f" % _s["over"]
         _fin = (f'<div class="m3fin over">'
-                f'{e(T("rooms.over_by", t=_day.hhmm(_s["finish"]), m=_over))}</div>')
+                f'{e(_es_time(T("rooms.over_by", t=_day.hhmm(_s["finish"]), m=_over)))}</div>')
     else:
-        _fin = f'<div class="m3fin">✓ {e(T("rooms.on_track", t=_day.hhmm(_s["finish"])))}</div>'
+        _fin = (f'<div class="m3fin">✓ '
+                f'{e(_es_time(T("rooms.on_track", t=_day.hhmm(_s["finish"]))))}</div>')
+
+# Somebody with rooms of their own and nobody else's on the page gets one
+# header card: the count, when the day ends, the day as a bar and who their
+# RQS is (11 Nov). It was three blocks -- header, "Updating by itself", "Your
+# day" -- and the first room started most of a phone screen down. An RQS with
+# a team keeps the plain header; each housekeeper's bar is drawn by their rooms.
+_own_only = bool(my_rooms) and len({g.get("housekeeper") for g, _r in shown_rooms}) == 1
+_hero_strip = _day_strip(_mine_plan, bare=True) if _own_only else ""
+#: The one RQS over all of this person's rooms, named once in the header
+#: instead of on every card. Empty when the rooms sit under more than one.
+_my_rqs = {str(g.get("inspector") or "") for g in my_charts}
+_one_rqs = _my_rqs.pop() if _own_only and len(_my_rqs) == 1 else ""
+_rqs_line = (f'<div class="m3rqs"><span>{e(_t("rooms.rqs_today", "Your RQS today"))}</span>'
+             f'<b>{e(_one_rqs)}</b></div>' if _one_rqs else "")
 
 st.markdown(
-    f'<div class="mrhero m3">{_ring(done_n, total_n)}<div>'
+    f'<div class="mrhero m3{" day" if _hero_strip or _rqs_line else ""}">'
+    f'<div class="m3top">{_ring(done_n, total_n)}<div>'
     f'<h1>{e(T("rooms.hello", name=greet))}</h1>'
     f'<p>{e(_date_str(today))}'
     f'{" · " + e(T("rooms.total_time", mins=mins)) if mins else ""}'
     f'{"" if my_rooms else " · " + e(T("rooms.subtitle_team"))}</p>'
-    f'{_fin}</div></div>', unsafe_allow_html=True)
+    f'{_fin}</div></div>{_hero_strip}{_rqs_line}</div>', unsafe_allow_html=True)
 
 # Carpet and stripping, read-only, for the RQS and managers (duties).
 if _drooms and st.session_state.get("role", "") in ("rqs", "admin"):
@@ -745,7 +873,8 @@ def _watch():
         f'</div>', unsafe_allow_html=True)
 
 
-_watch()
+# (_watch() is called at the foot of the page, so its "Updating by itself"
+# line no longer sits between the header and the first room.)
 
 if st.session_state.pop("mr_changed", False):
     st.toast(T("rooms.updated"), icon="🔄")
@@ -892,8 +1021,10 @@ def _menu(code, g, owner, key_prefix, cur):
     # Not use_container_width: that stretched the menu to the width of the row
     # and it came out as a slab under the card. A fixed, narrow menu floats
     # beside the circle that opened it, the way the handheld does it.
+    # The key ends in the status, which is the only handle CSS has on one
+    # button: it takes the status's own tint (the rules after the stylesheet).
     with st.popover(_GLYPH.get(cur, "○"), use_container_width=True,
-                    width=248, key=f"pop_{key_prefix}_{code}_{gen}"):
+                    width=248, key=f"pop_{key_prefix}_{code}_{gen}_is-{cur}"):
         # HotSOS is where rooms are marked for now; the app only mirrors it,
         # so two places can't disagree. The note stays: it's the app's own.
         if _rst.mirrored():
@@ -1105,6 +1236,17 @@ def _room_row_body(g, r, code, key_prefix, owner, editable, show_owner, when, ne
 
     chips = "".join(
         f'<span class="tkchip {kind}">{lbl}</span>' for kind, lbl in _flags_for(r))
+    # The status chip says something only once the room has moved: "Awaiting
+    # Service" on every untouched card was the same words down the whole list.
+    # The RQS is on the card only when the header has not already named them.
+    _foot = (
+        ("" if cur == NOT_STARTED else
+         f'<span class="tkchip stchip" style="background:{bg};color:{ink};'
+         f'font-weight:700">{e(_status_words(cur))}</span>')
+        + chips
+        + (f'<span class="tkrqs">🧹 {e(owner)}</span>' if show_owner else
+           "" if (key_prefix == "mr" and _one_rqs and insp == _one_rqs) else
+           f'<span class="tkrqs">👤 {e(insp) or "—"}</span>'))
 
     c_txt, c_btn = st.columns([6.4, 1.15], vertical_alignment="center")
     with c_txt:
@@ -1125,10 +1267,8 @@ def _room_row_body(g, r, code, key_prefix, owner, editable, show_owner, when, ne
             f'<div class="tkguest">{e(guest) or "—"}</div>'
             + (f'<div class="tkarr">→ {e(arriving)}</div>' if arriving else "")
             + (f'<div class="tkmsg">📝 {e(note)}</div>' if note else "")
-            + f'<div class="tkfoot"><span class="tkchip stchip" style="background:{bg};color:{ink};'
-              f'font-weight:700">{e(_status_words(cur))}</span>{chips}'
-            f'<span class="tkrqs">{"🧹 " + e(owner) if show_owner else "👤 " + (e(insp) or "—")}</span></div>'
-            f'</div>'
+            + (f'<div class="tkfoot">{_foot}</div>' if _foot else "")
+            + f'</div>'
             f'<div class="tkdot" style="background:{accent}"></div>'
             f'</div>', unsafe_allow_html=True)
         # The room to do next carries its next step as a real button. Not while
@@ -1252,87 +1392,13 @@ def _seat(item):
     return (hk, _seatmap.get(hk, {}).get(code, (999, None))[0], code)
 
 
-def _day_strip(blocks):
-    """The whole day as one proportional bar, with the deadlines drawn on it."""
-    if not blocks:
-        return ""
-    s = _day.summary(blocks)
-    begin = _day._mins(_day.DAY_START)
-    finish = s["finish"]
-    span = max(finish, _day._mins(_day.CHECKIN)) - begin
-    if span <= 0:
-        return ""
-
-    def pct(m):
-        return 100.0 * m / span
-
-    segs, cur = "", begin
-    for b in blocks:
-        if b["travel"] > 0:
-            segs += f'<i class="go" style="width:{pct(b["travel"]):.3f}%"></i>'
-        if b["wait"] > 0:
-            segs += f'<i class="wait" style="width:{pct(b["wait"]):.3f}%"></i>'
-        # The lightest segment carries dark text; the three darker ones carry
-        # white. Room numbers on a bar are only worth putting there if they can
-        # be read at arm's length in a corridor.
-        if b["release"] is not None:
-            klass = "job late"
-        elif b["urgency"] >= 100:
-            klass = "job u3"
-        elif b["urgency"] >= 50:
-            klass = "job u2"
-        else:
-            klass = "job u0"
-        segs += (f'<i class="{klass}" style="width:{pct(b["minutes"]):.3f}%" '
-                 f'title="{e(b["room"])} · {b["minutes"]:.0f}m · done by '
-                 f'{_day.hhmm(b["end"])}"><b>{e(b["room"])}</b></i>')
-        cur = b["end"]
-
-    tgt = pct(_day._mins(_day.TARGET_END) - begin)
-    chk = pct(_day._mins(_day.CHECKIN) - begin)
-    # Pacing lands most charts exactly on the target, where the overrun is a
-    # rounding sliver. Half a minute is not late; showing "0m over" is.
-    over = s["over"] > 0.5
-    fin_txt = _day.hhmm(finish) + (" · " + _tf("day.over", "{m}m over", m="%.0f" % s["over"])
-                                   if over else " ✓")
-    return (
-        f'<div class="dayw">'
-        f'<div class="dayh"><b>{e(T("rooms.yourday"))}</b>'
-        f'<span class="fin{" over" if over else ""}">{e(fin_txt)}</span></div>'
-        f'<div class="daytrack">{segs}'
-        f'<span class="daymark soft" style="left:{tgt:.2f}%"></span>'
-        f'<span class="daymark" style="left:{chk:.2f}%"></span>'
-        f'</div>'
-        f'<div class="dayax"><span>{_day.hhmm(begin)}</span>'
-        f'<span>3:30 ▏ 4:00</span></div>'
-        f'<div class="daysum">'
-        + _tf("day.rooms", "{n} rooms", n=f'<b>{s["rooms"]}</b>') + " · "
-        + _tf("day.cleaning", "{m} cleaning", m=f'<b>{s["clean"]:.0f}m</b>') + " · "
-        + _tf("day.walking", "{m} walking", m=f'<b>{s["travel"]:.0f}m</b>')
-        # The sheet's minutes are standards the floor beats. Say by how much
-        # rather than silently quoting times nobody can trace back.
-        + (" · " + _tf("day.paced", "paced {p} under the sheet",
-                       p=f'<b>{(1 - s["pace"]) * 100:.0f}%</b>')
-           if s["pace"] < 0.995 else "")
-        + (" · " + _tf("day.waiting", "{m} waiting on a guest", m=f'<b>{s["wait"]:.0f}m</b>')
-           if s["wait"] > 0 else "")
-        + (" · " + _tf("day.late", "{n} late checkout(s)", n=f'<b>{s["late_rooms"]}</b>')
-           if s["late_rooms"] else "")
-        # Never present a guess as a plan: if the sheet carried no minutes for
-        # some rooms, the finish time is an estimate and has to say so.
-        + (" · " + _tf("day.untimed", "{n} with no time on the sheet, estimated",
-                       n=f'<b>{s["untimed"]}</b>')
-           if s["untimed"] else "")
-        + '</div></div>')
-
-
 _flat = sorted(shown_rooms, key=_seat)
 _mixed = len({g.get("housekeeper") for g, _ in _flat}) > 1
 
 def _when_for(g, r):
     blk = _seatmap.get(str(g.get("housekeeper", "")), {}).get(
         str(r.get("room", "")).strip().upper(), (999, None))[1]
-    return (T("rooms.by") + " " + _day.hhmm(blk["end"])) if blk else None
+    return _by(_day.hhmm(blk["end"])) if blk else None
 
 
 def _is_done(r):
@@ -1344,7 +1410,7 @@ def _is_done(r):
 # out of the way. The walking order is kept inside each group.
 if not _mixed:
     _hk0 = str(_flat[0][0].get("housekeeper", "")) if _flat else ""
-    _strip = _day_strip(_plan.get(_hk0) or [])
+    _strip = "" if _hero_strip else _day_strip(_plan.get(_hk0) or [])
     if _strip:
         st.markdown(_strip, unsafe_allow_html=True)
     _todo = [(g, r) for g, r in _flat if not _is_done(r)]
@@ -1385,7 +1451,7 @@ for _g, _r in (_flat if _mixed else []):
     # being useful the moment the day slips by ten minutes.
     _room_row(_g, _r, "mr", _g.get("housekeeper") or mine,
               show_owner=_mixed,
-              when=(T("rooms.by") + " " + _day.hhmm(_blk["end"])) if _blk else None)
+              when=_by(_day.hhmm(_blk["end"])) if _blk else None)
 
 # ── everyone else, for a manager who is on the floor today ───────────────────
 # Nothing is drawn until a name is picked: a closed section still runs its
@@ -1411,5 +1477,7 @@ if _aside is not None:
             for _g, _r in sorted(_theirs, key=lambda it: _key(it)[0]):
                 _blk = _key((_g, _r))[1]
                 _room_row(_g, _r, "mrx", _pick,
-                          when=(T("rooms.by") + " " + _day.hhmm(_blk["end"]))
-                          if _blk else None)
+                          when=_by(_day.hhmm(_blk["end"])) if _blk else None)
+
+# Last on the page: the watcher, and its one quiet line.
+_watch()
