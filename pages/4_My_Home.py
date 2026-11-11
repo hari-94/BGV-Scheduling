@@ -475,10 +475,16 @@ st.markdown("""<style>
 .hm-sum{background:#fff;border-radius:20px;padding:14px 16px;box-shadow:0 1px 2px rgba(25,28,32,.08)}
 .hm-sumh{display:flex;align-items:center;font-size:.95rem;font-weight:500}
 .hm-sumh span{margin-left:auto;font-size:.82rem;font-weight:400;color:#43474e}
-.hm-figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;text-align:center}
-.hm-figs div{background:#f3f4fa;border-radius:14px;padding:10px 4px}
-.hm-figs b{display:block;font-size:1.35rem;font-weight:500}
-.hm-figs span{display:block;font-size:.75rem;color:#43474e}
+.hm-figs{display:grid;gap:8px;
+  margin-top:12px;text-align:center}
+.hm-figs div{background:#f3f4fa;border-radius:14px;padding:14px 6px;min-width:0;overflow-wrap:anywhere}
+.hm-figs b{display:block;font-size:1.35rem;font-weight:500;margin-bottom:4px}
+.hm-figs span{display:block;font-size:.8rem;font-weight:500;color:#191c20}
+.hm-figs small{display:block;font-size:.72rem;color:#5b6170;margin-top:2px}
+/* One gap between the page's cards (HP, 11 Nov: "looks very close"). A
+   markdown block brings no gap of its own here, so each card carries it. */
+.hm-today,.hm-rqs,.hm-chg,.hm-tiles,.hm-list,.hm-sum{margin:0 0 16px !important}
+.st-key-hmrooms,.st-key-hmgotit{margin-bottom:16px}
 .hm-sec{font-size:.95rem;font-weight:500;margin:6px 4px 0}
 .st-key-hmweek [data-testid="stButtonGroup"]{justify-content:flex-end}
 @media (min-width:821px){.hm-head{font-size:1.8rem}}
@@ -657,17 +663,28 @@ def tally(start, end):
     return len(span), len(done), len(span) - len(done)
 
 
-_mo = ri.summarise_person([r for r in s_all["rows"] if mo_s <= r["date"] <= mo_e], pid=mine)
-_mo_total, _mo_done, _ = tally(mo_s, mo_e)
+_mo_rows = [r for r in s_all["rows"] if mo_s <= r["date"] <= mo_e]
+_mo = ri.summarise_person(_mo_rows, pid=mine)
+_mo_total, _mo_done, _mo_left = tally(mo_s, mo_e)
+# The month is only as long as the weeks posted: say where the sheet stops, so
+# "still to work" is not read as the whole month.
+_mo_last = max((r["date"] for r in _mo_rows), default="")
+_figs = [(_mo_done, T("home.m_worked"), T("home.m_of", n=_mo_total)),
+         (_mo_left, T("home.m_left"),
+          T("home.m_through", d=_day_name(datetime.date.fromisoformat(_mo_last)))
+          if _mo_last and _mo_last < mo_e else ""),
+         (_mo["off"], T("home.m_rest"), T("home.m_rest_sub"))]
+if _mo["n_paid_off"]:
+    _figs.append((_mo["n_paid_off"], T("home.m_vto"), ""))
 st.markdown(
     f'<div class="hm-sum"><div class="hm-sumh">{e(_MONTH[today.month - 1].title())}'
     f'<span>{e(T("home.week_line", n=tally(wk_s, wk_e)[0]))}</span></div>'
-    f'<div class="hm-figs">'
-    f'<div><b>{_mo_total}</b><span>{e(T("home.to_work"))}</span>'
-    f'<span>{e(T("home.done_n", n=_mo_done))}</span></div>'
-    f'<div><b>{_mo["off"]}</b><span>{e(T("home.days_off"))}</span></div>'
-    f'<div><b>{_mo["n_paid_off"]}</b><span>VTO</span></div>'
-    f'</div></div>', unsafe_allow_html=True)
+    # One row however narrow the screen: a 2 + 1 wrap read as two groups.
+    f'<div class="hm-figs" style="grid-template-columns:repeat({len(_figs)},minmax(0,1fr))">'
+    + "".join(f'<div><b>{n}</b><span>{e(lbl)}</span>'
+              + (f'<small>{e(sub)}</small>' if sub else "") + '</div>'
+              for n, lbl, sub in _figs)
+    + '</div></div>', unsafe_allow_html=True)
 
 # 6. Everything else, for whoever wants it.
 _record = st.expander(T("home.full_record"))

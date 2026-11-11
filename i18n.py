@@ -160,6 +160,15 @@ STRINGS = {
     "home.to_work":       ("Days to work", "Días de trabajo"),
     "home.done_n":        ("{n} done", "{n} hechos"),
     "home.days_off":      ("Days off", "Descansos"),
+    # The month card (HP, 11 Nov): "7 Days off" was read as seven days taken
+    # off. Each figure now says plainly what it counts.
+    "home.m_worked":      ("Days worked", "Días trabajados"),
+    "home.m_of":          ("of {n} on the schedule", "de {n} en el horario"),
+    "home.m_left":        ("Days still to work", "Días por trabajar"),
+    "home.m_through":     ("schedule posted to {d}", "horario publicado hasta {d}"),
+    "home.m_rest":        ("Rest days (R/OFF)", "Descansos (R/OFF)"),
+    "home.m_rest_sub":    ("part of your schedule", "parte de tu horario"),
+    "home.m_vto":         ("VTO days — paid", "Días VTO — pagados"),
     "home.full_record":   ("My full record", "Mi historial completo"),
     "home.k_week":        ("days this week", "días esta semana"),
     "home.k_month":       ("days this month", "días este mes"),
