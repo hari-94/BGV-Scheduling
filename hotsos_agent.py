@@ -381,6 +381,13 @@ def sync_room_status(cfg):
     import roomstatus as rs
     import staff_names
     from hotsos_client import HotSOSError, _pick, _ROOM_CODE
+    # The day HotSOS goes (12 Nov: down overnight) the switch is flipped and
+    # the floor marks rooms in the app. Mirroring the status then would write
+    # HotSOS's board -- stale, or all pending -- over every room they marked.
+    # Who holds each room is still mirrored: reconcile_charts reads it, and
+    # without it a housekeeper moved on the sheet (-> HotSOS) never reached
+    # the app (12 Nov, 2332E).
+    holders_only = not rs.mirrored()
     sched = db.load_full_schedule() or {}
     chart = {}
     for g in sched.get("groups_data") or []:
@@ -439,6 +446,12 @@ def sync_room_status(cfg):
                "inspected_at": inspected, "housekeeper": hk,
                "swapped_from": hk_chart if hk != hk_chart else None,
                "group_label": label, "inspector": insp, "updated_by": "HotSOS"}
+        if holders_only:
+            # No status, no times, no updated_by: those are the floor's marks.
+            row = {k: row[k] for k in ("room", "housekeeper", "swapped_from",
+                                       "group_label", "inspector")}
+            if not old:                            # no row yet: nobody has marked it
+                row["status"] = rs.PENDING
 
         def same(a, b):
             # Times come back from the database in its own offset; compare
@@ -452,8 +465,13 @@ def sync_room_status(cfg):
             return str(a or "") == str(b or "")
         if any(not same(row[k], old.get(k)) for k in row if k != "room"):
             rows.append(row)
-    if rows:
-        db.bulk_upsert_room_statuses(rows)
+    # One write per set of columns: PostgREST wants every row in a batch to
+    # carry the same keys, and holders_only rows differ (status on new rows).
+    shapes = collections.defaultdict(list)
+    for row in rows:
+        shapes[tuple(sorted(row))].append(row)
+    for batch in shapes.values():
+        db.bulk_upsert_room_statuses(batch)
     rec = {"at": clock.stamp(), "rooms": sum(counts.values()), "changed": len(rows),
            "counts": dict(counts), "unknown": sorted(unknown)}
     if rows or unknown:
