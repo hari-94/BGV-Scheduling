@@ -27,12 +27,12 @@ NAV_ITEMS = [
     ("pages/5_My_Rooms.py",      "My Rooms",      ":material/bed:", "_my_rooms", "nav.my_rooms"),
     ("cleaning_scheduler.py",    "Schedule",      ":material/cleaning_services:", "can_generate", "nav.schedule"),
     ("pages/1_Dashboard.py",     "Dashboard",     ":material/dashboard:", "can_view_dashboard", "nav.dashboard"),
-    ("pages/3_Roster_Import.py", "Roster Import", ":material/upload_file:", "can_generate", "nav.roster_import"),
+    ("pages/13_Whos_Working.py", "Who's Working", ":material/groups:", "_whos_working", "nav.whos_working"),
+    ("pages/3_Roster_Import.py", "Roster Import", ":material/upload_file:", "can_manage_users", "nav.roster_import"),
     ("pages/6_Property.py",      "Property",      ":material/apartment:", "can_view_insp_tab", "nav.property"),
     ("pages/9_Forecast.py",      "Forecast",      ":material/trending_up:", "can_view_dashboard", "nav.forecast"),
     ("pages/10_Stats.py",        "Stats",         ":material/monitoring:",    "can_manage_users", "nav.health"),
     ("pages/11_Report.py",       "Report",        ":material/summarize:",     "can_manage_users", "nav.report"),
-    ("pages/12_Questions.py",    "Questions",     ":material/quiz:",          "can_manage_users", "nav.questions"),
     ("pages/8_HotSOS.py",        "HotSOS",        ":material/sync_alt:", "can_manage_users", "nav.hotsos"),
     ("pages/7_Profile.py",       "Profile",       ":material/account_circle:", None, "nav.profile"),
     ("pages/2_Admin.py",         "Admin",         ":material/admin_panel_settings:", "can_manage_users", "nav.admin"),
@@ -380,6 +380,16 @@ def _visible(perm) -> bool:
     """
     if perm is None:
         return True
+    if perm == "_whos_working":
+        # Admins always; an RQS only on a day they are RQS 1 / RQS 2
+        # (whos_working.access, Hari 14 Nov).
+        try:
+            import whos_working
+            cu = auth.current_user()
+            return whos_working.can_see(cu["username"], cu["role"], cu.get("display_name") or "")
+        except Exception as ex:
+            print(f"[ui] who's-working check failed: {ex}")
+            return auth.can("can_manage_users")
     if perm != "_my_rooms":
         return auth.can(perm)
     role = st.session_state.get("role", "")

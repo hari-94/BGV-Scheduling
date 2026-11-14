@@ -38,11 +38,11 @@ st.markdown("""<style>
 # ran, which made the restore skip itself -- so a refresh on this page could
 # never have brought anybody back, cookie or no cookie.
 auth.require_login()
-# Admin and RQS both run schedules day to day, so both get this page.
-# can_generate is exactly that distinction: true for admin and rqs, false for
-# housekeepers (who get My Home instead).
-if not auth.can("can_generate"):
-    st.error("This page is for admins and RQS. Your own schedule is on **My Home**.")
+# Managers only (Hari, 14 Nov). It used to be every admin and every RQS
+# (can_generate); the RQS who run the day as RQS 1 / RQS 2 see who is working
+# on "Who's Working" instead (whos_working.py).
+if not auth.can("can_manage_users"):
+    st.error("Roster Import is for managers. Your own schedule is on **My Home**.")
     st.stop()
 IS_ADMIN = auth.can("can_manage_users")
 

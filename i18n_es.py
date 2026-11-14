@@ -491,4 +491,7 @@ ES.update({
         "— Pegar datos de cuartos, generar horarios, ver todas las pestañas y el panel",
     "— View-only: see their groups and the schedule":
         "— Sólo lectura: ver sus grupos y el horario",
+    # Roster Import is managers-only (14 Nov)
+    "Roster Import is for managers. Your own schedule is on **My Home**.":
+        "Importar horario es para los gerentes. Tu horario está en **Mi inicio**.",
 })

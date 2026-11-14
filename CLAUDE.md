@@ -46,13 +46,13 @@ several of them read the *real* schedule to test against a real day.
 | `roomstatus.py` | 105 | the one vocabulary for a room's state |
 | `assignments.py` | 92 | who is on which rooms today (shared by the page and the nav) |
 | `account_links.py` | 120 | which staff-sheet row an account is (`account_links` in app_settings): picked on Admin's Create User / Edit User, tried by My Home and My Rooms before any guess from the sign-in -- no Streamlit |
+| `pages/13_Whos_Working.py` + `whos_working.py` | 330 | (Hari, 14 Nov) today only: the people working, team by team, with their shift ("HSP 6" for a houseperson route, nothing for a plain ON), and today's RQS 1 / RQS 2. Managers always; an RQS only on a day they are RQS 1 / RQS 2 on the staff sheet -- the menu link appears that day only (`ui._visible("_whos_working")`, cached 5 min). They have the staff workbook for the month, so no other dates on purpose. Not in the Android app (appmode shows three pages). **Roster Import is managers-only** since the same day (`can_manage_users`; it was every admin and RQS) |
 | `pages/6_Property.py` | 300 | the property in 3-D, coloured by status — admin and RQS only |
 | `pages/11_Report.py` | 720 | rooms inspected and cleaned per person, beside their schedule days — managers only; its tables are drawn by `report_table.py` (a static component in `components/report_table/`: click a column name to sort) |
 | `report_data.py` | 870 | reads every GC8 Inspections day tab (office PC, 4 PM), matches typed names to people, counts — no Streamlit |
 | `report_timing.py` | 230 | the Report's Timing tab: when each room was started, marked done and inspected in HotSOS (the mirror's `room_status`), per housekeeper and per RQS, and the flags for late marking -- no Streamlit |
 | `credentials.py` | 270 | a service password changed on the Admin page reaches every agent PC sealed to that PC's own key; each PC signs in with it before keeping it — no Streamlit |
 | `teams_notes.py` + `arrival_sections.py` | 330 | 7:30 AM: the Arrival Report's notes to the two Teams chats, the housekeeping one with each room's HK and RQS from the sheet; the heading names are shared with the Schedule page |
-| `pages/12_Questions.py` + `manager_questions.py` | 330 | the managers' questionnaire: the decisions the 5 AM run guesses today (who helps first when short, Daily Service, inspectors, call-outs, quiet days, auto-push). Managers only; each manager's answers are their own app_settings row `mq_<username>` |
 | `property_map.py` | 400 | where every room is and what it costs to walk between two |
 | `daystart.py` | 210 | what to clean first, and when each room is reached |
 | `weekend_duties.py` | 170 | the sheet's Carpet and Stripping columns from the staff schedule |
@@ -89,7 +89,7 @@ models, no-guest rooms — deliberately unassigned).
 `app_settings` — a TEXT key plus JSONB payload used for everything that has no table
 of its own: `roster`, `staffsched_*`, `lang_<user>`, `session_<hash>`,
 `noteseen_<user>`; for the Report, `report_sync`, `report_days_<YYYY-MM>`,
-`report_names` (its name fixes) and `staff_left` (people who no longer work here). `account_links` is each account's row on the staff sheet, set on the Admin page. The managers' answers to the Questions page are `mq_<username>`, one row each; a question's `key` in `manager_questions.py` never changes, since answers are stored under it.
+`report_names` (its name fixes) and `staff_left` (people who no longer work here). `account_links` is each account's row on the staff sheet, set on the Admin page. (`mq_<username>` rows are the answers from the managers' questionnaire, a page removed on 14 Nov; nothing reads them.)
 
 `room_status` columns, and there are no others: `date, room, status, group_label,
 housekeeper, inspector, started_at, cleaned_at, inspected_at, marked_clean_at, notes,
