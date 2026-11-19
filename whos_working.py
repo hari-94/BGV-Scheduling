@@ -114,6 +114,8 @@ def day(all_rows, iso: str) -> dict:
         if r.get("group") == "rqs":
             for role in ri.rqs_roles(r.get("raw")):
                 rqs[role].append(r["person"])
+    # People, not rows: somebody on two sections (Nancy Ramirez in Building 3
+    # and Houseperson PM, 19 Nov) is one person working.
     return {"sections": list(sections.items()),
             "rqs1": " / ".join(rqs[1]), "rqs2": " / ".join(rqs[2]),
-            "total": sum(len(v) for v in sections.values())}
+            "total": len({n for v in sections.values() for n, _ in v})}

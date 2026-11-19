@@ -311,6 +311,12 @@ CHROME_CSS = """
 [data-testid="stToolbar"]{
   display:flex !important;background:transparent !important;
   pointer-events:none !important;padding:0 !important;}
+/* Streamlit's header strip is fixed over the top 60px in the page colour.
+   Each page used to clear it in its own stylesheet; one that didn't (Who's
+   Working, 19 Nov) had the menu's top row hidden under it. Cleared here for
+   every page; the sidebar button above is fixed in place on its own. */
+header[data-testid="stHeader"]{background:transparent !important;height:0 !important;
+  min-height:0 !important;}
 [data-testid="stMainMenu"],[data-testid="stMainMenuButton"],
 [data-testid="stAppDeployButton"],[data-testid="stStatusWidget"],
 [data-testid="stToolbarActions"],#MainMenu{display:none !important;}
