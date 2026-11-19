@@ -1403,6 +1403,7 @@ def run_loop():
     last_cred = _register("office")
     last_teams = 0
     last_preview = 0
+    last_arrival = 0
     _LOOP_PASS[0] = time.time()
     start_beat()
     while True:
@@ -1504,6 +1505,13 @@ def run_loop():
             except Exception as ex:
                 last_preview = time.time()
                 log(f"evening preview: {type(ex).__name__}: {ex}")
+
+            # The Arrival Report, from Outlook, when the flow didn't save it.
+            try:
+                last_arrival = _arrival_tick(cfg, last_arrival)
+            except Exception as ex:
+                last_arrival = time.time()
+                log(f"arrival report from Outlook: {type(ex).__name__}: {ex}")
 
             # The room-status mirror runs on its own thread (start_mirror).
             start_mirror()
@@ -1796,6 +1804,38 @@ def evening_preview(cfg, day=None, test=False):
     if not test:
         db._upsert_key(tn.PREVIEW_KEY, rec)
     return rec
+
+
+ARRIVAL_FETCH_EVERY = 20 * 60
+
+
+def _arrival_tick(cfg, last):
+    """From the loop: the Arrival Report the 5 AM build and the 7:30 notes
+    need, read straight from Outlook when the "Save Arrival Report to
+    SharePoint" flow hasn't put it in the folder (arrival_mail). From 22:30
+    for tomorrow's, and 00:00-10:30 for today's, every 20 minutes, only while
+    the folder has none. The flow's trigger went quiet after the Outlook
+    outage of 12 Nov and three nights' reports never reached the folder."""
+    if time.time() - last < ARRIVAL_FETCH_EVERY or not cfg.get("workbook"):
+        return last
+    now = clock.now()
+    if now.hour >= 12:
+        if (now.hour, now.minute) < (22, 30):
+            return time.time()
+        day = now.date() + _dt.timedelta(days=1)
+    elif (now.hour, now.minute) < (10, 30):
+        day = now.date()
+    else:
+        return time.time()
+    import daily_build
+    import arrival_mail
+    _, folder = daily_paths(cfg)
+    if not folder or daily_build.find_arrival_report(folder, day):
+        return time.time()
+    rec = arrival_mail.fetch(day, folder, log=log)
+    if rec.get("status") != "saved":
+        log(f"arrival report {day} from Outlook: {rec.get('status')} -- {rec.get('why')}")
+    return time.time()
 
 
 def _preview_tick(cfg, last):

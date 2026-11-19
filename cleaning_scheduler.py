@@ -130,7 +130,12 @@ def room_is_unallocated(r) -> bool:
 
     "Buyback, Buyback" is the resort holding the room back, not a guest
     leaving it, so it is the same case as Unallocated.
+
+    Not a room on a blocked floor that a guest arrives into (blocked_arrival,
+    14 Nov): that one is cleaned whatever its last guest was.
     """
+    if r.get("blocked_arrival"):
+        return False
     g = re.sub(r"\s+", " ", str(r.get("guest", "")).strip().lower())
     return g in ("unallocated", "---", "") or g.startswith("buyback")
 
@@ -4865,6 +4870,105 @@ def release_borrowed(groups, names, roster):
 
 #: Settings row naming the housekeepers on light duty (HP, 4 Nov). The reason
 #: is the manager's to know and is never stored -- only "light duty".
+def add_day_rooms(text, iso):
+    """Rooms a manager adds to a day's list that the dashboard doesn't have
+    (borrow_off[iso]["add_rooms"]: [{"room", "service", "time", "note"}];
+    Hari 17 Nov: the team's "Sheet5" tab, 53 Daily Service rooms for 18 Nov).
+    Appended to the dashboard's text in its own columns, so they are parsed,
+    packed, written to the sheet and pushed like any other row. A room the
+    list already has is left as the dashboard says. Text without a header
+    row (a hand paste) is left alone. Returns (text, [rooms added])."""
+    try:
+        rule = ((db._load_key("borrow_off") or {}).get(iso) or {}).get("add_rooms") or []
+    except Exception:
+        rule = []
+    lines = [l for l in str(text or "").splitlines() if l.strip()]
+    if not rule or not lines:
+        return text, []
+    low = [h.strip().lower() for h in lines[0].split("\t")]
+    if "room" not in low or "service" not in low:
+        return text, []
+    def _ix(*names):
+        return next((low.index(n) for n in names if n in low), None)
+    i_room, i_svc = low.index("room"), low.index("service")
+    i_time, i_notes, i_status = _ix("time", "time (min)"), _ix("notes"), _ix("status")
+    have = {l.split("\t")[i_room].strip().upper() for l in lines[1:] if len(l.split("\t")) > i_room}
+    added = []
+    for a in rule:
+        rm = str(a.get("room") or "").strip().upper()
+        if not rm or rm in have:
+            continue
+        cells = [""] * len(low)
+        cells[i_room], cells[i_svc] = rm, str(a.get("service") or SVC_DS)
+        if i_time is not None:
+            cells[i_time] = str(int(a.get("time") or 0))
+        if i_notes is not None:
+            cells[i_notes] = str(a.get("note") or "Added by the manager")
+        if i_status is not None:
+            cells[i_status] = "In House"
+        lines.append("\t".join(cells))
+        have.add(rm)
+        added.append(rm)
+    return "\n".join(lines), added
+
+
+def carve_trainees(rds, plan):
+    """A new housekeeper's day, set by the manager (borrow_off
+    "trainee_rooms": [{"name", "mix": {"120": 2, "70": 1}}], Hari 15 Nov:
+    "they are new so we are giving them this easy task"). Each gets exactly
+    that many Full Clean rooms of each size -- 120 a master, 70 a studio --
+    as whole apartments only (_cluster_adjacent_same_guest: an apartment is
+    never split between two people), out of the plan before it is packed.
+
+    No late checkouts, nothing held back to check, no blocked-floor arrivals.
+    Of the combinations that match the mix exactly, fewest pets, then fewest
+    early ins, then one building and fewest floors, then fewest apartments,
+    then the shortest walk.
+
+    Returns (rds without those rooms, [chart], [(name, why)] for anyone the
+    day had no exact match for)."""
+    import collections as _c
+    import itertools as _it
+    pool = [r for r in rds if r.get("service") == SVC_FC and not r.get("verify")
+            and not room_is_unallocated(r) and not str(r.get("late_checkout") or "").strip()
+            and not r.get("blocked_arrival") and r.get("time") in (70, 120, 140)]
+    bundles = _cluster_adjacent_same_guest(pool)
+    used, charts, missing = set(), [], []
+    for p in plan or []:
+        name = str(p.get("name") or "").strip()
+        want = _c.Counter({int(k): int(v) for k, v in (p.get("mix") or {}).items() if int(v)})
+        if not name or not want:
+            continue
+        fit = [b for b in bundles if not any(id(r) in used for r in b)
+               and not (_c.Counter(r["time"] for r in b) - want)]
+        best = None
+        for k in range(1, sum(want.values()) + 1):
+            for combo in _it.combinations(fit, k):
+                rooms = [r for b in combo for r in b]
+                if _c.Counter(r["time"] for r in rooms) != want:
+                    continue
+                try:
+                    walk = pmap.chart_travel([r["room"] for r in rooms])
+                except Exception:
+                    walk = 0
+                key = (sum(1 for r in rooms if str(r.get("pet") or "").strip()),
+                       sum(1 for r in rooms if "early in" in str(r.get("notes") or "").lower()),
+                       len({r["bld"] for r in rooms}),
+                       len({(r["bld"], r.get("floor", 0)) for r in rooms}),
+                       len(combo), walk)
+                if best is None or key < best[0]:
+                    best = (key, rooms)
+        if not best:
+            missing.append((name, "no whole apartments make exactly that mix today"))
+            continue
+        for r in best[1]:
+            used.add(id(r))
+        g = mk(best[1], SVC_FC)
+        g.update(housekeeper=name, inspector="", trainee=name)
+        charts.append(g)
+    return [r for r in rds if id(r) not in used], charts, missing
+
+
 LIGHT_DUTY_KEY = "light_duty"
 
 
@@ -6122,6 +6226,9 @@ if run:
 """, unsafe_allow_html=True)
         if True:
             try:
+                # Rooms the manager added for the day (borrow_off "add_rooms").
+                raw_input, st.session_state["added_rooms"] = add_day_rooms(
+                    raw_input, st.session_state.get("sched_day") or _today_iso())
                 df = parse_rooms(raw_input)
                 # Rooms out of service (blocked_rooms: a deep-clean floor) come
                 # off before anything is planned -- no housekeeper, no inspector,
@@ -6157,6 +6264,12 @@ if run:
                         else:
                             st.sidebar.caption("Email parsed — no late checkouts found.")
                     records_raw = df.to_dict("records")
+                    # A blocked room kept because a guest arrives (Hari, 14 Nov):
+                    # it must be cleaned -- never held back as "may be clean"
+                    # (a buyback, 3451F on 15 Nov) -- and its Notes say why it is
+                    # on the plan, so the sheet, the app and the phones show it.
+                    _blk_kept = {str(k[0]).strip().upper(): (str(k[1] or "") or "blocked").split(" (")[0]
+                                 for k in (st.session_state.get("blocked_kept") or []) if k}
                     rds = []
                     for r in records_raw:
                         rm_upper = str(r["Room"]).strip().upper()
@@ -6167,6 +6280,8 @@ if run:
                         elif excel_late: late_co = "Late Out"
                         else: late_co = ""
                         notes_parts = []
+                        if rm_upper in _blk_kept:
+                            notes_parts.append(f"Blocked floor ({_blk_kept[rm_upper]}) – guest arriving, clean this unit")
                         if r.get("NotesRaw","").strip(): notes_parts.append(r["NotesRaw"].strip())
                         if rm_upper in email_notes_map: notes_parts += email_notes_map[rm_upper]
                         has_stayover = (
@@ -6189,7 +6304,23 @@ if run:
                             "notes":"; ".join(notes_parts),"arriving":r.get("ArrivingGuest",""),
                             "res_type":r.get("ResType",""),"uncertain":has_stayover,
                             "verify":needs_verify,
+                            "blocked_arrival": rm_upper in _blk_kept,
                         })
+                    # New housekeepers on a set, easy mix for the day (borrow_off
+                    # "trainee_rooms", Hari 15 Nov): their rooms come out before
+                    # packing and go back as charts of their own.
+                    _tr_charts, st.session_state["trainee_given"] = [], []
+                    try:
+                        _tr_plan = ((db._load_key("borrow_off") or {}).get(
+                            st.session_state.get("sched_day") or _today_iso()) or {}).get("trainee_rooms") or []
+                    except Exception:
+                        _tr_plan = []
+                    if _tr_plan:
+                        rds, _tr_charts, _tr_missing = carve_trainees(rds, _tr_plan)
+                        st.session_state["trainee_given"] = (
+                            [(g["trainee"], [r["room"] for r in g["rooms"]]) for g in _tr_charts]
+                            + [(n, why) for n, why in _tr_missing])
+                    _tr_names = {g["trainee"] for g in _tr_charts}
                     fg = build_all_groups(rds)
                     fc_gs=[g for g in fg if g.get("service_type")==SVC_FC and not g.get("verify_group")]
                     ih_gs=[g for g in fg if g.get("service_type")==SVC_IH and not g.get("verify_group")]
@@ -6208,7 +6339,7 @@ if run:
                     # (The new solve_full_clean already consolidates to the fewest
                     # charts, so the legacy tiny-merge pass below is disabled to
                     # avoid undoing its tidy, building-coherent packing.)
-                    fg=[g for g in fg if g["rooms"]]
+                    fg=[g for g in fg if g["rooms"]] + _tr_charts
                     n_fc=[g for g in fg if g.get("service_type")==SVC_FC and not g.get("verify_group")]
                     ih2=[g for g in fg if g.get("service_type")==SVC_IH and not g.get("verify_group")]
                     ds2=[g for g in fg if g.get("service_type")==SVC_DS and not g.get("verify_group")]
@@ -6247,7 +6378,16 @@ if run:
                         except Exception as _ex:
                             print(f"[app] Daily Service pick failed: {_ex}")
 
+                    # The trainees have their charts already; nobody else is handed
+                    # them, and they are never given anything more.
+                    present_hk = [n for n in present_hk if n not in _tr_names]
+
                     def _staff(fg, present_hk, present_insp, release=()):
+                        # Trainee charts sit out every pass that deals rooms
+                        # (fill_from_unstaffed would top a 190-minute day up to
+                        # 380) and come back for inspectors.
+                        _tr = [g for g in fg if g.get("trainee")]
+                        fg = [g for g in fg if not g.get("trainee")]
                         hk_asgn, used_hk_set = assign_hk_building_aware(
                             fg, present_hk, roster, ds_team=_ds_team)
                         for g in fg: g["housekeeper"] = hk_asgn.get(g["label"],"")
@@ -6265,6 +6405,10 @@ if run:
                         # Light duty last, so it sees the day as staffed (HP, 4 Nov).
                         fg, st.session_state["light_duty_eased"] = ease_light_duty(
                             fg, light_duty_names(), roster)
+                        for g in _tr:
+                            g["housekeeper"] = g["trainee"]
+                        fg = fg + _tr
+                        used_hk_set = set(used_hk_set) | {g["trainee"] for g in _tr}
                         inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
                         return fg, inspectors, used_hk_set, released
 
@@ -6376,7 +6520,7 @@ if run:
                         import schedule_audit as _sa
                         _sd = _datetime.strptime(st.session_state.get("sched_day") or _today_iso(),
                                                  "%Y-%m-%d").date()
-                        _found = _sa.check(fg, day=_sd, present=set(present_hk),
+                        _found = _sa.check(fg, day=_sd, present=set(present_hk) | _tr_names,
                                            rqs2=rqs2 or None)
                         st.session_state["rule_check"] = _found
                         for _f in _sa.rules(_found):

@@ -241,6 +241,8 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
         generate.released = []
         generate.light_duty = []
         generate.blocked, generate.blocked_kept = [], []
+        generate.trainees = []
+        generate.added = []
         generate.roles = {}
         generate.ds_auto = {}
         generate.leftover = []
@@ -309,8 +311,18 @@ def generate(room_text: str, arrival_text: str, publish=True, timeout=900, day=N
             rooms_in = [l.split("\t")[0] for l in room_text.splitlines()
                         if l.strip() and l.split("\t")[0].strip().lower() != "room"]
             rooms_in = [r for r in rooms_in if r.strip().upper() not in off]
+            # Rooms a manager added for the day (borrow_off "add_rooms") are
+            # in the day's list too, though not in the dashboard's text.
+            generate.added = list(at.session_state["added_rooms"]
+                                  if "added_rooms" in at.session_state else [])
+            rooms_in += generate.added
             hk = at.session_state["hk_roster"] if "hk_roster" in at.session_state else {}
-            present = {n for n, v in hk.items() if v.get("present")} | {b[0] for b in generate.borrowed}
+            # Trainees on a set mix for the day (borrow_off "trainee_rooms") are
+            # working too, though the sheet has them on an "Assign ..." cell.
+            generate.trainees = [tuple(x) for x in (at.session_state["trainee_given"]
+                                                    if "trainee_given" in at.session_state else [])]
+            present = ({n for n, v in hk.items() if v.get("present")} | {b[0] for b in generate.borrowed}
+                       | {t[0] for t in generate.trainees if isinstance(t[1], (list, tuple))})
             generate.audit = sa.check(fg, day=day or clock.today(), rooms_in=rooms_in,
                                       present=present, rqs2=generate.roles.get("rqs2") or None)
         except Exception as ex:

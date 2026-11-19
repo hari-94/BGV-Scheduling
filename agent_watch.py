@@ -133,11 +133,23 @@ def problems(cfg) -> list:
     folder = Path(cfg["workbook"]).parent / "Arrival Reports" if cfg.get("workbook") else None
     if folder and ((now.hour, now.minute) >= (21, 30) or now.hour < 5):
         day = today + _dt.timedelta(days=1) if now.hour >= 12 else today
-        if not daily_build.find_arrival_report(folder, day):
+        # The office PC also looks in Outlook itself from 22:30 (arrival_mail);
+        # what it found says whose move it is.
+        fetched = db._load_key("arrival_fetch") or {}
+        fetched = fetched if fetched.get("date") == str(day) else {}
+        report = daily_build.find_arrival_report(folder, day)
+        if not report:
             # The same words either side of midnight, so it is one alert, not two.
             out.append(f"No Arrival Report for {day:%a %b %d} has arrived yet. Ask the front desk to "
                        "send it to *GC8OPS (not only *GC8 FrontDesk) -- any subject with 'Arrival' "
-                       "in it works.")
+                       "in it works."
+                       + (" The office PC looked in Outlook too and found no such e-mail."
+                          if fetched.get("status") == "none" else ""))
+        elif fetched.get("status") == "saved" and report.name == fetched.get("file"):
+            out.append(f"The Arrival Report for {day:%a %b %d} was in Outlook but the 'Save Arrival "
+                       "Report to SharePoint' flow didn't save it -- the office PC saved it from "
+                       "Outlook instead. Turn the flow off and on in Power Automate so it picks up "
+                       "the next one.")
 
     # the HotSOS mirror, through the day
     s = db._load_key(getattr(hs, "STATUS_SYNC_KEY", "hotsos_status_sync")) or {}

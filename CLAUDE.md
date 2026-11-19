@@ -537,6 +537,51 @@ until 11, never repeats a chat that already took it, and `teams_notes_sent`
 records what happened. No report or no tab by 11: nothing is sent, and the
 record says why.
 
+**The Arrival Report reaches the folder by a flow, with a net under it** (14
+Nov). "Save Arrival Report to SharePoint" (Hari's Power Automate) saves any
+Inbox e-mail with "Arrival" in the subject into Arrival Reports. After the
+Outlook outage of 12 Nov its trigger went quiet -- status On, no failed runs,
+no runs at all -- and three nights' reports never reached the folder; 14 Nov
+was built without one. **Turning the flow off and on** re-registered the
+trigger (it then caught up on the missed e-mails). The net is
+`arrival_mail.py`: from 22:30 for tomorrow's report, and 00:00-10:30 for
+today's, every 20 minutes while the folder has none, the agent opens Outlook
+in its `pa-browser` profile (under sharepoint's browser lock), finds the
+newest message whose *subject* has "Arrival" and the day's date (the first
+m/d in the list entry -- the received time and an older message's received
+date come after it) and saves its text as "Arrival Report MM-DD-YYYY (from
+Outlook).txt". Its record is `arrival_fetch`; agent_watch says when the file
+in use came from Outlook (the flow wants turning off and on), and when
+Outlook had no such e-mail either (the front desk hasn't sent it).
+
+**A blocked floor's room with a guest arriving is cleaned and says so**
+(Hari, 14 Nov). blocked_rooms keeps it on the plan; the page now also gives
+it `blocked_arrival`, so `room_is_unallocated` never holds it back as "may be
+clean" (3451F, a buyback, on 15 Nov), and its Notes lead with "Blocked floor
+(deep clean) – guest arriving, clean this unit" -- on the sheet, the app and
+the phones.
+
+**A new housekeeper can be given a set, easy day** (Hari, 15 Nov):
+`borrow_off[<date>]["trainee_rooms"] = [{"name": "Janelly", "mix": {"120": 1,
+"70": 1}}, ...]` -- 120 a master, 70 a studio. `carve_trainees` takes exactly
+that mix out of the day's Full Cleans before packing, whole apartments only,
+no late checkouts or held rooms, fewest pets / early ins / buildings / floors
+first, and gives each a chart of their own; `_staff` keeps those charts out
+of every pass that deals rooms (fill_from_unstaffed would top a 190-minute
+day up to 380) and puts them back for inspectors. Name them in the same
+day's `names` too, so a short day never borrows them. The sheet has them on
+an "Assign ..." cell (other duty), so both rule checks count trainees as
+working. Keyed by date, so it lapses by itself.
+
+**Rooms the dashboard doesn't have can be added for a day** (Hari, 17 Nov):
+`borrow_off[<date>]["add_rooms"] = [{"room", "service", "time", "note"}]`.
+`add_day_rooms` appends them to the room text in the dashboard's own
+columns (status In House, the note in Notes) before `parse_rooms`, so they
+are packed, written to the sheet and pushed like any other row; a room the
+dashboard already lists is left as it says. First used for the team's
+"Sheet5" tab in GC8 Inspections: 53 Daily Service rooms for 18 Nov. The
+build's rule check counts them as in the day's list (`generate.added`).
+
 **At 9 PM tomorrow's charts go to Hari's own chat** (HP, 4 Nov).
 `hotsos_agent.evening_preview` builds tomorrow as a preview (nothing saved)
 from the forecast's room list (`ssrs_rooms_<date>`) and posts one Adaptive
