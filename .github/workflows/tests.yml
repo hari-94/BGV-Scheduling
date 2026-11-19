@@ -1,0 +1,27 @@
+name: Tests
+# The scheduling rules (tests/), on every push to main. No database, no
+# secrets: the tests run on stored room lists with the guests' names replaced.
+# A failure doesn't stop Streamlit Cloud deploying; GitHub e-mails the pusher.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v

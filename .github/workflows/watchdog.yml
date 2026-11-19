@@ -1,0 +1,39 @@
+name: Watchdog
+# The office PC's outside alarm: posts to Hari's Teams test chat when the PC
+# goes quiet, the 5 AM build hasn't happened, or the app stops answering.
+# See .github/watchdog.py. Public repo, public logs: it prints counts only.
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"   # every 30 min, off the top of the hour (GitHub runs late at :00)
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "Post a test card to the Teams test chat"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check the office PC, today's build and the app
+        run: python .github/watchdog.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          WATCHDOG_TEST: ${{ inputs.test }}

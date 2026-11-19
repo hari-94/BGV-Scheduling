@@ -503,6 +503,23 @@ loop came round in the last 15 minutes: when the loop wrote the beat, the 5 AM
 build -- three or four minutes of nothing else -- read as an outage and the
 backup stood in (19 and 20 Oct).
 
+**GitHub watches the office PC from outside** (19 Nov). The PC sends its own
+alerts, so it can't say it has gone quiet: on 12 Nov a Windows Update reboot
+at 00:34 stopped everything until a sign-in at 08:45, unnoticed. The
+`Watchdog` workflow (`.github/watchdog.py`, every 30 min at :07 and :37)
+reads the database and posts to the `test` Teams webhook when the heartbeat
+is over 20 minutes old or the backup PC is writing it, when today's build
+isn't done by 5:45 (or failed, or is stuck "running"), or when the app misses
+two health checks running. Once per problem, again after 6 hours, and a line
+when it clears; record `gh_watchdog`. Secrets `SUPABASE_URL`/`SUPABASE_KEY`
+(the app's publishable key). **The repo is public, so are the run logs**: it
+prints counts only. "Run workflow" with *test* ticked posts a test card. The
+`Tests` workflow runs `tests/` on every push to main (no secrets needed).
+Why the tasks still start only at sign-in: the agent reads and writes the
+OneDrive-synced folders, and OneDrive syncs only in a signed-in session; and
+hvardan isn't a local admin on the domain PC, so auto-logon or Windows Update
+restart hours are IT's to set.
+
 **A skipped big-workbook tab is retried, and call-offs after the build are
 flagged** (3 Nov). The 5 AM build asks SharePoint once before writing GC8
 Inspections 2026; that morning it answered 503, the tab was "skipped", nothing
