@@ -301,14 +301,29 @@ STRINGS = {
     "prop.av_all":        ("Whole team", "Todo el equipo"),
     "prop.play_start":    ("▶ Play", "▶ Jugar"),
     "prop.play_stop":     ("■ Exit", "■ Salir"),
-    "prop.play_help":     ("W / S or ↑ ↓ walk · A / D or ← → turn · Shift run · "
-                           "drag to look · Q / E lift up / down · Esc to stop",
-                           "W / S o ↑ ↓ caminar · A / D o ← → girar · Shift correr · "
-                           "arrastra para mirar · Q / E ascensor sube / baja · Esc para salir"),
-    "prop.play_lift":     ("Lift or stairs here: Q up, E down",
-                           "Ascensor o escaleras aquí: Q sube, E baja"),
-    "prop.play_up":       ("Up", "Subir"),
-    "prop.play_down":     ("Down", "Bajar"),
+    "prop.play_help":     ("W / S walk · A / D turn · Space jump (twice to double) · "
+                           "Shift sprint · R run on/off · Q / E floor up / down · "
+                           "M go to · drag to look · H hide help · Esc stop",
+                           "W / S caminar · A / D girar · Espacio saltar (dos veces: doble) · "
+                           "Shift correr rápido · R correr sí/no · Q / E piso arriba / abajo · "
+                           "M ir a · arrastra para mirar · H ocultar ayuda · Esc salir"),
+    "prop.play_map":      ("Go to", "Ir a"),
+    "prop.play_floors":   ("Buildings and floors", "Edificios y pisos"),
+    "prop.play_team":     ("Team", "Equipo"),
+    "prop.play_office":   ("Housekeeping office", "Oficina de housekeeping"),
+    "prop.play_next":     ("Next room to visit", "Siguiente cuarto por visitar"),
+    "prop.play_hunt":     ("Hunt", "Búsqueda"),
+    "prop.play_warm":     ("Something is hidden nearby…", "Hay algo escondido cerca…"),
+    "prop.play_f_egg":    ("Egg!", "¡Huevo!"),
+    "prop.play_f_bunny":  ("Bunny!", "¡Conejo!"),
+    "prop.play_f_golden": ("Golden bunny!", "¡Conejo dorado!"),
+    "prop.play_f_pico":   ("You found Pico!", "¡Encontraste a Pico!"),
+    "prop.play_f_duck":   ("Quack!", "¡Cuac!"),
+    "prop.play_f_all":    ("Hunt complete!", "¡Búsqueda completa!"),
+    "prop.play_sound":    ("Sound", "Sonido"),
+    "prop.play_no_floor": ("Step off the bridge to change floor",
+                           "Sal del puente para cambiar de piso"),
+    "prop.play_walk":     ("▶ Walk here", "▶ Caminar aquí"),
     "prop.play_quests":   ("Rooms to visit", "Cuartos por visitar"),
     "prop.play_help_q":   ("need help", "necesitan ayuda"),
     "prop.play_ready_q":  ("ready for RQS", "listos para RQS"),

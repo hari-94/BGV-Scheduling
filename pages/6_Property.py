@@ -139,9 +139,10 @@ PLAYER = {"look": av.look_of(looks, _me_name),
           "name": av.short_name(_me_name) or _me_name}
 # The game's own words, so the game is bilingual like the rest of the page.
 PLAY_TXT = {k: T(f"prop.play_{k}") for k in (
-    "start", "stop", "help", "lift", "up", "down", "quests", "help_q",
-    "ready_q", "xp", "visited", "level", "bld", "you", "here", "since",
-    "full")}
+    "start", "stop", "help", "quests", "help_q", "ready_q", "xp", "visited",
+    "level", "bld", "you", "since", "full", "map", "floors", "team", "office",
+    "next", "hunt", "warm", "f_egg", "f_bunny", "f_golden", "f_pico", "f_duck",
+    "f_all", "sound", "no_floor", "walk")}
 
 # roomstatus owns the vocabulary and the colours; the model must not invent
 # its own or the legend here stops matching the phone in somebody's hand.
@@ -305,13 +306,19 @@ HTML = """
   </div>
   <div id="labels"></div>
   <div id="btns">
+    <button id="mapbtn" class="ponly" type="button">&#x1F5FA;</button>
+    <button id="sndbtn" class="ponly" type="button">&#x1F507;</button>
     <button id="playbtn" type="button"></button>
     <button id="fsbtn" type="button">&#x26F6;</button>
   </div>
   <div id="phud"></div>
+  <canvas id="mini" width="560" height="168"></canvas>
+  <div id="goto"></div>
   <div id="near"></div>
   <div id="toast"></div>
+  <div id="fade"></div>
   <div id="joy"><div id="knob"></div></div>
+  <div id="actbtns"><button id="runbtn" type="button">&#x1F3C3;</button><button id="jumpbtn" type="button">&#x2912;</button></div>
   <div id="liftbtns"><button id="upbtn" type="button">&#9650;</button><button id="dnbtn" type="button">&#9660;</button></div>
   <canvas id="cv" tabindex="0"></canvas>
 </div>
@@ -351,12 +358,39 @@ HTML = """
   #liftbtns{position:absolute;right:16px;bottom:22px;z-index:5;display:none;flex-direction:column;gap:8px}
   #liftbtns button{font-size:1.1rem;padding:12px 16px}
   #wrap.playing #hint,#wrap.playing #labels{display:none}
+  .ponly{display:none}
+  #wrap.playing .ponly{display:inline-block}
+  #mini{position:absolute;left:12px;top:10px;z-index:4;width:280px;height:84px;display:none;
+    border-radius:10px;background:rgba(255,255,255,.9);box-shadow:0 4px 14px rgba(22,32,46,.15);
+    cursor:crosshair}
+  #goto{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;display:none;
+    width:min(560px,92%);max-height:80%;overflow:auto;background:rgba(255,255,255,.97);
+    border-radius:16px;padding:14px 16px;box-shadow:0 12px 40px rgba(22,32,46,.3);
+    font-size:.82rem;color:#16202e}
+  #goto h5{margin:10px 0 6px;font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:#5b6b7e}
+  #goto .row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0}
+  #goto .row b{width:84px;flex:none}
+  #goto button{font:600 .8rem -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;border:1px solid #cbd6e2;
+    background:#f4f7fa;color:#1e3350;border-radius:8px;padding:5px 10px;cursor:pointer}
+  #goto button:hover{background:#e3ecf7}
+  #goto button.here{background:#1e3350;color:#fff;border-color:#1e3350}
+  #goto .x{float:right;border:0;background:none;font-size:1.1rem;padding:0 4px}
+  #fade{position:absolute;inset:0;z-index:6;background:#fff;opacity:0;pointer-events:none;
+    transition:opacity .22s}
+  #fade.on{opacity:1}
+  #actbtns{position:absolute;right:86px;bottom:22px;z-index:5;display:none;flex-direction:column;gap:8px}
+  #actbtns button{font-size:1.1rem;padding:12px 15px;border:1px solid #cbd6e2;
+    background:rgba(255,255,255,.94);border-radius:10px;box-shadow:0 2px 8px rgba(22,32,46,.12)}
+  #actbtns button.on{background:#f5a524;border-color:#d48806}
   #hud{position:absolute;left:12px;top:10px;z-index:3;pointer-events:none}
   #hint{font-size:.68rem;letter-spacing:.03em;color:#64748b;background:rgba(255,255,255,.8);
     padding:4px 9px;border-radius:7px;display:inline-block}
   #pick{margin-top:7px;font-size:.8rem;color:#16202e;background:rgba(255,255,255,.94);
     padding:7px 11px;border-radius:9px;display:none;box-shadow:0 4px 16px rgba(22,32,46,.15)}
   #pick b{font-size:.95rem}
+  #pick{pointer-events:auto}
+  #walkhere{margin-top:7px;font:700 .78rem -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    border:0;background:#1a9e4b;color:#fff;border-radius:8px;padding:6px 11px;cursor:pointer}
   #pick span{color:#64748b}
   #labels{position:absolute;inset:0;z-index:2;pointer-events:none}
   .lv{position:absolute;transform:translate(-50%,-50%);font-size:.62rem;font-weight:700;
@@ -655,6 +689,7 @@ DATA.boxes.forEach(b=>{
   m.position.set(b.x, b.y, z);
   m.castShadow = true; m.receiveShadow = true;
   m.userData = b;
+  b._z = z;
   root.add(m); meshes.push(m);
   const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
     new THREE.LineBasicMaterial({color:0x2b3a4a, transparent:true, opacity:0.2}));
@@ -873,7 +908,9 @@ cv.addEventListener("click", e=>{
     } else {
       line2 = "<br><span>not on a chart today</span>";
     }
-    pick.innerHTML = "<b>"+d.code+"</b> <span>"+where+"</span>"+line2;
+    pick.innerHTML = "<b>"+d.code+"</b> <span>"+where+"</span>"+line2+
+      "<br><button id='walkhere' type='button'>"+esc((DATA.txt||{}).walk||"▶ Walk here")+"</button>";
+    document.getElementById("walkhere").onclick = ()=>{ pick.style.display = "none"; walkHere(d.code); };
   }
 });
 
@@ -994,45 +1031,354 @@ function buildPlayer(look, role){
   return {g, legs, arms};
 }
 
-const P = {lv:null, x:0, z:CORR_Z, feet:0, head:Math.PI/2, phase:0, xp:0,
-           visited:new Set()};
+const P = {lv:null, x:0, z:CORR_Z, ground:0, air:0, vy:0, jumps:0, feet:0,
+           head:Math.PI/2, phase:0, speed:0, xp:0, visited:new Set(), found:new Set(),
+           walked:0, help:true};
 let me = null, meTag = null, lamp = null, ride = null, built = false;
+let runOn = false, muted = true;
 let pcYaw = -Math.PI/2, pcPitch = 0.2, pcDist = 7;
-const quests = [];
+const quests = [], hunt = [], bursts = [];
+const decor = {snow:null, gondola:[], steam:[], fires:[]};
+/* jump physics, in model units: a jump clears about 1.5, two about 2.6,
+   and nobody goes through the ceiling of their own corridor */
+const GRAV = 26, JUMP_V = 8.8, CEIL = 3.7, HEIGHT = 1.95;
+const WALK_V = 5.5, RUN_V = 13, BACK_V = 3.2;
 
 /* ---- the day's score, kept in this browser only ---- */
 const SAVE_KEY = "bgv_play_" + (DATA.day || "");
 function save(){
   try{
     localStorage.setItem(SAVE_KEY, JSON.stringify({xp:P.xp, visited:[...P.visited],
-      lv:P.lv, x:P.x, z:P.z, head:P.head, yaw:pcYaw, playing}));
+      found:[...P.found], lv:P.lv, x:P.x, z:P.z, head:P.head, yaw:pcYaw, playing}));
+    localStorage.setItem("bgv_play_sound", muted ? "0" : "1");
   }catch(e){}
 }
 let saved = null;
 try{ saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null"); }catch(e){ saved = null; }
-if(saved){ P.xp = saved.xp || 0; (saved.visited || []).forEach(c=>P.visited.add(c)); }
+if(saved){
+  P.xp = saved.xp || 0;
+  (saved.visited || []).forEach(c=>P.visited.add(c));
+  (saved.found || []).forEach(c=>P.found.add(c));
+}
+try{ muted = localStorage.getItem("bgv_play_sound") !== "1"; }catch(e){}
 
+const OFFICE = (DATA.facils||[]).find(f=>f.kind==="office" && /housekeeping/i.test(f.label||""))
+            || (DATA.facils||[]).find(f=>f.kind==="office");
 function spawn(){
   if(saved && saved.lv && where(saved.lv, saved.x, saved.z)){
     P.lv = saved.lv; P.x = saved.x; P.z = saved.z; P.head = saved.head || P.head;
     pcYaw = saved.yaw != null ? saved.yaw : pcYaw;
-  } else {
+  } else if(OFFICE && where(OFFICE.level, OFFICE.x, CORR_Z)){
     /* the day starts at the housekeeping office */
-    const off = (DATA.facils||[]).find(f=>f.kind==="office" && /housekeeping/i.test(f.label||""))
-             || (DATA.facils||[]).find(f=>f.kind==="office");
-    const r0 = off && where(off.level, off.x, CORR_Z);
-    if(r0){ P.lv = off.level; P.x = off.x; }
-    else { const p = Object.values(plates)[0]; P.lv = p.lv; P.x = (p.x0 + p.x1)/2; }
-    P.z = CORR_Z;
+    P.lv = OFFICE.level; P.x = OFFICE.x; P.z = CORR_Z;
+  } else {
+    const p = Object.values(plates)[0]; P.lv = p.lv; P.x = (p.x0 + p.x1)/2; P.z = CORR_Z;
   }
-  P.feet = FLOOR(P.lv);
+  P.ground = P.feet = groundAt(P.lv, P.x, P.z);
+}
+function groundAt(lv, x, z){
+  const r = where(lv, x, z);
+  return r && r.bridge ? DECK(lv) : FLOOR(lv);
+}
+
+/* ---- a seeded die: the same hunt for everybody, a new one every day ---- */
+function rng(seed){
+  return ()=>{
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s){
+  let h = 2166136261;
+  for(let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+const M = c=>new THREE.MeshLambertMaterial({color:c});
+
+/* ---- the hunt: eggs, bunnies, one golden bunny, and Pico ---------------- */
+const EGG_COLS = ["#fbcfe8", "#bfdbfe", "#bbf7d0", "#fde68a", "#ddd6fe"];
+const EGG_INK = ["#db2777", "#2563eb", "#16a34a", "#d97706", "#7c3aed"];
+const eggMats = [];
+function eggMat(i){
+  i = i % EGG_COLS.length;
+  if(eggMats[i]) return eggMats[i];
+  const c = document.createElement("canvas"); c.width = 128; c.height = 64;
+  const g = c.getContext("2d");
+  g.fillStyle = EGG_COLS[i]; g.fillRect(0, 0, 128, 64);
+  g.strokeStyle = EGG_INK[i]; g.lineWidth = 5; g.beginPath();
+  for(let x = 0; x <= 128; x += 16) g.lineTo(x, x % 32 ? 26 : 38);
+  g.stroke();
+  g.fillStyle = "#ffffff";
+  for(let x = 8; x < 128; x += 21){ g.beginPath(); g.arc(x, 12, 3.5, 0, 7); g.fill();
+                                     g.beginPath(); g.arc(x + 10, 52, 3.5, 0, 7); g.fill(); }
+  return (eggMats[i] = new THREE.MeshLambertMaterial({map:new THREE.CanvasTexture(c)}));
+}
+function makeEgg(i){
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.22, 18, 14), eggMat(i));
+  m.scale.set(1, 1.3, 1); m.castShadow = true;
+  const g = new THREE.Group(); m.position.y = 0.3; g.add(m);
+  return g;
+}
+const BUNNY_COLS = [0xf8fafc, 0xe7d8c4, 0xb8a593, 0xd1d5db, 0xf3e8d2];
+function makeBunny(i, golden){
+  const g = new THREE.Group();
+  const fur = golden ? new THREE.MeshLambertMaterial({color:0xf5c542, emissive:0x7a5600})
+                     : M(BUNNY_COLS[i % BUNNY_COLS.length]);
+  const pink = M(0xff9fb5), ink = M(0x1f2937), white = M(0xffffff);
+  const add = (geo, m, x, y, z)=>{ const o = new THREE.Mesh(geo, m); o.position.set(x, y, z);
+                                   o.castShadow = true; g.add(o); return o; };
+  add(new THREE.SphereGeometry(0.26, 16, 12), fur, 0, 0.26, 0).scale.set(1, 0.9, 1.15);
+  add(new THREE.SphereGeometry(0.17, 16, 12), fur, 0, 0.52, 0.2);
+  [-1, 1].forEach(s=>{
+    const ear = add(new THREE.CylinderGeometry(0.045, 0.06, 0.36, 10), fur, s*0.075, 0.78, 0.15);
+    ear.rotation.z = -s*0.18;
+    const inner = add(new THREE.BoxGeometry(0.04, 0.26, 0.01), pink, s*0.08, 0.78, 0.2);
+    inner.rotation.z = -s*0.18;
+    add(new THREE.SphereGeometry(0.025, 8, 6), ink, s*0.07, 0.56, 0.35);
+  });
+  add(new THREE.SphereGeometry(0.03, 8, 6), pink, 0, 0.5, 0.37);
+  add(new THREE.SphereGeometry(0.08, 10, 8), white, 0, 0.28, -0.3);
+  return g;
+}
+/* Pico, the peak who waves on My Home, in three dimensions */
+function makePico(){
+  const g = new THREE.Group();
+  const peak = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.1, 6),
+    new THREE.MeshPhongMaterial({color:0x2f6fc4, flatShading:true, shininess:0}));
+  peak.position.y = 0.55; peak.castShadow = true; g.add(peak);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.42, 6),
+    new THREE.MeshPhongMaterial({color:0xffffff, flatShading:true, shininess:0}));
+  cap.position.y = 0.55 + 0.55 - 0.21 + 0.005; g.add(cap);
+  [-1, 1].forEach(s=>{
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 10), M(0xffffff));
+    eye.position.set(s*0.13, 0.5, 0.29); g.add(eye);
+    const pup = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), M(0x001b3e));
+    pup.position.set(s*0.13, 0.5, 0.36); g.add(pup);
+    const ck = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), M(0xff8fa8));
+    ck.position.set(s*0.23, 0.38, 0.27); ck.scale.z = 0.4; g.add(ck);
+  });
+  const arm = new THREE.Group(); arm.position.set(0.32, 0.45, 0.05); g.add(arm);
+  const a = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.42, 8), M(0x1f4f96));
+  a.geometry.translate(0, 0.21, 0); arm.add(a);
+  arm.rotation.z = -0.9;
+  g.userData.arm = arm;
+  const spark = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), new THREE.MeshBasicMaterial({color:0xffb300}));
+  spark.position.set(0.0, 1.32, 0); g.add(spark);
+  return g;
+}
+/* a glass shelf under anything that floats, so "jump for it" reads at a glance */
+function shelf(){
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.05, 20),
+    new THREE.MeshLambertMaterial({color:0xbfe3ff, transparent:true, opacity:0.55}));
+  return m;
+}
+function huntSpots(){
+  const R = rng(hashStr("hunt|" + (DATA.day || "")));
+  const rects = Object.values(walk).flat();
+  const total = rects.reduce((s, r)=>s + (r.x1 - r.x0), 0);
+  const pickRect = pool=>{
+    const tot = pool.reduce((s, r)=>s + (r.x1 - r.x0), 0);
+    let t = R()*tot;
+    for(const r of pool){ t -= (r.x1 - r.x0); if(t <= 0) return r; }
+    return pool[pool.length - 1];
+  };
+  const spot = (high, pool)=>{
+    const r = pickRect(pool || rects);
+    const base = r.bridge ? DECK(r.lv) : FLOOR(r.lv);
+    return {lv:r.lv, x:r.x0 + 1 + R()*Math.max(0.1, r.x1 - r.x0 - 2),
+            z:r.z0 + 0.7 + R()*Math.max(0.1, r.z1 - r.z0 - 1.4),
+            base, y:base + (high ? 2.2 + R()*0.35 : 0), high};
+  };
+  const out = [];
+  for(let i = 0; i < 10; i++) out.push(Object.assign(spot(R() < 0.25), {kind:"egg", id:"egg"+i, pts:20, i}));
+  for(let i = 0; i < 5; i++) out.push(Object.assign(spot(R() < 0.5), {kind:"bunny", id:"bunny"+i, pts:50, i}));
+  out.push(Object.assign(spot(true), {kind:"golden", id:"golden", pts:150, i:0}));
+  /* Pico keeps to the top floors, at a corridor's far end */
+  const tops = rects.filter(r=>!r.bridge && (r.lv === "5" || r.lv === "4"));
+  const pr = tops.length ? tops[Math.floor(R()*tops.length)] : rects[0];
+  const end = R() < 0.5;
+  out.push({kind:"pico", id:"pico", pts:100, i:0, lv:pr.lv, x:end ? pr.x0 + 1.4 : pr.x1 - 1.4,
+            z:CORR_Z + (R() < 0.5 ? -1 : 1)*(CORR_HALF - 0.9), base:FLOOR(pr.lv),
+            y:FLOOR(pr.lv), high:false});
+  return out;
+}
+const HUNT_CENTRE = {egg:0.3, bunny:0.45, golden:0.45, pico:0.6, duck:0.15};
+
+/* ---- the place around the building ------------------------------------- */
+function buildCart(){
+  const g = new THREE.Group();
+  const add = (geo, m, x, y, z)=>{ const o = new THREE.Mesh(geo, m); o.position.set(x, y, z);
+                                   o.castShadow = true; g.add(o); return o; };
+  const shelfM = M(0xcbd5e1), post = M(0x64748b);
+  [0.35, 0.78, 1.18].forEach(y=>add(new THREE.BoxGeometry(1.1, 0.05, 0.56), shelfM, 0, y, 0));
+  [[-0.53, -0.26], [0.53, -0.26], [-0.53, 0.26], [0.53, 0.26]].forEach(([x, z])=>{
+    add(new THREE.BoxGeometry(0.04, 1.1, 0.04), post, x, 0.72, z);
+    add(new THREE.CylinderGeometry(0.07, 0.07, 0.04, 10), M(0x1f2937), x, 0.08, z).rotation.x = Math.PI/2;
+  });
+  [[0xffffff, -0.32], [0x93c5fd, 0], [0xfde68a, 0.32]].forEach(([c, x])=>
+    add(new THREE.BoxGeometry(0.28, 0.2, 0.4), M(c), x, 0.9, 0));
+  [[0x22c55e, -0.3], [0xf59e0b, -0.15], [0x3b82f6, 0]].forEach(([c, x])=>
+    add(new THREE.CylinderGeometry(0.05, 0.05, 0.24, 10), M(c), x, 0.5, 0.05));
+  add(new THREE.BoxGeometry(0.34, 0.62, 0.5), M(0x475569), 0.75, 0.6, 0);
+  add(new THREE.BoxGeometry(0.04, 0.04, 0.56), post, -0.62, 1.1, 0);
+  return g;
+}
+function buildPlant(){
+  const g = new THREE.Group();
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.18, 0.4, 12), M(0xc2703d));
+  pot.position.y = 0.2; pot.castShadow = true; g.add(pot);
+  const leaf = new THREE.MeshPhongMaterial({color:0x3f9d5a, flatShading:true, shininess:0});
+  [[0, 0.78, 0, 0.44], [0.12, 1.12, 0.05, 0.3], [-0.1, 1.02, -0.08, 0.28]].forEach(([x, y, z, r])=>{
+    const f = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), leaf);
+    f.position.set(x, y, z); f.castShadow = true; g.add(f);
+  });
+  return g;
+}
+function buildDuck(){
+  const g = new THREE.Group();
+  const y = M(0xfacc15);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), y);
+  body.scale.set(1, 0.8, 1.25); g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), y);
+  head.position.set(0, 0.15, 0.12); g.add(head);
+  const beak = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.08), M(0xf97316));
+  beak.position.set(0, 0.14, 0.23); g.add(beak);
+  [-1, 1].forEach(s=>{ const e = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), M(0x111827));
+                       e.position.set(s*0.05, 0.18, 0.2); g.add(e); });
+  return g;
+}
+function buildDecor(){
+  const R = rng(hashStr("peaks"));
+  const siteTop = (minY - RH*1.4) + DATA.levelH*0.25;
+  const midX = (minX + maxX)/2;
+  /* snow on the ground, and the Tenmile Range around it */
+  const ground = new THREE.Mesh(new THREE.CylinderGeometry(900, 900, 1, 48), M(0xeef2f7));
+  ground.position.set(midX, siteTop - 0.56, CORR_Z); ground.receiveShadow = true;
+  playGroup.add(ground);
+  for(let i = 0; i < 16; i++){
+    const a = i/16*Math.PI*2 + R()*0.3, d = 380 + R()*220;
+    const h = 90 + R()*140, r = h*(0.75 + R()*0.35);
+    const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7),
+      new THREE.MeshPhongMaterial({color:0x6d8197, flatShading:true, shininess:0}));
+    m.position.set(midX + Math.cos(a)*d, siteTop + h/2 - 2, CORR_Z + Math.sin(a)*d);
+    m.rotation.y = R()*3;
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(r*0.36, h*0.34, 7),
+      new THREE.MeshPhongMaterial({color:0xf8fafc, flatShading:true, shininess:0}));
+    cap.position.y = h/2 - h*0.17 + 0.4;
+    m.add(cap);
+    playGroup.add(m);
+  }
+  /* snow falling everywhere a roof isn't */
+  const N = 1400, pos = new Float32Array(N*3);
+  const X0 = minX - 90, X1 = maxX + 90, Y0 = siteTop - 1, Y1 = maxY + 45, Z0 = -80, Z1 = 95;
+  const plateList = Object.values(plates);
+  const under = (x, z)=>z > -10 && z < 23 && plateList.some(p=>x > p.x0 - 4 && x < p.x1 + 4);
+  for(let i = 0; i < N; i++){
+    let x, z, n = 0;
+    do { x = X0 + R()*(X1 - X0); z = Z0 + R()*(Z1 - Z0); } while(under(x, z) && ++n < 30);
+    pos[i*3] = x; pos[i*3 + 1] = Y0 + R()*(Y1 - Y0); pos[i*3 + 2] = z;
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const snow = new THREE.Points(sg, new THREE.PointsMaterial({color:0xffffff, size:0.5,
+    transparent:true, opacity:0.9, depthWrite:false}));
+  playGroup.add(snow);
+  decor.snow = {pos, N, Y0, Y1, geo:sg};
+  /* the gondola, gliding over the back of the property */
+  const gy0 = maxY + 70, gy1 = maxY + 40, gz = -150, gx0 = minX - 180, gx1 = maxX + 180;
+  const cable = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(gx0, gy0, gz), new THREE.Vector3(gx1, gy1, gz)]);
+  playGroup.add(new THREE.Line(cable, new THREE.LineBasicMaterial({color:0x334155})));
+  [0.2, 0.5, 0.8].forEach(t=>{
+    const x = gx0 + (gx1 - gx0)*t, y = gy0 + (gy1 - gy0)*t;
+    const tw = new THREE.Mesh(new THREE.BoxGeometry(1.6, y - siteTop, 1.6), M(0x475569));
+    tw.position.set(x, (y + siteTop)/2, gz); playGroup.add(tw);
+  });
+  const CAB = [0xe11d48, 0x2563eb, 0x16a34a, 0xf59e0b, 0x7c3aed, 0x0891b2, 0xdc2626];
+  CAB.forEach((c, i)=>{
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 3.4, 3.4), M(c)); g.add(body);
+    const win = new THREE.Mesh(new THREE.BoxGeometry(4.25, 1.1, 3.45), M(0x1e293b));
+    win.position.y = 0.5; g.add(win);
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 4, 6), M(0x334155));
+    rod.position.y = 3.6; g.add(rod);
+    playGroup.add(g);
+    decor.gondola.push({g, t:i/CAB.length, gx0, gx1, gy0, gy1, gz});
+  });
+  /* a cart parked by everybody cleaning right now */
+  for(const a of avList){
+    if(a.p.act !== "clean") continue;
+    const c = buildCart();
+    const g = a.b._av;
+    c.position.set(a.door.x - g.ax*RW*0.95, FLOOR(a.b.level), a.door.z + (CORR_Z - a.door.z)*0.15);
+    c.rotation.y = g.ax ? 0 : Math.PI/2;
+    playGroup.add(c);
+  }
+  /* a plant at each end of every corridor */
+  Object.values(walk).flat().forEach((r, i)=>{
+    if(r.bridge) return;
+    [r.x0 + 0.9, r.x1 - 0.9].forEach((x, j)=>{
+      const p = buildPlant();
+      p.position.set(x, FLOOR(r.lv), CORR_Z + ((i + j) % 2 ? 1 : -1)*(CORR_HALF - 0.45));
+      playGroup.add(p);
+    });
+  });
+  /* the pools get water and ducks; the spa steams; the lobby has a fire */
+  (DATA.facils||[]).forEach(f=>{
+    const fl = FLOOR(f.level);
+    if(/pool/i.test(f.label || "")){
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 0.08, 32),
+        new THREE.MeshLambertMaterial({color:0x38bdf8, transparent:true, opacity:0.78}));
+      const z = Math.max(CORR_Z - CORR_HALF + 2.2, Math.min(CORR_Z + CORR_HALF - 2.2, f.z));
+      w.position.set(f.x, fl + 0.07, z); playGroup.add(w);
+      for(let k = 0; k < 3; k++){
+        const d = buildDuck(); playGroup.add(d);
+        hunt.push({kind:"duck", id:"duck|" + f.bld + "|" + k, pts:5, lv:f.level, secret:true,
+                   cx:f.x, cz:z, r:0.7 + k*0.5, ph:k*2.1, y:fl + 0.13, base:fl, m:d, x:f.x, z});
+      }
+    }
+    if(/spa/i.test(f.label || "")){
+      const N2 = 70, sp = new Float32Array(N2*3);
+      const z = Math.max(CORR_Z - CORR_HALF + 0.8, f.z);
+      for(let i = 0; i < N2; i++){
+        sp[i*3] = f.x + (Math.random() - 0.5)*2.4; sp[i*3 + 1] = fl + Math.random()*2.6;
+        sp[i*3 + 2] = z + (Math.random() - 0.5)*1.2;
+      }
+      const g2 = new THREE.BufferGeometry();
+      g2.setAttribute("position", new THREE.BufferAttribute(sp, 3));
+      playGroup.add(new THREE.Points(g2, new THREE.PointsMaterial({color:0xe2e8f0, size:0.42,
+        transparent:true, opacity:0.55, depthWrite:false})));
+      const tub = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 0.3, 24),
+        new THREE.MeshLambertMaterial({color:0x67e8f9, transparent:true, opacity:0.8}));
+      tub.position.set(f.x, fl + 0.15, z); playGroup.add(tub);
+      decor.steam.push({pos:sp, N:N2, geo:g2, y0:fl, x:f.x, z});
+    }
+    if(/grand lobby/i.test(f.label || "") && f.level === "1"){
+      const z = CORR_Z - CORR_HALF - 0.45;
+      const stone = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.6, 0.8), M(0x78716c));
+      stone.position.set(f.x, fl + 1.3, z); stone.castShadow = true; playGroup.add(stone);
+      const hole = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.95, 0.1), M(0x1c1917));
+      hole.position.set(f.x, fl + 0.6, z + 0.41); playGroup.add(hole);
+      const flames = [0xf97316, 0xfacc15, 0xef4444].map((c, i)=>{
+        const fl3 = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.55, 8),
+          new THREE.MeshBasicMaterial({color:c, transparent:true, opacity:0.9}));
+        fl3.position.set(f.x + (i - 1)*0.28, fl + 0.4, z + 0.46); playGroup.add(fl3);
+        return fl3;
+      });
+      const glow = new THREE.PointLight(0xff8a3d, 1.2, 10, 1.6);
+      glow.position.set(f.x, fl + 1, z + 1.2); playGroup.add(glow);
+      decor.fires.push({flames, glow, y:fl + 0.4});
+    }
+  });
 }
 
 function buildWorld(){
   if(built) return;
   built = true;
   const B = buildPlayer(PL.look, PL.role);
-  me = B; playGroup.add(B.g);
+  me = B; B.g.rotation.order = "YXZ"; playGroup.add(B.g);
   const tm = tagMat("★ " + (PL.name || TX.you || "You"), "#f5a524");
   meTag = new THREE.Sprite(tm.m); meTag.scale.set(0.34*tm.aspect, 0.34, 1);
   meTag.renderOrder = 3; playGroup.add(meTag);
@@ -1063,9 +1409,23 @@ function buildWorld(){
     quests.push({b, kind, m, done:P.visited.has(b.code)});
   });
   quests.forEach(q=>{ q.m.visible = !q.done; });
+  buildDecor();
+  /* and the day's hunt */
+  huntSpots().forEach(h=>{
+    h.m = h.kind === "egg" ? makeEgg(h.i) : h.kind === "pico" ? makePico()
+        : makeBunny(h.i, h.kind === "golden");
+    h.m.position.set(h.x, h.y, h.z);
+    h.m.rotation.y = Math.random()*6.28;
+    playGroup.add(h.m);
+    if(h.high){
+      h.shelf = shelf(); h.shelf.position.set(h.x, h.y - 0.04, h.z); playGroup.add(h.shelf);
+    }
+    hunt.push(h);
+  });
+  hunt.forEach(h=>{ const f = P.found.has(h.id); h.m.visible = !f; if(h.shelf) h.shelf.visible = !f; });
 }
 
-/* ---- lifts and stairs ---- */
+/* ---- getting about: floors anywhere in a building, and fast travel ----- */
 function nearLift(){
   const r = where(P.lv, P.x, P.z);
   if(!r || r.bridge || ride) return null;
@@ -1077,35 +1437,216 @@ function nearLift(){
   }
   return best && bd < 3.4 ? best : null;
 }
+/* Q / E change floor anywhere inside a building (Hari: traversing should be
+   easy). At a lift you come out at the same lift; elsewhere, straight up. */
 function levelStep(dir){
+  if(ride) return;
+  const r = where(P.lv, P.x, P.z);
+  if(!r || r.bridge){ toast(TX.no_floor || "Step off the bridge to change floor", "#64748b"); return; }
   const lift = nearLift();
-  if(!lift) return;
   const order = DATA.levels;
   for(let j = order.indexOf(P.lv) + dir; j >= 0 && j < order.length; j += dir){
     const lv = order[j];
-    const r = (walk[lv] || []).find(r=>r.bld === lift.bld);
-    if(!r) continue;
-    const there = lifts.filter(f=>f.level === lv && f.bld === lift.bld)
+    const t = (walk[lv] || []).find(q=>q.bld === r.bld);
+    if(!t) continue;
+    const there = lift ? lifts.filter(f=>f.level === lv && f.bld === lift.bld)
       .sort((a, b)=>(a.kind === lift.kind ? 0 : 1) - (b.kind === lift.kind ? 0 : 1)
-                    || Math.abs(a.x - lift.x) - Math.abs(b.x - lift.x))[0];
-    const x = Math.max(r.x0 + 0.5, Math.min(r.x1 - 0.5, there ? there.x : P.x));
+                    || Math.abs(a.x - lift.x) - Math.abs(b.x - lift.x))[0] : null;
+    const x = Math.max(t.x0 + 0.5, Math.min(t.x1 - 0.5, there ? there.x : P.x));
     ride = {from:P.feet, to:FLOOR(lv), t:0, lv, x};
-    P.x = x; P.z = CORR_Z;
+    P.x = x; P.z = Math.max(t.z0 + 0.3, Math.min(t.z1 - 0.3, P.z));
+    P.air = 0; P.vy = 0;
+    sfx("lift");
     return;
   }
 }
+const fadeEl = document.getElementById("fade");
+function travelTo(lv, x, z, head){
+  ride = null;
+  fadeEl.classList.add("on");
+  sfx("warp");
+  setTimeout(()=>{
+    P.lv = lv; P.x = x; P.z = z;
+    if(head != null){ P.head = head; pcYaw = head + Math.PI; }
+    P.air = 0; P.vy = 0;
+    P.ground = P.feet = groundAt(lv, x, z);
+    save();
+    setTimeout(()=>fadeEl.classList.remove("on"), 60);
+  }, 230);
+}
+/* the nearest point you can stand on, on a level */
+function snap(lv, x, z){
+  let best = null, bd = 1e9;
+  for(const r of (walk[lv] || [])){
+    const cx = Math.max(r.x0 + 0.3, Math.min(r.x1 - 0.3, x)),
+          cz = Math.max(r.z0 + 0.3, Math.min(r.z1 - 0.3, z));
+    const d = Math.hypot(cx - x, cz - z);
+    if(d < bd){ bd = d; best = [cx, cz]; }
+  }
+  return best;
+}
+function nextQuest(){
+  const ix = lv=>DATA.levels.indexOf(lv);
+  return quests.filter(q=>!q.done).sort((a, b)=>
+    Math.abs(ix(a.b.level) - ix(P.lv)) - Math.abs(ix(b.b.level) - ix(P.lv))
+    || Math.abs(a.b._av.dx - P.x) - Math.abs(b.b._av.dx - P.x))[0];
+}
+/* arrive a few steps short, facing the door: the last bit is yours to walk */
+function goNear(lv, x, z){
+  const s = snap(lv, x - 3.2, CORR_Z) || [x, CORR_Z];
+  travelTo(lv, s[0], s[1], Math.atan2(x - s[0], z - s[1]));
+}
 
-/* ---- input: keys, and a thumb stick on a touch screen ---- */
+const gotoEl = document.getElementById("goto");
+function openGoto(){
+  const lvBtn = lv=>lv === "Plaza" ? "P" : lv === "Terrace" ? "T" : lv;
+  const r = where(P.lv, P.x, P.z);
+  let h = "<button class='x' data-close='1'>✕</button><b style='font-size:.98rem'>🗺 " +
+          esc(TX.map || "Go to") + "</b>";
+  h += "<h5>" + esc(TX.floors || "Buildings and floors") + "</h5>";
+  [3, 1, 2].forEach(bld=>{
+    const lvs = DATA.levels.filter(lv=>(walk[lv] || []).some(q=>q.bld === bld));
+    if(!lvs.length) return;
+    h += "<div class='row'><b>" + esc(TX.bld || "Building") + " " + bld + "</b>" +
+      lvs.map(lv=>"<button data-bld='" + bld + "' data-lv='" + lv + "'" +
+        (r && !r.bridge && r.bld === bld && lv === P.lv ? " class='here'" : "") + ">" +
+        lvBtn(lv) + "</button>").join("") + "</div>";
+  });
+  if(avList.length){
+    h += "<h5>" + esc(TX.team || "Team") + "</h5><div class='row'>" +
+      avList.map((a, i)=>"<button data-p='" + i + "'>" + esc(a.p.who || a.p.name) + " · " +
+                         a.b.code + "</button>").join("") + "</div>";
+  }
+  h += "<h5>&nbsp;</h5><div class='row'>" +
+       (OFFICE ? "<button data-office='1'>🏠 " + esc(TX.office || "Housekeeping office") + "</button>" : "") +
+       (nextQuest() ? "<button data-next='1'>🎯 " + esc(TX.next || "Next room to visit") + "</button>" : "") +
+       "</div>";
+  gotoEl.innerHTML = h;
+  gotoEl.style.display = "block";
+}
+function closeGoto(){ gotoEl.style.display = "none"; try{ cv.focus({preventScroll:true}); }catch(e){} }
+gotoEl.addEventListener("click", e=>{
+  const t = e.target.closest("button");
+  if(!t) return;
+  const d = t.dataset;
+  if(d.bld){
+    const bld = +d.bld, lv = d.lv;
+    const r = (walk[lv] || []).find(q=>q.bld === bld);
+    const lift = lifts.filter(f=>f.level === lv && f.bld === bld)[0];
+    if(r) travelTo(lv, Math.max(r.x0 + 0.5, Math.min(r.x1 - 0.5, lift ? lift.x : (r.x0 + r.x1)/2)),
+                   CORR_Z, null);
+  } else if(d.p){
+    const a = avList[+d.p];
+    goNear(a.b.level, a.door.x, a.door.z);
+  } else if(d.office){
+    travelTo(OFFICE.level, OFFICE.x, CORR_Z, null);
+  } else if(d.next){
+    const q = nextQuest();
+    if(q) goNear(q.b.level, q.b._av.dx, q.b._av.dz);
+  }
+  closeGoto();
+});
+document.getElementById("mapbtn").addEventListener("click", ()=>{
+  gotoEl.style.display === "block" ? closeGoto() : openGoto(); });
+
+/* ---- the minimap: this level from above; click it to go there ---------- */
+const mini = document.getElementById("mini"), mctx = mini.getContext("2d");
+const MX0 = minX - 8, MX1 = maxX + 8, MZ0 = -10, MZ1 = 23;
+const m2c = (x, z)=>[(x - MX0)/(MX1 - MX0)*mini.width, (z - MZ0)/(MZ1 - MZ0)*mini.height];
+function drawMini(){
+  const W = mini.width, H = mini.height;
+  mctx.clearRect(0, 0, W, H);
+  mctx.fillStyle = "#dbe3ec";
+  for(const r of (walk[P.lv] || [])){
+    const [a, b] = m2c(r.x0, r.z0), [c, d] = m2c(r.x1, r.z1);
+    mctx.fillStyle = r.bridge ? "#9fd3b4" : "#dbe3ec";
+    mctx.fillRect(a, b, c - a, d - b);
+  }
+  for(const b of DATA.boxes){
+    if(b.level !== P.lv) continue;
+    const [x, y] = m2c(b.x, b._z);
+    mctx.fillStyle = b.colour; mctx.fillRect(x - 4, y - 6, 8, 12);
+  }
+  for(const q of quests){
+    if(q.done || q.b.level !== P.lv) continue;
+    const [x, y] = m2c(q.b._av.dx, q.b._av.dz);
+    mctx.fillStyle = q.kind === "help" ? "#ef4444" : "#2f80ed";
+    mctx.beginPath(); mctx.moveTo(x, y - 7); mctx.lineTo(x + 6, y); mctx.lineTo(x, y + 7);
+    mctx.lineTo(x - 6, y); mctx.fill();
+  }
+  for(const a of avList){
+    if(a.b.level !== P.lv) continue;
+    const [x, y] = m2c(a.door.x, a.door.z);
+    mctx.fillStyle = a.p.col; mctx.strokeStyle = "#fff"; mctx.lineWidth = 2;
+    mctx.beginPath(); mctx.arc(x, y, 6, 0, 7); mctx.fill(); mctx.stroke();
+  }
+  const [px, py] = m2c(P.x, P.z);
+  const sx = Math.sin(P.head), sz = Math.cos(P.head);
+  mctx.fillStyle = "#f5a524"; mctx.strokeStyle = "#1e3350"; mctx.lineWidth = 2;
+  mctx.beginPath();
+  mctx.moveTo(px + sx*12, py + sz*12);
+  mctx.lineTo(px - sx*7 + sz*7, py - sz*7 - sx*7);
+  mctx.lineTo(px - sx*7 - sz*7, py - sz*7 + sx*7);
+  mctx.closePath(); mctx.fill(); mctx.stroke();
+  mctx.fillStyle = "#1e3350"; mctx.font = "700 20px system-ui,-apple-system,'Segoe UI',sans-serif";
+  mctx.fillText(LV_NAME(P.lv), 10, 24);
+}
+mini.addEventListener("click", e=>{
+  const r = mini.getBoundingClientRect();
+  const x = MX0 + (e.clientX - r.left)/r.width*(MX1 - MX0);
+  const z = MZ0 + (e.clientY - r.top)/r.height*(MZ1 - MZ0);
+  const s = snap(P.lv, x, z);
+  if(s) travelTo(P.lv, s[0], s[1], null);
+});
+
+/* ---- a few sounds, off until asked for: this runs in an office ---- */
+let actx = null;
+const SFX = {jump:[420, 640], egg:[660, 990], bunny:[523, 1046], golden:[784, 1568],
+             pico:[392, 784], quest:[523, 784], lift:[300, 460], warp:[900, 330], duck:[320, 190]};
+function sfx(kind){
+  if(muted) return;
+  try{
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+    const f = SFX[kind] || [440, 660];
+    o.type = kind === "duck" ? "sawtooth" : "triangle";
+    o.frequency.setValueAtTime(f[0], t);
+    o.frequency.exponentialRampToValueAtTime(f[1], t + 0.12);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + 0.26);
+  }catch(e){}
+}
+const sndBtn = document.getElementById("sndbtn");
+const labelSnd = ()=>{ sndBtn.textContent = muted ? "🔇" : "🔊";
+                       sndBtn.title = TX.sound || "Sound"; };
+sndBtn.addEventListener("click", ()=>{ muted = !muted; labelSnd(); save(); sfx("egg"); });
+labelSnd();
+
+/* ---- input: keys, and a thumb stick and buttons on a touch screen ---- */
 const keys = {};
 const joy = {x:0, y:0};
+function jump(){
+  if(ride || !playing) return;
+  if(P.air <= 0.001){ P.vy = JUMP_V; P.jumps = 1; sfx("jump"); }
+  else if(P.jumps < 2){ P.vy = JUMP_V*0.85; P.jumps = 2; sfx("jump"); }
+}
+const runBtn = document.getElementById("runbtn");
+function setRun(on){ runOn = on; runBtn.classList.toggle("on", on); }
 window.addEventListener("keydown", e=>{
   if(!playing) return;
   keys[e.code] = true;
   if(/^Arrow|^Space$|^Page/.test(e.code)) e.preventDefault();
   if(e.repeat) return;
+  if(e.code === "Space") jump();
+  if(e.code === "KeyR") setRun(!runOn);
+  if(e.code === "KeyH") P.help = !P.help;
+  if(e.code === "KeyM") gotoEl.style.display === "block" ? closeGoto() : openGoto();
   if(e.code === "KeyQ" || e.code === "PageUp") levelStep(1);
   if(e.code === "KeyE" || e.code === "PageDown") levelStep(-1);
-  if(e.code === "Escape") stopPlay();
+  if(e.code === "Escape"){ if(gotoEl.style.display === "block") closeGoto(); else stopPlay(); }
 });
 window.addEventListener("keyup", e=>{ keys[e.code] = false; });
 window.addEventListener("blur", ()=>{ for(const k in keys) keys[k] = false; });
@@ -1125,23 +1666,44 @@ function moveJoy(e){
 }
 document.getElementById("upbtn").addEventListener("click", ()=>levelStep(1));
 document.getElementById("dnbtn").addEventListener("click", ()=>levelStep(-1));
+document.getElementById("jumpbtn").addEventListener("pointerdown", e=>{ e.preventDefault(); jump(); });
+runBtn.addEventListener("click", ()=>setRun(!runOn));
 const TOUCH = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+
+/* ---- bursts of colour when something is found ---- */
+const burstGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
+function burst(x, y, z, colours, n, power){
+  for(let i = 0; i < n; i++){
+    const m = new THREE.Mesh(burstGeo, new THREE.MeshBasicMaterial({
+      color:colours[i % colours.length], transparent:true}));
+    m.position.set(x, y, z);
+    const a = Math.random()*6.28, u = (0.3 + Math.random())*(power || 1);
+    bursts.push({m, vx:Math.cos(a)*u*3.5, vy:2.5 + Math.random()*4*(power || 1),
+                 vz:Math.sin(a)*u*3.5, t:0});
+    playGroup.add(m);
+  }
+}
 
 /* ---- each frame ---- */
 const phud = document.getElementById("phud"), nearEl = document.getElementById("near"),
-      toastEl = document.getElementById("toast"), liftEl = document.getElementById("liftbtns");
+      toastEl = document.getElementById("toast"), liftEl = document.getElementById("liftbtns"),
+      actEl = document.getElementById("actbtns");
 let toastT = 0, hudT = 0;
 function toast(msg, colour){
   toastEl.textContent = msg; toastEl.style.background = colour || "#1a9e4b";
-  toastEl.classList.add("on"); toastT = performance.now() + 1600;
+  toastEl.classList.add("on"); toastT = performance.now() + 1700;
 }
 const LV_NAME = lv => (lv === "Plaza" || lv === "Terrace") ? lv : (TX.level || "Level")+" "+lv;
+const HUNT_TOAST = {egg:["egg", "🥚", "#db2777"], bunny:["bunny", "🐰", "#7c3aed"],
+                    golden:["golden", "✨", "#d97706"], pico:["pico", "⛰", "#2f6fc4"],
+                    duck:["duck", "🦆", "#0891b2"]};
 function stepPlayer(dt, now){
+  const running = (keys.ShiftLeft || keys.ShiftRight || runOn);
   if(ride){
     P.speed = 0;
-    ride.t = Math.min(1, ride.t + dt/0.9);
+    ride.t = Math.min(1, ride.t + dt/0.6);
     const k = ride.t < .5 ? 2*ride.t*ride.t : 1 - Math.pow(-2*ride.t + 2, 2)/2;
-    P.feet = ride.from + (ride.to - ride.from)*k;
+    P.feet = P.ground = ride.from + (ride.to - ride.from)*k;
     if(ride.t >= 1){ P.lv = ride.lv; ride = null; save(); }
   } else {
     /* Steer and walk: left/right turn, up/down walk. Walking relative to
@@ -1153,7 +1715,7 @@ function stepPlayer(dt, now){
     if(Math.abs(turn) > 0.08) P.head -= Math.max(-1, Math.min(1, turn))*2.6*dt;
     if(Math.abs(fwd) > 0.08){
       const f = Math.max(-1, Math.min(1, fwd));
-      const sp = f > 0 ? ((keys.ShiftLeft || keys.ShiftRight) ? 11 : 5.5)*f : 3.2*f;
+      const sp = f > 0 ? (running ? RUN_V : WALK_V)*f : BACK_V*f;
       const mx = Math.sin(P.head), mz = Math.cos(P.head);
       const nx = P.x + mx*sp*dt, nz = P.z + mz*sp*dt;
       /* slide along a wall rather than stop dead at it */
@@ -1161,6 +1723,9 @@ function stepPlayer(dt, now){
       else if(where(P.lv, nx, P.z)) P.x = nx;
       else if(where(P.lv, P.x, nz)) P.z = nz;
       P.speed = Math.abs(sp);
+      /* the controls line steps aside once you have the hang of it; H brings it back */
+      P.walked += P.speed*dt;
+      if(P.help && P.walked > 45) P.help = false;
     }
     /* the camera drifts back behind you once you move, unless you are
        holding it somewhere with the mouse */
@@ -1169,23 +1734,43 @@ function stepPlayer(dt, now){
       d = Math.atan2(Math.sin(d), Math.cos(d));
       pcYaw += d*Math.min(1, dt*3.5);
     }
-    const r = where(P.lv, P.x, P.z);
-    const fy = r && r.bridge ? DECK(P.lv) : FLOOR(P.lv);
-    P.feet += (fy - P.feet)*Math.min(1, dt*10);
+    P.ground += (groundAt(P.lv, P.x, P.z) - P.ground)*Math.min(1, dt*10);
+    /* in the air: up, gravity, the ceiling, and down again */
+    if(P.air > 0 || P.vy > 0){
+      P.vy -= GRAV*dt;
+      P.air += P.vy*dt;
+      const roof = CEIL - HEIGHT - (P.ground - FLOOR(P.lv));
+      if(P.air > roof){ P.air = roof; P.vy = Math.min(0, P.vy); }
+      if(P.air <= 0){ P.air = 0; P.vy = 0; P.jumps = 0; }
+    }
+    P.feet = P.ground + P.air;
   }
-  /* the figure: legs and arms swing with the pace, a breath when standing */
+  /* the figure: legs and arms swing with the pace, a lean when running,
+     knees up and arms high in the air */
   P.phase += dt*(P.speed ? 2.2 + P.speed*0.9 : 2);
-  const sw = P.speed ? Math.sin(P.phase)*Math.min(0.75, 0.25 + P.speed*0.06) : 0;
-  me.legs[0].rotation.x = sw; me.legs[1].rotation.x = -sw;
-  me.arms[0].rotation.x = -sw*0.85; me.arms[1].rotation.x = sw*0.85;
-  me.g.position.set(P.x, P.feet + (P.speed ? Math.abs(Math.sin(P.phase))*0.04 : 0), P.z);
+  const sw = P.speed ? Math.sin(P.phase)*Math.min(0.95, 0.25 + P.speed*0.06) : 0;
+  if(P.air > 0.02){
+    me.legs[0].rotation.x = -0.6; me.legs[1].rotation.x = 0.35;
+    me.arms[0].rotation.x = me.arms[1].rotation.x = P.vy > 0 ? -2.5 : -1.6;
+  } else {
+    me.legs[0].rotation.x = sw; me.legs[1].rotation.x = -sw;
+    me.arms[0].rotation.x = -sw*0.85; me.arms[1].rotation.x = sw*0.85;
+  }
+  me.g.position.set(P.x, P.feet + (P.speed && P.air <= 0 ? Math.abs(Math.sin(P.phase))*0.05 : 0), P.z);
   me.g.rotation.y = P.head;
+  me.g.rotation.x += ((P.speed > WALK_V + 1 ? 0.16 : 0) - me.g.rotation.x)*Math.min(1, dt*8);
   me.g.scale.y = P.speed ? 1 : 1 + Math.sin(now*0.003)*0.008;
   meTag.position.set(P.x, P.feet + 2.25, P.z);
+  /* your own name is for people watching from afar; up close it is in the way */
+  meTag.visible = pcDist > 9;
   lamp.position.set(P.x, P.feet + 2.9, P.z);
 
-  /* the follow camera */
-  const tx = P.x + root.position.x, ty = P.feet + 1.45 + root.position.y, tz = P.z + root.position.z;
+  /* the follow camera; it widens a little at a run */
+  const fov = P.speed > WALK_V + 1 ? 52 : 42;
+  if(Math.abs(camera.fov - fov) > 0.05){
+    camera.fov += (fov - camera.fov)*Math.min(1, dt*5); camera.updateProjectionMatrix();
+  }
+  const tx = P.x + root.position.x, ty = P.feet + 1.8 + root.position.y, tz = P.z + root.position.z;
   const cp = Math.cos(pcPitch), sp = Math.sin(pcPitch);
   camera.position.set(tx + Math.sin(pcYaw)*cp*pcDist, ty + sp*pcDist, tz + Math.cos(pcYaw)*cp*pcDist);
   camera.lookAt(tx, ty, tz);
@@ -1202,11 +1787,94 @@ function stepPlayer(dt, now){
       P.xp += pts;
       toast("+" + pts + " " + (TX.xp || "XP") + " · " + q.b.code,
             q.kind === "help" ? "#dc2626" : "#2f80ed");
+      sfx("quest");
       save();
     }
   }
+  /* the hunt: everything bobs, and anything you touch is yours */
+  for(const h of hunt){
+    if(P.found.has(h.id)) continue;
+    if(h.kind === "duck"){
+      const a = now*0.0004 + h.ph;
+      h.x = h.cx + Math.cos(a)*h.r; h.z = h.cz + Math.sin(a)*h.r;
+      h.m.position.set(h.x, h.y + Math.sin(now*0.004 + h.ph)*0.03, h.z);
+      h.m.rotation.y = -a;
+    } else if(h.kind === "pico"){
+      h.m.userData.arm.rotation.z = -0.9 + Math.sin(now*0.008)*0.5;
+      h.m.position.y = h.y + Math.abs(Math.sin(now*0.003))*0.12;
+    } else if(h.kind === "egg"){
+      h.m.rotation.y += dt*1.2;
+      h.m.position.y = h.y + Math.sin(now*0.003 + h.i)*0.06;
+    } else {
+      h.m.rotation.y += dt*(h.kind === "golden" ? 2.4 : 0.8);
+      h.m.position.y = h.y + Math.abs(Math.sin(now*0.005 + h.i))*0.14;
+    }
+    if(ride || h.lv !== P.lv) continue;
+    const cy = h.y + (HUNT_CENTRE[h.kind] || 0.3);
+    if(Math.hypot(h.x - P.x, h.z - P.z) < (h.kind === "golden" || h.kind === "pico" ? 1.15 : 0.95)
+       && cy > P.feet - 0.3 && cy < P.feet + HEIGHT + 0.25){
+      P.found.add(h.id); h.m.visible = false; if(h.shelf) h.shelf.visible = false;
+      P.xp += h.pts;
+      const [k, icon, col] = HUNT_TOAST[h.kind];
+      toast(icon + " " + (TX["f_" + k] || k) + " +" + h.pts + " " + (TX.xp || "XP"), col);
+      burst(h.x, cy, h.z, h.kind === "golden" ? [0xf5c542, 0xfff1a8, 0xffffff]
+                       : [0xf472b6, 0x60a5fa, 0x34d399, 0xfacc15, 0xa78bfa], 22, 1);
+      sfx(k);
+      const left = hunt.filter(q=>!q.secret && !P.found.has(q.id)).length;
+      if(!h.secret && left === 0){
+        setTimeout(()=>{
+          toast("🎉 " + (TX.f_all || "Hunt complete!") + " +250 " + (TX.xp || "XP"), "#16a34a");
+          burst(P.x, P.feet + 2, P.z, [0xf472b6, 0x60a5fa, 0x34d399, 0xfacc15, 0xa78bfa, 0xf97316], 90, 1.6);
+          sfx("golden");
+        }, 900);
+        P.xp += 250;
+      }
+      save();
+    }
+  }
+  /* bursts fall and fade */
+  for(let i = bursts.length - 1; i >= 0; i--){
+    const b = bursts[i];
+    b.t += dt; b.vy -= 12*dt;
+    b.m.position.x += b.vx*dt; b.m.position.y += b.vy*dt; b.m.position.z += b.vz*dt;
+    b.m.rotation.x += dt*7; b.m.rotation.y += dt*5;
+    b.m.material.opacity = Math.max(0, 1 - b.t/1.2);
+    if(b.t > 1.2){ playGroup.remove(b.m); b.m.material.dispose(); bursts.splice(i, 1); }
+  }
+  stepDecor(dt, now);
   if(toastT && now > toastT){ toastEl.classList.remove("on"); toastT = 0; }
-  if(now - hudT > 150){ hudT = now; drawHud(); }
+  if(now - hudT > 120){ hudT = now; drawHud(); drawMini(); }
+}
+
+function stepDecor(dt, now){
+  const s = decor.snow;
+  if(s){
+    const p = s.pos;
+    for(let i = 0; i < s.N; i++){
+      p[i*3 + 1] -= (1.3 + (i % 7)*0.15)*dt;
+      p[i*3] += Math.sin(now*0.0006 + i)*0.006;
+      if(p[i*3 + 1] < s.Y0) p[i*3 + 1] = s.Y1;
+    }
+    s.geo.attributes.position.needsUpdate = true;
+  }
+  for(const c of decor.gondola){
+    c.t = (c.t + dt*0.01) % 1;
+    c.g.position.set(c.gx0 + (c.gx1 - c.gx0)*c.t, c.gy0 + (c.gy1 - c.gy0)*c.t - 5.6, c.gz);
+  }
+  for(const st of decor.steam){
+    const p = st.pos;
+    for(let i = 0; i < st.N; i++){
+      p[i*3 + 1] += (0.5 + (i % 5)*0.1)*dt;
+      p[i*3] += Math.sin(now*0.001 + i)*0.004;
+      if(p[i*3 + 1] > st.y0 + 2.8){ p[i*3 + 1] = st.y0 + 0.2; p[i*3] = st.x + (Math.random() - 0.5)*2.2; }
+    }
+    st.geo.attributes.position.needsUpdate = true;
+  }
+  for(const f of decor.fires){
+    f.flames.forEach((fl, i)=>{ fl.scale.y = 0.8 + Math.abs(Math.sin(now*0.012 + i*1.7))*0.6;
+                                fl.position.y = f.y + fl.scale.y*0.12; });
+    f.glow.intensity = 1 + Math.sin(now*0.02)*0.25 + Math.sin(now*0.047)*0.15;
+  }
 }
 
 function drawHud(){
@@ -1215,7 +1883,11 @@ function drawHud(){
     ? "Bridge " + r.a + " ↔ " + r.b + " · " + LV_NAME(P.lv)
     : (TX.bld || "Building") + " " + (r ? r.bld : "?") + " · " + LV_NAME(P.lv);
   const left = k=>quests.filter(q=>!q.done && q.kind === k).length;
-  const lift = nearLift();
+  const got = k=>hunt.filter(h=>h.kind === k && P.found.has(h.id)).length;
+  const all = k=>hunt.filter(h=>h.kind === k).length;
+  /* warmer: something unfound within a few doors, on this floor */
+  const warm = hunt.some(h=>!h.secret && !P.found.has(h.id) && h.lv === P.lv
+                            && Math.hypot(h.x - P.x, h.z - P.z) < 11);
   phud.innerHTML =
     "<b>★ " + esc(PL.name || TX.you || "You") + "</b><br>" + esc(here) +
     "<br><span class='xp'>" + P.xp + " " + esc(TX.xp || "XP") + "</span> · " +
@@ -1223,9 +1895,13 @@ function drawHud(){
     "<br>" + esc(TX.quests || "Rooms to visit") + ": <b style='color:#dc2626'>" + left("help") +
     "</b> " + esc(TX.help_q || "need help") + " · <b style='color:#2f80ed'>" + left("ready") +
     "</b> " + esc(TX.ready_q || "ready for RQS") +
-    (lift ? "<br><b style='color:#1a9e4b'>" + esc(TX.lift || "Lift here: Q up, E down") + "</b>" : "") +
-    (TOUCH ? "" : "<br><span style='color:#64748b'>" + esc(TX.help || "") + "</span>");
-  liftEl.style.display = lift ? "flex" : "none";
+    "<br>" + esc(TX.hunt || "Hunt") + ": 🥚 " + got("egg") + "/" + all("egg") +
+    " · 🐰 " + got("bunny") + "/" + all("bunny") +
+    " · ✨ " + got("golden") + "/" + all("golden") +
+    " · ⛰ " + (got("pico") ? "Pico!" : "?") +
+    (warm ? "<br><b style='color:#d97706'>👀 " + esc(TX.warm || "Something is hidden nearby…") + "</b>" : "") +
+    (TOUCH || !P.help ? "" : "<br><span style='color:#64748b'>" + esc(TX.help || "") + "</span>");
+  liftEl.style.display = r && !r.bridge ? "flex" : "none";
   /* who or what is right here */
   let best = null, bd = 3.2;
   for(const a of avList){
@@ -1257,10 +1933,13 @@ function startPlay(){
   playing = true;
   wrap.classList.add("playing");
   playGroup.visible = true;
-  camera.near = 0.1; camera.updateProjectionMatrix();
+  camera.near = 0.1; camera.far = 2000; camera.updateProjectionMatrix();
   pick.style.display = "none";
   phud.style.display = "block";
+  mini.style.display = "block";
   joyEl.style.display = TOUCH ? "block" : "none";
+  actEl.style.display = TOUCH ? "flex" : "none";
+  document.getElementById("mapbtn").title = TX.map || "Go to";
   labelPlay(); save();
   try{ cv.focus({preventScroll:true}); }catch(e){}
 }
@@ -1268,14 +1947,21 @@ function stopPlay(){
   playing = false;
   wrap.classList.remove("playing");
   playGroup.visible = false;
-  camera.near = 1; camera.updateProjectionMatrix();
-  for(const el of [phud, nearEl, joyEl, liftEl]) el.style.display = "none";
+  camera.near = 1; camera.far = 4000; camera.fov = 42; camera.updateProjectionMatrix();
+  for(const el of [phud, nearEl, joyEl, liftEl, mini, gotoEl, actEl]) el.style.display = "none";
   for(const k in keys) keys[k] = false;
   labelPlay(); save(); place();
 }
 playBtn.addEventListener("click", ()=>playing ? stopPlay() : startPlay());
 labelPlay();
 cv.addEventListener("pointerdown", ()=>{ if(playing){ try{ cv.focus({preventScroll:true}); }catch(e){} } });
+/* from the model: tap a room, then walk from its door */
+function walkHere(code){
+  const b = BOX[code];
+  if(!b || !b._av) return;
+  if(!playing) startPlay();
+  goNear(b.level, b._av.dx, b._av.dz);
+}
 
 const fsBtn = document.getElementById("fsbtn");
 fsBtn.title = TX.full || "Fullscreen";
