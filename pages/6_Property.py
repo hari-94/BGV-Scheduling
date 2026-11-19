@@ -11,7 +11,7 @@ actually crosses — the topology is exact. The dimensions are proportions taken
 off the plans, which carry no measurements, so it is not a survey.
 """
 import streamlit as st
-import sys, os, json, collections
+import sys, os, json, collections, html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, i18n
 import property_map as pmap
@@ -19,6 +19,7 @@ import roomstatus as _rst
 import streamlit.components.v1 as components
 import ui
 import fresh
+import avatars as av
 
 st.set_page_config(page_title="Property", page_icon="🏔️", layout="wide")
 # Same width family as the rest of the app, and unconditional: the plan
@@ -27,7 +28,7 @@ st.set_page_config(page_title="Property", page_icon="🏔️", layout="wide")
 st.markdown("<style>.block-container{max-width:min(1200px,97%);}</style>",
             unsafe_allow_html=True)
 auth.require_login()
-fresh.latest("i18n", "ui")    # the menu as it is on disk, not as first loaded
+fresh.latest("i18n", "ui", "avatars")    # as they are on disk, not as first loaded
 ui.topnav("Property")
 
 T = i18n.t
@@ -74,6 +75,15 @@ def _today(_gen):
     return out
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _looks(_gen):
+    """Who is drawn as a woman, a man or neutral -- set below, never guessed."""
+    try:
+        return db._load_key(av.SETTING_KEY) or {}
+    except Exception:
+        return {}
+
+
 rooms = _inventory()
 if not rooms:
     st.info(T("prop.no_rooms"))
@@ -92,6 +102,9 @@ with c1:
                          [T("prop.by_status"), T("prop.by_service"),
                           T("prop.by_building")],
                          horizontal=True, key="prop_colour")
+    av_choice = st.radio(T("prop.avatars"),
+                         [T("prop.av_live"), T("prop.av_all"), T("prop.av_off")],
+                         horizontal=True, key="prop_avatars")
 with c2:
     flat = st.toggle(T("prop.flat"), value=False, key="prop_flat")
     show_extras = st.toggle(T("prop.show_amenities"), value=True, key="prop_extras")
@@ -112,6 +125,23 @@ with c3:
 
 MODE = ("status" if colour_by == T("prop.by_status")
         else "service" if colour_by == T("prop.by_service") else "bld")
+AV_MODE = ("live" if av_choice == T("prop.av_live")
+           else "all" if av_choice == T("prop.av_all") else "off")
+looks = _looks(st.session_state.get("prop_av_gen", 0))
+ACT_LABEL = {a: T(f"prop.act_{a}") for a in av.ORDER}
+
+# The signed-in person walks the property as themselves: their own look, in
+# an RQS's navy unless they are housekeeping staff.
+_me = auth.current_user()
+_me_name = _me.get("display_name") or _me.get("username") or ""
+PLAYER = {"look": av.look_of(looks, _me_name),
+          "role": "hk" if _me.get("role") in ("housekeeper", "houseperson") else "rqs",
+          "name": av.short_name(_me_name) or _me_name}
+# The game's own words, so the game is bilingual like the rest of the page.
+PLAY_TXT = {k: T(f"prop.play_{k}") for k in (
+    "start", "stop", "help", "lift", "up", "down", "quests", "help_q",
+    "ready_q", "xp", "visited", "level", "bld", "you", "here", "since",
+    "full")}
 
 # roomstatus owns the vocabulary and the colours; the model must not invent
 # its own or the legend here stops matching the phone in somebody's hand.
@@ -164,6 +194,32 @@ for b in boxes:
         b["colour"] = SVC_COLOUR.get(svc, "#94a3b8")
     else:
         b["colour"] = BLD_COLOUR.get(b["bld"], "#94a3b8")
+    b["av"] = 0          # how many people stand at this door
+
+# Everybody once, at the room they marked last (avatars.place_people). The
+# rooms keep their own colours; a person is drawn only where they last were.
+people = []
+if AV_MODE != "off":
+    _now = clock.now()
+    for i, p in enumerate(sorted(av.place_people(statuses, today, _now,
+                                                 whole_team=AV_MODE == "all"),
+                                 key=lambda p: p["name"].lower())):
+        look = av.look_of(looks, p["name"])
+        people.append({
+            "code": p["code"], "key": av.key(look, p["act"]), "act": p["act"],
+            "role": p["role"], "who": av.short_name(p["name"]), "name": p["name"],
+            "col": av.ACT_COLOUR.get(p["act"], "#94a3b8"),
+            "at": p["t"].astimezone(clock.MTN).strftime("%H:%M") if p["t"] else "",
+        })
+    _by_code = {b["code"]: b for b in boxes}
+    _slots = collections.Counter()
+    for p in people:       # two people at one door stand side by side
+        p["slot"] = _slots[p["code"]]
+        _slots[p["code"]] += 1
+    for p in people:
+        p["n"] = _slots[p["code"]]
+        if p["code"] in _by_code:
+            _by_code[p["code"]]["av"] = p["n"]
 
 # Everything that is not a guest room. The service core is what a housekeeper's
 # day is actually spent walking between, so it is drawn by default; the amenity
@@ -174,11 +230,72 @@ cores = pmap.service_cores(_levels)
 if not show_extras:
     facils = [f for f in facils if f["kind"] != "amenity"]
 
+AV_KEYS = sorted({p["key"] for p in people})
 payload = json.dumps({"boxes": boxes, "spans": spans,
                       "facils": facils, "cores": cores,
                       "levels": pmap.LEVELS,
                       "doorW": pmap.DOOR_W, "levelH": pmap.LEVEL_H,
-                      "hallD": pmap.HALL_D}, separators=(",", ":"))
+                      "hallD": pmap.HALL_D,
+                      "people": people,
+                      # one stepped strip per look and action actually on screen
+                      "av": {k: av.strip_uri(*k.split("-", 1)) for k in AV_KEYS},
+                      "acts": ACT_LABEL, "player": PLAYER, "txt": PLAY_TXT,
+                      "day": clock.today_iso(),
+                      "ready": list(_rst.READY), "help": _rst.HELP},
+                     separators=(",", ":"))
+
+
+def _game_bar():
+    """The day as a score: how much of the floor is done, and what is live.
+
+    Counted over the rooms on a chart today only -- a room nobody was ever
+    going to clean is not a room left to do.
+    """
+    on = [b for b in boxes if b["on_chart"]]
+    if not on:
+        return ""
+    n = collections.Counter(b["status"] for b in on)
+    done = sum(v for k, v in n.items() if k in _rst.CLEANED)
+    pct = round(100 * done / len(on))
+    stars = "".join(
+        f'<span style="opacity:{1 if pct >= q else .22}">★</span>' for q in (25, 50, 75, 100))
+
+    def chip(action, count, colour):
+        if not count:
+            return ""
+        return (f'<span class="gchip"><i class="av av-n-{action}" '
+                f'style="background-color:transparent"></i>'
+                f'<b style="color:{colour}">{count}</b> {ACT_LABEL[action]}</span>')
+
+    chips = (chip("clean", n[_rst.STARTED], "#b45309")
+             + chip("cheer", sum(n[k] for k in _rst.READY), "#2f80ed")
+             + chip("pass", n[_rst.INSPECTED], "#15803d")
+             + chip("help", n[_rst.HELP], "#dc2626")
+             + chip("dnd", n[_rst.DND], "#7c3aed"))
+    return (f'<div class="gbar"><div class="gtop"><b>{T("prop.game_floor")}</b>'
+            f'<span class="gstars">{stars}</span><span class="gpct">{pct}%</span>'
+            f'<span class="gof">{done} / {len(on)}</span></div>'
+            f'<div class="gtrack"><div class="gfill" style="width:{pct}%"></div></div>'
+            f'<div class="gchips">{chips}</div></div>')
+
+
+GAME_CSS = """
+.gbar{background:#fff;border:1px solid #d6dfea;border-radius:14px;padding:10px 14px 8px;
+  margin:4px 0 10px;box-shadow:0 2px 10px rgba(22,32,46,.05)}
+.gtop{display:flex;align-items:center;gap:10px;font-size:.86rem;color:#1e3350}
+.gstars{color:#f5a524;font-size:1.05rem;letter-spacing:2px}
+.gpct{font-weight:800;font-size:1.05rem;color:#15803d;margin-left:auto}
+.gof{color:#7b8798;font-size:.78rem;font-family:ui-monospace,Menlo,monospace}
+.gtrack{height:10px;border-radius:999px;background:#e6ebf2;overflow:hidden;margin:7px 0 6px}
+.gfill{height:100%;border-radius:999px;
+  background:linear-gradient(90deg,#e89611 0%,#2f80ed 55%,#1a9e4b 100%);
+  transition:width .6s ease}
+.gchips{display:flex;flex-wrap:wrap;gap:4px 14px}
+.gchip{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:#42536a}
+.gchip .av{flex:none}
+.avcast{display:flex;flex-wrap:wrap;gap:6px 16px;margin:2px 0 8px}
+.avcast span{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;color:#42536a}
+"""
 
 HTML = """
 <div id="wrap">
@@ -187,15 +304,53 @@ HTML = """
     <div id="pick"></div>
   </div>
   <div id="labels"></div>
-  <canvas id="cv"></canvas>
+  <div id="btns">
+    <button id="playbtn" type="button"></button>
+    <button id="fsbtn" type="button">&#x26F6;</button>
+  </div>
+  <div id="phud"></div>
+  <div id="near"></div>
+  <div id="toast"></div>
+  <div id="joy"><div id="knob"></div></div>
+  <div id="liftbtns"><button id="upbtn" type="button">&#9650;</button><button id="dnbtn" type="button">&#9660;</button></div>
+  <canvas id="cv" tabindex="0"></canvas>
 </div>
 <style>
   html,body{margin:0;padding:0;overflow:hidden;background:transparent}
-  #wrap{position:relative;width:100%;height:620px;border-radius:16px;
+  #wrap{position:relative;width:100%;height:780px;border-radius:16px;
     overflow:hidden;background:linear-gradient(180deg,#eef3f9 0%,#dfe7f1 100%);
     border:1px solid #d6dfea;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-  #cv{display:block;width:100%;height:100%;touch-action:none}
+  #wrap:fullscreen{height:100vh;border-radius:0;border:0}
+  #cv{display:block;width:100%;height:100%;touch-action:none;outline:none}
+  #btns{position:absolute;right:12px;top:10px;z-index:5;display:flex;gap:6px}
+  #btns button,#liftbtns button{font:700 .82rem -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    border:1px solid #cbd6e2;background:rgba(255,255,255,.94);color:#1e3350;border-radius:10px;
+    padding:7px 12px;cursor:pointer;box-shadow:0 2px 8px rgba(22,32,46,.12)}
+  #playbtn{background:#1a9e4b !important;color:#fff !important;border-color:#15803d !important}
+  #wrap.playing #playbtn{background:#334155 !important;border-color:#1f2937 !important}
+  #phud{position:absolute;right:12px;top:52px;z-index:4;display:none;min-width:190px;
+    font-size:.78rem;color:#16202e;background:rgba(255,255,255,.94);padding:9px 12px;
+    border-radius:11px;box-shadow:0 4px 16px rgba(22,32,46,.15);line-height:1.5}
+  #phud b{font-size:.9rem}
+  #phud .xp{color:#b45309;font-weight:800}
+  #near{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:4;display:none;
+    font-size:.82rem;color:#16202e;background:rgba(255,255,255,.96);padding:8px 14px;
+    border-radius:12px;box-shadow:0 4px 18px rgba(22,32,46,.2);white-space:nowrap;max-width:90%}
+  #near span{color:#64748b}
+  #toast{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);z-index:6;
+    font-weight:800;font-size:1.05rem;color:#fff;background:#1a9e4b;padding:9px 18px;
+    border-radius:999px;box-shadow:0 8px 24px rgba(22,32,46,.25);opacity:0;
+    transition:opacity .25s, transform .25s;pointer-events:none}
+  #toast.on{opacity:1;transform:translate(-50%,-62%)}
+  #joy{position:absolute;left:22px;bottom:22px;width:118px;height:118px;border-radius:50%;
+    background:rgba(255,255,255,.55);border:2px solid rgba(51,69,92,.25);z-index:5;display:none;
+    touch-action:none}
+  #knob{position:absolute;left:39px;top:39px;width:40px;height:40px;border-radius:50%;
+    background:rgba(30,51,80,.75)}
+  #liftbtns{position:absolute;right:16px;bottom:22px;z-index:5;display:none;flex-direction:column;gap:8px}
+  #liftbtns button{font-size:1.1rem;padding:12px 16px}
+  #wrap.playing #hint,#wrap.playing #labels{display:none}
   #hud{position:absolute;left:12px;top:10px;z-index:3;pointer-events:none}
   #hint{font-size:.68rem;letter-spacing:.03em;color:#64748b;background:rgba(255,255,255,.8);
     padding:4px 9px;border-radius:7px;display:inline-block}
@@ -272,8 +427,8 @@ function mat(hex, op){
    reprojected every frame is what makes a page like this crawl on a phone,
    and because a label stuck to the box cannot drift off it. */
 const labelCache = {};
-function labelMat(code, svc, hex, forceDark, square){
-  const k = code+"|"+svc+"|"+hex+"|"+(forceDark||0)+"|"+(square||0);
+function labelMat(code, svc, hex, forceDark, square, top){
+  const k = code+"|"+svc+"|"+hex+"|"+(forceDark||0)+"|"+(square||0)+"|"+(top||0);
   if(labelCache[k]) return labelCache[k];
   /* A side face is about as tall as it is wide; a lid is twice as wide as it
      is deep. Using one canvas shape for both stretched the text on whichever
@@ -288,6 +443,35 @@ function labelMat(code, svc, hex, forceDark, square){
   g.fillStyle = (forceDark || lum > 0.34) ? "#15202e" : "#ffffff";
   g.textAlign = "center";
   const mono = /^[0-9]{4}[A-Z]?$/.test(code);
+  if(top){
+    /* An avatar and its name tag stand in front of the lower half of this
+       face, so the number and service go on one line across the top, where
+       nothing covers them. */
+    const MONO = "ui-monospace,Menlo,Consolas,monospace";
+    const SANS = "system-ui,-apple-system,'Segoe UI',sans-serif";
+    let size = 118, cw = 0, sw = 0;
+    do {
+      g.font = "bold "+size+"px "+(mono ? MONO : SANS);
+      cw = g.measureText(code).width;
+      g.font = "bold "+Math.round(size*0.6)+"px "+SANS;
+      sw = svc ? g.measureText("  "+svc).width : 0;
+      if(cw + sw <= W-42) break;
+      size -= 6;
+    } while(size > 34);
+    g.textAlign = "left";
+    const x0 = (W - cw - sw)/2, base = H*0.27;
+    g.font = "bold "+size+"px "+(mono ? MONO : SANS);
+    g.fillText(code, x0, base);
+    if(svc){
+      g.globalAlpha = 0.72;
+      g.font = "bold "+Math.round(size*0.6)+"px "+SANS;
+      g.fillText("  "+svc, x0+cw, base);
+      g.globalAlpha = 1;
+    }
+    const tt = new THREE.CanvasTexture(c);
+    tt.anisotropy = 8;
+    return (labelCache[k] = new THREE.MeshLambertMaterial({map:tt, transparent:true}));
+  }
   /* shrink to fit rather than spill: "Housekeeping office" is not a room code */
   let size = mono ? 132 : 100;
   do {
@@ -313,15 +497,126 @@ function labelMat(code, svc, hex, forceDark, square){
 }
 function srgb(v){ return v <= 0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); }
 
+/* ---- the people: one sprite per person, at the room they marked last,
+   doing what that mark was (avatars.place_people). Each action is a strip of
+   four frames, stepped by moving the texture's offset, so the whole team
+   costs a handful of textures. Two materials per strip, half a cycle apart,
+   so two people vacuuming do not sweep in lockstep. */
+const AVK = DATA.av || {};
+const AH = RH*0.52, AW = AH*0.75;     /* the strip's frames are 96 x 128 */
+/* walking the corridor, the people stand at the player's own scale: the
+   figure fills 78% of its frame, and the player is 1.9 tall */
+const AH_PLAY = 2.45;
+const TAG_H = 0.36;
+const CORR_Z = DATA.hallD*0.5;
+let playing = false;
+const avMats = {}, avList = [];
+/* True size beside a room is a speck from across the property, so each
+   avatar and tag is held to a smallest size on screen; close up they shrink
+   back to standing in front of the lower half of the face. */
+const AV_MIN_PX = 34, TAG_MIN_PX = 15;
+function avMat(key, phase){
+  if(!avMats[key]){
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 256;      /* power of two; the sprite's scale undoes the stretch */
+    const pair = [0,1].map(()=>{
+      const t = new THREE.CanvasTexture(c);
+      t.repeat.set(0.25, 1);
+      t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+      return new THREE.SpriteMaterial({map:t, transparent:true, alphaTest:0.06});
+    });
+    const img = new Image();
+    img.onload = ()=>{
+      c.getContext("2d").drawImage(img, 0, 0, 1024, 256);
+      pair.forEach(m=>{ m.map.needsUpdate = true; });
+    };
+    img.src = AVK[key];
+    avMats[key] = pair;
+  }
+  return avMats[key][phase];
+}
+const tagCache = {};
+function tagMat(text, hex){
+  const k = text+"|"+hex;
+  if(tagCache[k]) return tagCache[k];
+  const c = document.createElement("canvas");
+  const font = "700 40px system-ui,-apple-system,'Segoe UI',sans-serif";
+  let g = c.getContext("2d"); g.font = font;
+  c.width = Math.ceil(g.measureText(text).width) + 46; c.height = 64;
+  g = c.getContext("2d"); g.font = font;           /* resizing resets the context */
+  const w = c.width-6, h = 54, x = 3, y = 5, r = 27;
+  g.beginPath();
+  g.moveTo(x+r, y); g.lineTo(x+w-r, y); g.arc(x+w-r, y+r, r, -Math.PI/2, Math.PI/2);
+  g.lineTo(x+r, y+h); g.arc(x+r, y+r, r, Math.PI/2, Math.PI*1.5); g.closePath();
+  g.fillStyle = hex; g.fill();
+  g.lineWidth = 4; g.strokeStyle = "rgba(255,255,255,.95)"; g.stroke();
+  const col = new THREE.Color(hex);
+  const lum = 0.2126*srgb(col.r) + 0.7152*srgb(col.g) + 0.0722*srgb(col.b);
+  g.fillStyle = lum > 0.34 ? "#15202e" : "#ffffff";
+  g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(text, c.width/2, 33);
+  const t = new THREE.CanvasTexture(c);
+  t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+  return (tagCache[k] = {m:new THREE.SpriteMaterial({map:t, transparent:true, depthWrite:false}),
+                         aspect:c.width/c.height});
+}
+/* Two places for each person: just out from the room's labelled face, where
+   the model is looked at from outside, and in the corridor beside the door,
+   where somebody walking the floor would meet them. Feet on the floor of
+   the level either way; the name floats over the head. */
+function addPerson(p, b){
+  const g = b._av;
+  if(!g) return;
+  const feet = b.y - RH*0.64 + DATA.levelH*0.05;          /* the slab's top */
+  const off = (p.slot - (p.n - 1)/2) * AW * 1.05;          /* side by side */
+  const s = new THREE.Sprite(avMat(p.key, avList.length % 2));
+  s.userData = {person:true, p, b};
+  root.add(s); meshes.push(s);
+  const one = {s, feet, p, b, tag:null, aspect:1, ph:Math.random()*6.28,
+               out:{x:g.ox + g.ax*off, z:g.oz + g.az*off},
+               door:{x:g.dx + g.ax*(RW*0.42 + off*1.6), z:g.dz + g.az*(RW*0.42 + off*1.6)}};
+  if(p.who){
+    const tm = tagMat(p.who, p.col);
+    const tg = new THREE.Sprite(tm.m);
+    tg.renderOrder = 2;
+    root.add(tg);
+    one.tag = tg; one.aspect = tm.aspect;
+  }
+  avList.push(one);
+}
+const _wp = new THREE.Vector3();
+function sizeAvatars(now){
+  /* world units per screen pixel at distance 1 */
+  const k = 2*Math.tan(camera.fov*Math.PI/360) / Math.max(wrap.clientHeight, 1);
+  const base = playing ? AH_PLAY : AH;
+  for(const a of avList){
+    const at = playing ? a.door : a.out;
+    a.s.position.x = at.x; a.s.position.z = at.z;
+    _wp.copy(a.s.position).add(root.position);
+    const dist = camera.position.distanceTo(_wp);
+    const h = Math.max(base, AV_MIN_PX*k*dist);
+    a.s.scale.set(h*0.75, h, 1);
+    a.s.position.y = a.feet + h*0.5;
+    if(a.tag){
+      const th = Math.max(TAG_H, TAG_MIN_PX*k*dist);
+      a.tag.scale.set(th*a.aspect, th, 1);
+      /* the figure's head is a fifth of the way down its frame */
+      a.tag.position.set(at.x, a.feet + h*0.86 + th*(0.55 + 0.12*Math.sin(now*0.0025 + a.ph)),
+                         at.z);
+    }
+  }
+}
+
 const meshes = [];
 DATA.boxes.forEach(b=>{
   const d = RD * b.depth;
-  let geo, z;
+  let geo, z, wingW = 0;
   if(b.wing){
     /* an end wing sits across the corridor line; its row is what separates it
        from its neighbours, so it keeps that and shows its size along x -- and
        only gently, or it reaches the main row beside it */
-    geo = new THREE.BoxGeometry(RW*(0.85 + 0.3*(b.depth-0.62)/0.84), RH, RD*0.92);
+    wingW = RW*(0.85 + 0.3*(b.depth-0.62)/0.84);
+    geo = new THREE.BoxGeometry(wingW, RH, RD*0.92);
     z = b.row * DATA.hallD;
   } else {
     /* grow away from the corridor, never across it */
@@ -329,21 +624,32 @@ DATA.boxes.forEach(b=>{
     z = DATA.hallD*0.5 + b.side * (HALF_HALL + d*0.5);
   }
   const plain = mat(b.colour, b.on_chart ? 0.96 : 0.55);
-  const face = labelMat(b.code, b.svc_short, b.colour, 0, 1);
+  const face = labelMat(b.code, b.svc_short, b.colour, 0, 1, b.av ? 1 : 0);
+  /* where a person stands at this room: (ox,oz) outside its labelled face,
+     (dx,dz) in the corridor at its door, (ax,az) the way along the face */
+  const out = 0.55;
+  if(b.wing){
+    const dir = (b.x > (minX + maxX)/2) ? 1 : -1;
+    b._av = {ox:b.x + dir*(wingW*0.5 + out), oz:z,
+             dx:b.x - dir*(wingW*0.5 + 0.9),
+             dz:Math.max(CORR_Z - HALF_HALL*0.7, Math.min(CORR_Z + HALF_HALL*0.7, z)),
+             ax:0, az:1};
+  } else {
+    b._av = {ox:b.x, oz:z + b.side*(d*0.5 + out),
+             dx:b.x, dz:CORR_Z + b.side*(HALF_HALL - 0.75), ax:1, az:0};
+  }
   /* The number goes on the OUTWARD-FACING SIDE, not the lid. A lid is hidden
      the moment another level sits above it, which is every level but the top
      one -- the labels were invisible on all six floors that matter. The side
      a room faces is the side it is on: north rooms show on -Z, south rooms on
      +Z, and an end wing shows on whichever end of the building it sits at.
-     BoxGeometry material order is +X -X +Y -Y +Z -Z. */
-  const mid = (minX + maxX) / 2;
+     And on the door side too: walking the corridor in play, the doors are
+     what you see. BoxGeometry material order is +X -X +Y -Y +Z -Z. */
   let mats6;
   if(b.wing){
-    mats6 = (b.x > mid) ? [face,plain,plain,plain,plain,plain]
-                        : [plain,face,plain,plain,plain,plain];
+    mats6 = [face,face,plain,plain,plain,plain];
   } else {
-    mats6 = (b.side > 0) ? [plain,plain,plain,plain,face,plain]
-                         : [plain,plain,plain,plain,plain,face];
+    mats6 = [plain,plain,plain,plain,face,face];
   }
   const m = new THREE.Mesh(geo, mats6);
   m.position.set(b.x, b.y, z);
@@ -354,6 +660,9 @@ DATA.boxes.forEach(b=>{
     new THREE.LineBasicMaterial({color:0x2b3a4a, transparent:true, opacity:0.2}));
   e.position.copy(m.position); root.add(e);
 });
+const BOX = {};
+DATA.boxes.forEach(b=>{ BOX[b.code] = b; });
+(DATA.people||[]).forEach(p=>{ if(BOX[p.code]) addPerson(p, BOX[p.code]); });
 
 /* ---- everything that is not a guest room ---------------------------------
    Distinct colour and silhouette per kind, because on a model this size a
@@ -473,6 +782,7 @@ DATA.spans.forEach(s=>{
 /* ---- orbit: drag to turn, wheel or pinch to zoom, right-drag to pan ---- */
 let yaw=-0.62, pitch=0.42, dist=Math.max(maxX-minX,80)*0.92, panX=0, panY=0;
 function place(){
+  if(playing) return;               /* the follow camera owns it in play */
   const cp=Math.cos(pitch), sp=Math.sin(pitch);
   camera.position.set(Math.sin(yaw)*cp*dist + panX, sp*dist + panY, Math.cos(yaw)*cp*dist);
   camera.lookAt(panX, panY, 0);
@@ -487,6 +797,11 @@ cv.addEventListener("pointermove", e=>{
   if(!drag) return;
   const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
   drag.x=e.clientX; drag.y=e.clientY;
+  if(playing){
+    pcYaw -= dx*0.008;
+    pcPitch = Math.max(-0.15, Math.min(1.3, pcPitch + dy*0.005));
+    return;
+  }
   if(drag.pan){ panX-=dx*dist*0.0016; panY+=dy*dist*0.0016; }
   else { yaw-=dx*0.007; pitch=Math.max(-0.25, Math.min(1.45, pitch+dy*0.006)); }
   place();
@@ -496,6 +811,10 @@ cv.addEventListener("pointercancel", ()=>{ drag=null; });
 cv.addEventListener("contextmenu", e=>e.preventDefault());
 cv.addEventListener("wheel", e=>{
   e.preventDefault();
+  if(playing){
+    pcDist = Math.max(2.5, Math.min(90, pcDist * (1 + Math.sign(e.deltaY)*0.1)));
+    return;
+  }
   dist = Math.max(28, Math.min(900, dist * (1 + Math.sign(e.deltaY)*0.09)));
   place();
 }, {passive:false});
@@ -504,15 +823,25 @@ cv.addEventListener("touchmove", e=>{
     e.preventDefault();
     const a=e.touches[0], b=e.touches[1];
     const d=Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
-    if(lastTouchDist) dist=Math.max(28, Math.min(900, dist*(lastTouchDist/d)));
+    if(lastTouchDist){
+      if(playing) pcDist=Math.max(2.5, Math.min(90, pcDist*(lastTouchDist/d)));
+      else dist=Math.max(28, Math.min(900, dist*(lastTouchDist/d)));
+    }
     lastTouchDist=d; place();
   }
 }, {passive:false});
 cv.addEventListener("touchend", ()=>{ lastTouchDist=0; });
 
 /* ---- tap a room to read it ---- */
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+/* "Ana Lopez · Cleaning · since 11:49" */
+function personLine(p){
+  return "<b>"+esc(p.name)+"</b> <span>&middot; "+esc((DATA.acts||{})[p.act]||p.act)+
+    (p.at ? " &middot; "+esc((DATA.txt||{}).since||"since")+" "+p.at : "")+"</span>";
+}
 const ray = new THREE.Raycaster();
 cv.addEventListener("click", e=>{
+  if(playing) return;      /* in play, a drag is looking round, not a tap */
   const r=cv.getBoundingClientRect();
   const v=new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1,
                             -((e.clientY-r.top)/r.height)*2+1);
@@ -521,7 +850,10 @@ cv.addEventListener("click", e=>{
   if(!hit){ pick.style.display="none"; return; }
   const d = hit.object.userData;
   pick.style.display="block";
-  if(d.bridge){
+  if(d.person){
+    pick.innerHTML = personLine(d.p) + "<br><span>"+d.b.code+" &middot; building "+d.b.bld+
+      " &middot; "+(isNaN(d.b.level)?d.b.level:"level "+d.b.level)+"</span>";
+  } else if(d.bridge){
     pick.innerHTML = "<b>Bridge</b> <span>building "+d.a+" &harr; "+d.b+
       " &middot; "+(isNaN(d.level)?d.level:"level "+d.level)+"</span>";
   } else if(d.facility){
@@ -536,12 +868,423 @@ cv.addEventListener("click", e=>{
               (d.hk?" &middot; "+d.hk:"")+
               (d.rqs?" &middot; RQS "+d.rqs:"")+"</span>";
       if(d.status) line2 += "<br><span>"+d.status.replace(/_/g," ")+"</span>";
+      (DATA.people||[]).filter(p=>p.code===d.code)
+        .forEach(p=>{ line2 += "<br>"+personLine(p); });
     } else {
       line2 = "<br><span>not on a chart today</span>";
     }
     pick.innerHTML = "<b>"+d.code+"</b> <span>"+where+"</span>"+line2;
   }
 });
+
+/* ================================================================== play ===
+   Walk the property as yourself (Hari, 19 Nov). What you can walk is what a
+   housekeeper walks: the corridor of every plate, the bridges between
+   buildings, and the lifts and stairs between levels -- so buildings 2 and 3
+   are as far apart here as they are on a cart. Rooms that need somebody
+   glow: red for help, blue for ready for the RQS. Reach one and it counts.
+   Nothing here writes anything; the score lives in this browser for the day. */
+const TX = DATA.txt || {};
+const PL = DATA.player || {look:"n", role:"rqs", name:""};
+const LV_Y = {};
+DATA.boxes.forEach(b=>{ LV_Y[b.level] = b.y; });
+(DATA.facils||[]).forEach(f=>{ if(!(f.level in LV_Y)) LV_Y[f.level] = f.y; });
+DATA.spans.forEach(s=>{ if(!(s.level in LV_Y)) LV_Y[s.level] = s.y; });
+const FLOOR = lv => LV_Y[lv] - RH*0.64 + DATA.levelH*0.05;   /* slab top */
+const DECK  = lv => LV_Y[lv] - RH*0.5 + DATA.levelH*0.08;    /* bridge top */
+const CORR_HALF = HALF_HALL*0.85;
+
+/* the walkable floor: a corridor strip per plate, and one per bridge */
+const plates = {}, bldMid = {};
+function grow(bld, lv, x0, x1){
+  const k = bld+"|"+lv;
+  const p = plates[k] || (plates[k] = {bld:+bld, lv, x0:1e9, x1:-1e9});
+  p.x0 = Math.min(p.x0, x0); p.x1 = Math.max(p.x1, x1);
+}
+DATA.boxes.forEach(b=>{
+  grow(b.bld, b.level, b.x - RW*0.6, b.x + RW*0.6);
+  const m = bldMid[b.bld] || (bldMid[b.bld] = {s:0, n:0}); m.s += b.x; m.n++;
+});
+(DATA.facils||[]).forEach(f=>{
+  if(f.kind === "amenity") return;   /* lobby volumes reach well past the corridor */
+  const w = DATA.doorW*f.width*0.45;
+  grow(f.bld, f.level, f.x - w, f.x + w);
+});
+/* a bridge lands on the corridor of the building at each end, even on a
+   level with no guest rooms -- building 1's level 1 is the crossroads */
+DATA.spans.forEach(s=>{
+  const lo = Math.min(s.x0, s.x1), hi = Math.max(s.x0, s.x1);
+  [s.a, s.b].forEach(bld=>{
+    const m = bldMid[bld]; if(!m) return;
+    const c = m.s/m.n, end = Math.abs(c - lo) < Math.abs(c - hi) ? lo : hi;
+    grow(bld, s.level, end, end);
+  });
+});
+const walk = {};
+Object.values(plates).forEach(p=>{
+  (walk[p.lv] || (walk[p.lv] = [])).push({x0:p.x0 - 1.2, x1:p.x1 + 1.2,
+    z0:CORR_Z - CORR_HALF, z1:CORR_Z + CORR_HALF, bld:p.bld, lv:p.lv});
+});
+DATA.spans.forEach(s=>{
+  (walk[s.level] || (walk[s.level] = [])).push({x0:Math.min(s.x0,s.x1) - 0.5,
+    x1:Math.max(s.x0,s.x1) + 0.5, z0:s.z - RD*0.38, z1:s.z + RD*0.38,
+    bld:0, bridge:true, a:s.a, b:s.b, lv:s.level});
+});
+/* the strip you are standing in -- a building's before a bridge's */
+function where(lv, x, z){
+  let hit = null;
+  for(const r of (walk[lv]||[]))
+    if(x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1 && (!hit || hit.bridge)) hit = r;
+  return hit;
+}
+
+const lifts = (DATA.facils||[]).filter(f=>f.kind==="lift_svc"||f.kind==="lift_guest"||f.kind==="stairs");
+const playGroup = new THREE.Group();
+playGroup.visible = false;
+root.add(playGroup);
+
+/* ---- you: a low-poly person in your own look, built from primitives ---- */
+function buildPlayer(look, role){
+  const M = c=>new THREE.MeshLambertMaterial({color:c});
+  const uni = M(role==="rqs" ? 0x1e3a8a : 0x0f766e), uniD = M(role==="rqs" ? 0x172c66 : 0x0b5a54);
+  const skin = M(0xd6a07a), hair = M(0x2a211d), pants = M(0x334155), shoe = M(0x1f2937),
+        apron = M(0xf8fafc), ink = M(0x1f2937), tights = M(0x3b3b45);
+  const g = new THREE.Group();
+  const part = (geo, m, x, y, z, parent)=>{ const o = new THREE.Mesh(geo, m);
+    o.position.set(x, y, z); o.castShadow = true; (parent||g).add(o); return o; };
+  const limb = (r0, r1, len, m)=>{ const geo = new THREE.CylinderGeometry(r0, r1, len, 10);
+    geo.translate(0, -len/2, 0); return geo; };
+  /* legs swing from the hip, arms from the shoulder */
+  const legs = [-0.11, 0.11].map(x=>{
+    const pivot = new THREE.Group(); pivot.position.set(x, 0.86, 0); g.add(pivot);
+    part(limb(0.075, 0.068, 0.78), look==="f" ? tights : pants, 0, 0, 0, pivot);
+    part(new THREE.BoxGeometry(0.14, 0.08, 0.26), shoe, 0, -0.8, 0.05, pivot);
+    return pivot;
+  });
+  part(new THREE.CylinderGeometry(0.2, 0.23, 0.62, 16), uni, 0, 1.18, 0);
+  if(look === "f") part(new THREE.CylinderGeometry(0.22, 0.36, 0.46, 18), uni, 0, 0.8, 0);
+  else part(new THREE.CylinderGeometry(0.23, 0.21, 0.18, 16), pants, 0, 0.9, 0);
+  if(role === "hk") part(new THREE.BoxGeometry(0.26, 0.5, 0.03), apron, 0, look==="f" ? 0.98 : 1.05,
+                         look==="f" ? 0.27 : 0.225);
+  else part(new THREE.BoxGeometry(0.08, 0.11, 0.02), apron, 0.1, 1.28, 0.22);
+  const arms = [-0.29, 0.29].map(x=>{
+    const pivot = new THREE.Group(); pivot.position.set(x, 1.44, 0); g.add(pivot);
+    pivot.rotation.z = x < 0 ? -0.1 : 0.1;
+    part(limb(0.062, 0.056, 0.6), uni, 0, 0, 0, pivot);
+    part(new THREE.SphereGeometry(0.068, 10, 8), skin, 0, -0.63, 0, pivot);
+    return pivot;
+  });
+  part(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 10), skin, 0, 1.52, 0);
+  part(new THREE.SphereGeometry(0.21, 20, 16), skin, 0, 1.7, 0);
+  [-0.075, 0.075].forEach(x=>part(new THREE.SphereGeometry(0.026, 8, 6), ink, x, 1.72, 0.193));
+  const cap = (frac, m, tilt)=>{
+    const o = part(new THREE.SphereGeometry(0.222, 20, 14, 0, Math.PI*2, 0, Math.PI*frac), m, 0, 1.7, 0);
+    o.rotation.x = tilt; return o; };
+  if(look === "f"){
+    cap(0.5, hair, -0.35);
+    part(new THREE.CylinderGeometry(0.2, 0.24, 0.42, 16, 1, true, Math.PI*0.6, Math.PI*0.8), hair, 0, 1.55, 0)
+      .material.side = THREE.DoubleSide;
+    part(new THREE.SphereGeometry(0.09, 12, 10), hair, 0, 1.86, -0.17);
+  } else if(look === "m"){
+    cap(0.38, hair, -0.3);
+  } else {
+    cap(0.45, uniD, -0.1);
+    part(new THREE.BoxGeometry(0.3, 0.025, 0.18), uniD, 0, 1.79, 0.2);
+  }
+  return {g, legs, arms};
+}
+
+const P = {lv:null, x:0, z:CORR_Z, feet:0, head:Math.PI/2, phase:0, xp:0,
+           visited:new Set()};
+let me = null, meTag = null, lamp = null, ride = null, built = false;
+let pcYaw = -Math.PI/2, pcPitch = 0.2, pcDist = 7;
+const quests = [];
+
+/* ---- the day's score, kept in this browser only ---- */
+const SAVE_KEY = "bgv_play_" + (DATA.day || "");
+function save(){
+  try{
+    localStorage.setItem(SAVE_KEY, JSON.stringify({xp:P.xp, visited:[...P.visited],
+      lv:P.lv, x:P.x, z:P.z, head:P.head, yaw:pcYaw, playing}));
+  }catch(e){}
+}
+let saved = null;
+try{ saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null"); }catch(e){ saved = null; }
+if(saved){ P.xp = saved.xp || 0; (saved.visited || []).forEach(c=>P.visited.add(c)); }
+
+function spawn(){
+  if(saved && saved.lv && where(saved.lv, saved.x, saved.z)){
+    P.lv = saved.lv; P.x = saved.x; P.z = saved.z; P.head = saved.head || P.head;
+    pcYaw = saved.yaw != null ? saved.yaw : pcYaw;
+  } else {
+    /* the day starts at the housekeeping office */
+    const off = (DATA.facils||[]).find(f=>f.kind==="office" && /housekeeping/i.test(f.label||""))
+             || (DATA.facils||[]).find(f=>f.kind==="office");
+    const r0 = off && where(off.level, off.x, CORR_Z);
+    if(r0){ P.lv = off.level; P.x = off.x; }
+    else { const p = Object.values(plates)[0]; P.lv = p.lv; P.x = (p.x0 + p.x1)/2; }
+    P.z = CORR_Z;
+  }
+  P.feet = FLOOR(P.lv);
+}
+
+function buildWorld(){
+  if(built) return;
+  built = true;
+  const B = buildPlayer(PL.look, PL.role);
+  me = B; playGroup.add(B.g);
+  const tm = tagMat("★ " + (PL.name || TX.you || "You"), "#f5a524");
+  meTag = new THREE.Sprite(tm.m); meTag.scale.set(0.34*tm.aspect, 0.34, 1);
+  meTag.renderOrder = 3; playGroup.add(meTag);
+  /* the corridors sit in the shadow of the slab above; a light that walks
+     with you keeps the doors readable */
+  lamp = new THREE.PointLight(0xfff6e8, 1.1, 26, 1.4);
+  playGroup.add(lamp);
+  /* a runner down every corridor, so the floor you can walk is the floor you see */
+  const runner = mat("#d5dde7", 1);
+  Object.values(walk).flat().forEach(r=>{
+    const deck = r.bridge ? DECK(r.lv) : FLOOR(r.lv);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(r.x1 - r.x0, 0.04, r.z1 - r.z0), runner);
+    m.position.set((r.x0 + r.x1)/2, deck + 0.02, (r.z0 + r.z1)/2);
+    m.receiveShadow = true;
+    playGroup.add(m);
+  });
+  /* glowing markers at the doors that need somebody */
+  const qGeo = new THREE.OctahedronGeometry(0.32);
+  DATA.boxes.forEach(b=>{
+    if(!b.on_chart || !b._av) return;
+    const kind = b.status === DATA.help ? "help"
+               : (DATA.ready || []).indexOf(b.status) >= 0 ? "ready" : null;
+    if(!kind) return;
+    const m = new THREE.Mesh(qGeo, new THREE.MeshBasicMaterial({
+      color: kind === "help" ? 0xef4444 : 0x2f80ed, transparent:true, opacity:0.92}));
+    m.position.set(b._av.dx, FLOOR(b.level) + 2.85, b._av.dz);
+    playGroup.add(m);
+    quests.push({b, kind, m, done:P.visited.has(b.code)});
+  });
+  quests.forEach(q=>{ q.m.visible = !q.done; });
+}
+
+/* ---- lifts and stairs ---- */
+function nearLift(){
+  const r = where(P.lv, P.x, P.z);
+  if(!r || r.bridge || ride) return null;
+  let best = null, bd = 1e9;
+  for(const f of lifts){
+    if(f.level !== P.lv || f.bld !== r.bld) continue;
+    const d = Math.abs(f.x - P.x);
+    if(d < bd){ bd = d; best = f; }
+  }
+  return best && bd < 3.4 ? best : null;
+}
+function levelStep(dir){
+  const lift = nearLift();
+  if(!lift) return;
+  const order = DATA.levels;
+  for(let j = order.indexOf(P.lv) + dir; j >= 0 && j < order.length; j += dir){
+    const lv = order[j];
+    const r = (walk[lv] || []).find(r=>r.bld === lift.bld);
+    if(!r) continue;
+    const there = lifts.filter(f=>f.level === lv && f.bld === lift.bld)
+      .sort((a, b)=>(a.kind === lift.kind ? 0 : 1) - (b.kind === lift.kind ? 0 : 1)
+                    || Math.abs(a.x - lift.x) - Math.abs(b.x - lift.x))[0];
+    const x = Math.max(r.x0 + 0.5, Math.min(r.x1 - 0.5, there ? there.x : P.x));
+    ride = {from:P.feet, to:FLOOR(lv), t:0, lv, x};
+    P.x = x; P.z = CORR_Z;
+    return;
+  }
+}
+
+/* ---- input: keys, and a thumb stick on a touch screen ---- */
+const keys = {};
+const joy = {x:0, y:0};
+window.addEventListener("keydown", e=>{
+  if(!playing) return;
+  keys[e.code] = true;
+  if(/^Arrow|^Space$|^Page/.test(e.code)) e.preventDefault();
+  if(e.repeat) return;
+  if(e.code === "KeyQ" || e.code === "PageUp") levelStep(1);
+  if(e.code === "KeyE" || e.code === "PageDown") levelStep(-1);
+  if(e.code === "Escape") stopPlay();
+});
+window.addEventListener("keyup", e=>{ keys[e.code] = false; });
+window.addEventListener("blur", ()=>{ for(const k in keys) keys[k] = false; });
+const joyEl = document.getElementById("joy"), knob = document.getElementById("knob");
+joyEl.addEventListener("pointerdown", e=>{ joyEl.setPointerCapture(e.pointerId); moveJoy(e); });
+joyEl.addEventListener("pointermove", e=>{ if(e.buttons || e.pointerType === "touch") moveJoy(e); });
+const endJoy = ()=>{ joy.x = joy.y = 0; knob.style.left = knob.style.top = "39px"; };
+joyEl.addEventListener("pointerup", endJoy);
+joyEl.addEventListener("pointercancel", endJoy);
+function moveJoy(e){
+  const r = joyEl.getBoundingClientRect();
+  let dx = e.clientX - r.left - r.width/2, dy = e.clientY - r.top - r.height/2;
+  const l = Math.hypot(dx, dy), R = 40;
+  if(l > R){ dx *= R/l; dy *= R/l; }
+  joy.x = dx/R; joy.y = dy/R;
+  knob.style.left = (39 + dx) + "px"; knob.style.top = (39 + dy) + "px";
+}
+document.getElementById("upbtn").addEventListener("click", ()=>levelStep(1));
+document.getElementById("dnbtn").addEventListener("click", ()=>levelStep(-1));
+const TOUCH = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+
+/* ---- each frame ---- */
+const phud = document.getElementById("phud"), nearEl = document.getElementById("near"),
+      toastEl = document.getElementById("toast"), liftEl = document.getElementById("liftbtns");
+let toastT = 0, hudT = 0;
+function toast(msg, colour){
+  toastEl.textContent = msg; toastEl.style.background = colour || "#1a9e4b";
+  toastEl.classList.add("on"); toastT = performance.now() + 1600;
+}
+const LV_NAME = lv => (lv === "Plaza" || lv === "Terrace") ? lv : (TX.level || "Level")+" "+lv;
+function stepPlayer(dt, now){
+  if(ride){
+    P.speed = 0;
+    ride.t = Math.min(1, ride.t + dt/0.9);
+    const k = ride.t < .5 ? 2*ride.t*ride.t : 1 - Math.pow(-2*ride.t + 2, 2)/2;
+    P.feet = ride.from + (ride.to - ride.from)*k;
+    if(ride.t >= 1){ P.lv = ride.lv; ride = null; save(); }
+  } else {
+    /* Steer and walk: left/right turn, up/down walk. Walking relative to
+       the camera made turning round in a corridor a fight with the camera;
+       a corridor is a line, and this is how you walk one. */
+    const turn = ((keys.KeyD||keys.ArrowRight) ? 1 : 0) - ((keys.KeyA||keys.ArrowLeft) ? 1 : 0) + joy.x;
+    const fwd = ((keys.KeyW||keys.ArrowUp) ? 1 : 0) - ((keys.KeyS||keys.ArrowDown) ? 1 : 0) - joy.y;
+    P.speed = 0;
+    if(Math.abs(turn) > 0.08) P.head -= Math.max(-1, Math.min(1, turn))*2.6*dt;
+    if(Math.abs(fwd) > 0.08){
+      const f = Math.max(-1, Math.min(1, fwd));
+      const sp = f > 0 ? ((keys.ShiftLeft || keys.ShiftRight) ? 11 : 5.5)*f : 3.2*f;
+      const mx = Math.sin(P.head), mz = Math.cos(P.head);
+      const nx = P.x + mx*sp*dt, nz = P.z + mz*sp*dt;
+      /* slide along a wall rather than stop dead at it */
+      if(where(P.lv, nx, nz)){ P.x = nx; P.z = nz; }
+      else if(where(P.lv, nx, P.z)) P.x = nx;
+      else if(where(P.lv, P.x, nz)) P.z = nz;
+      P.speed = Math.abs(sp);
+    }
+    /* the camera drifts back behind you once you move, unless you are
+       holding it somewhere with the mouse */
+    if((P.speed || Math.abs(turn) > 0.08) && !drag){
+      let d = (P.head + Math.PI) - pcYaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      pcYaw += d*Math.min(1, dt*3.5);
+    }
+    const r = where(P.lv, P.x, P.z);
+    const fy = r && r.bridge ? DECK(P.lv) : FLOOR(P.lv);
+    P.feet += (fy - P.feet)*Math.min(1, dt*10);
+  }
+  /* the figure: legs and arms swing with the pace, a breath when standing */
+  P.phase += dt*(P.speed ? 2.2 + P.speed*0.9 : 2);
+  const sw = P.speed ? Math.sin(P.phase)*Math.min(0.75, 0.25 + P.speed*0.06) : 0;
+  me.legs[0].rotation.x = sw; me.legs[1].rotation.x = -sw;
+  me.arms[0].rotation.x = -sw*0.85; me.arms[1].rotation.x = sw*0.85;
+  me.g.position.set(P.x, P.feet + (P.speed ? Math.abs(Math.sin(P.phase))*0.04 : 0), P.z);
+  me.g.rotation.y = P.head;
+  me.g.scale.y = P.speed ? 1 : 1 + Math.sin(now*0.003)*0.008;
+  meTag.position.set(P.x, P.feet + 2.25, P.z);
+  lamp.position.set(P.x, P.feet + 2.9, P.z);
+
+  /* the follow camera */
+  const tx = P.x + root.position.x, ty = P.feet + 1.45 + root.position.y, tz = P.z + root.position.z;
+  const cp = Math.cos(pcPitch), sp = Math.sin(pcPitch);
+  camera.position.set(tx + Math.sin(pcYaw)*cp*pcDist, ty + sp*pcDist, tz + Math.cos(pcYaw)*cp*pcDist);
+  camera.lookAt(tx, ty, tz);
+
+  /* the markers turn, and reaching one counts */
+  for(const q of quests){
+    if(q.done) continue;
+    q.m.rotation.y += dt*2;
+    q.m.position.y = FLOOR(q.b.level) + 2.85 + Math.sin(now*0.004 + q.b.x)*0.12;
+    if(!ride && q.b.level === P.lv
+       && Math.hypot(q.b._av.dx - P.x, q.b._av.dz - P.z) < 2.4){
+      q.done = true; q.m.visible = false; P.visited.add(q.b.code);
+      const pts = q.kind === "help" ? 25 : 10;
+      P.xp += pts;
+      toast("+" + pts + " " + (TX.xp || "XP") + " · " + q.b.code,
+            q.kind === "help" ? "#dc2626" : "#2f80ed");
+      save();
+    }
+  }
+  if(toastT && now > toastT){ toastEl.classList.remove("on"); toastT = 0; }
+  if(now - hudT > 150){ hudT = now; drawHud(); }
+}
+
+function drawHud(){
+  const r = where(P.lv, P.x, P.z);
+  const here = r && r.bridge
+    ? "Bridge " + r.a + " ↔ " + r.b + " · " + LV_NAME(P.lv)
+    : (TX.bld || "Building") + " " + (r ? r.bld : "?") + " · " + LV_NAME(P.lv);
+  const left = k=>quests.filter(q=>!q.done && q.kind === k).length;
+  const lift = nearLift();
+  phud.innerHTML =
+    "<b>★ " + esc(PL.name || TX.you || "You") + "</b><br>" + esc(here) +
+    "<br><span class='xp'>" + P.xp + " " + esc(TX.xp || "XP") + "</span> · " +
+    P.visited.size + " " + esc(TX.visited || "visited") +
+    "<br>" + esc(TX.quests || "Rooms to visit") + ": <b style='color:#dc2626'>" + left("help") +
+    "</b> " + esc(TX.help_q || "need help") + " · <b style='color:#2f80ed'>" + left("ready") +
+    "</b> " + esc(TX.ready_q || "ready for RQS") +
+    (lift ? "<br><b style='color:#1a9e4b'>" + esc(TX.lift || "Lift here: Q up, E down") + "</b>" : "") +
+    (TOUCH ? "" : "<br><span style='color:#64748b'>" + esc(TX.help || "") + "</span>");
+  liftEl.style.display = lift ? "flex" : "none";
+  /* who or what is right here */
+  let best = null, bd = 3.2;
+  for(const a of avList){
+    if(a.b.level !== P.lv) continue;
+    const d = Math.hypot(a.door.x - P.x, a.door.z - P.z);
+    if(d < bd){ bd = d; best = personLine(a.p) + " <span>&middot; " + a.b.code + "</span>"; }
+  }
+  if(!best){
+    let rb = null; bd = 2.6;
+    for(const b of DATA.boxes){
+      if(b.level !== P.lv || !b._av) continue;
+      const d = Math.hypot(b._av.dx - P.x, b._av.dz - P.z);
+      if(d < bd){ bd = d; rb = b; }
+    }
+    if(rb) best = "<b>" + rb.code + "</b> <span>" +
+      (rb.on_chart ? [rb.svc, rb.mins ? rb.mins + " min" : "", rb.hk,
+                      rb.status.replace(/_/g, " ")].filter(Boolean).map(esc).join(" &middot; ")
+                   : "not on a chart today") + "</span>";
+  }
+  nearEl.innerHTML = best || "";
+  nearEl.style.display = best ? "block" : "none";
+}
+
+const playBtn = document.getElementById("playbtn");
+function labelPlay(){ playBtn.textContent = playing ? (TX.stop || "■ Exit") : (TX.start || "▶ Play"); }
+function startPlay(){
+  buildWorld();
+  if(P.lv === null) spawn();
+  playing = true;
+  wrap.classList.add("playing");
+  playGroup.visible = true;
+  camera.near = 0.1; camera.updateProjectionMatrix();
+  pick.style.display = "none";
+  phud.style.display = "block";
+  joyEl.style.display = TOUCH ? "block" : "none";
+  labelPlay(); save();
+  try{ cv.focus({preventScroll:true}); }catch(e){}
+}
+function stopPlay(){
+  playing = false;
+  wrap.classList.remove("playing");
+  playGroup.visible = false;
+  camera.near = 1; camera.updateProjectionMatrix();
+  for(const el of [phud, nearEl, joyEl, liftEl]) el.style.display = "none";
+  for(const k in keys) keys[k] = false;
+  labelPlay(); save(); place();
+}
+playBtn.addEventListener("click", ()=>playing ? stopPlay() : startPlay());
+labelPlay();
+cv.addEventListener("pointerdown", ()=>{ if(playing){ try{ cv.focus({preventScroll:true}); }catch(e){} } });
+
+const fsBtn = document.getElementById("fsbtn");
+fsBtn.title = TX.full || "Fullscreen";
+if(!document.fullscreenEnabled) fsBtn.style.display = "none";
+fsBtn.addEventListener("click", ()=>{
+  if(document.fullscreenElement) document.exitFullscreen();
+  else wrap.requestFullscreen().catch(()=>{});
+});
+document.addEventListener("fullscreenchange", ()=>setTimeout(size, 60));
 
 /* ---- level and building labels, projected each frame ---- */
 const tags = [];
@@ -586,8 +1329,23 @@ function size(){
 window.addEventListener("resize", size);
 size();
 
-(function loop(){
+let avFrame = 0, avLast = 0, lastNow = 0;
+/* back in the game after a refresh, where you left off */
+if(saved && saved.playing) startPlay();
+(function loop(now){
   requestAnimationFrame(loop);
+  now = now || performance.now();
+  const dt = Math.min(0.05, lastNow ? (now - lastNow)/1000 : 0.016);
+  lastNow = now;
+  if(playing) stepPlayer(dt, now);
+  if(now - avLast > 190){          /* about five frames a second: a cartoon, not a video */
+    avLast = now; avFrame = (avFrame + 1) % 4;
+    for(const k in avMats){
+      avMats[k][0].map.offset.x = avFrame*0.25;
+      avMats[k][1].map.offset.x = ((avFrame + 2) % 4)*0.25;
+    }
+  }
+  sizeAvatars(now);
   project();
   renderer.render(scene, camera);
 })();
@@ -624,6 +1382,13 @@ def _plan_html():
     for f in facils:
         fac_by[f["bld"]][f["level"]].append(f)
 
+    # Avatars stand on top of their room's tile, so with them on each row
+    # gets the headroom to hold one without reaching into the row above.
+    row_px = 84 if AV_MODE != "off" else 62
+    pad = 26 if AV_MODE != "off" else 0
+    at_door = collections.defaultdict(list)
+    for p in people:
+        at_door[p["code"]].append(p)
     out = []
     for bld in (3, 1, 2):
         levels = set(per_bld[bld]) | set(fac_by[bld])
@@ -639,25 +1404,35 @@ def _plan_html():
             rs = per_bld[bld].get(lv, [])
             fs = fac_by[bld].get(lv, [])
             rows = [x["row"] for x in rs] + [x["row"] for x in fs] or [0]
-            h = int((max(rows) - min(rows)) * 62) + 74
+            h = int((max(rows) - min(rows)) * row_px) + 74 + pad
             cells = []
             for r in sorted(rs, key=lambda r: r["x"]):
                 # inset, or a box centred on 0% or 100% loses half itself
                 left = 5 + (r["x"] - lo) / span * 90
-                top = (r["row"] - min(rows)) * 62
+                top = (r["row"] - min(rows)) * row_px + pad
                 ink = _ink(r["colour"])
                 meta = " · ".join(x for x in (r["svc_short"],
                                               f'{r["mins"]:.0f}m' if r["mins"] else "") if x)
+                guy = ""
+                for i, p in enumerate(at_door.get(r["code"], [])):
+                    title = f'{p["name"]} · {ACT_LABEL.get(p["act"], "")}' + (
+                        f' · {p["at"]}' if p["at"] else "")
+                    guy += (f'<i class="av av-{p["key"]} pav" style="right:{-9 + i * 24}px" '
+                            f'title="{html.escape(title)}"></i>')
+                    if p["who"]:
+                        guy += (f'<span class="ptag" style="background:{p["col"]};'
+                                f'color:{_ink(p["col"])};top:{-17 - i * 15}px">'
+                                f'{html.escape(p["who"])}</span>')
                 cells.append(
                     f'<div class="pr" style="left:{left:.2f}%;top:{top}px;'
                     f'background:{r["colour"]};color:{ink};'
                     f'{"opacity:.5;" if not r["on_chart"] else ""}" '
-                    f'title="{r["code"]} — {r.get("hk") or "unassigned"}">'
-                    f'<b>{r["code"]}</b>'
+                    f'title="{r["code"]} — {html.escape(r.get("hk") or "unassigned")}">'
+                    f'{guy}<b>{r["code"]}</b>'
                     + (f'<i>{meta}</i>' if meta else '') + '</div>')
             for f in sorted(fs, key=lambda f: f["x"]):
                 left = 5 + (f["x"] - lo) / span * 90
-                top = (f["row"] - min(rows)) * 62
+                top = (f["row"] - min(rows)) * row_px + pad
                 cells.append(
                     f'<div class="pf k-{f["kind"]}" style="left:{left:.2f}%;'
                     f'top:{top + 8}px">{f["label"]}</div>')
@@ -691,6 +1466,11 @@ PLAN_CSS = """
   letter-spacing:-.01em;line-height:1.1}
 .pr i{font-size:.6rem;font-style:normal;opacity:.82;line-height:1.2;
   white-space:nowrap}
+.pr i.pav{position:absolute;right:-9px;top:-28px;opacity:1;z-index:2}
+.ptag{position:absolute;left:-6px;top:-17px;font-size:.56rem;font-weight:800;
+  padding:1px 6px;border-radius:999px;white-space:nowrap;max-width:60px;overflow:hidden;
+  text-overflow:ellipsis;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(20,35,55,.25);
+  z-index:3;line-height:1.35}
 .pf{position:absolute;transform:translateX(-50%);font-size:.58rem;
   font-weight:700;padding:3px 6px;border-radius:5px;white-space:nowrap;
   background:#dfe6ee;color:#43566c;border:1px solid #cbd6e2}
@@ -707,10 +1487,19 @@ PLAN_CSS = """
 </style>
 """
 
+# One sprite stylesheet for the plan, the game bar and the cast below it:
+# whatever is on screen, plus the neutral faces the bar and the cast use.
+CAST = [a for a in av.ORDER if AV_MODE == "all" or a in av.LIVE]
+AV_CSS = ""
+if AV_MODE != "off":
+    AV_CSS = av.sprite_css(set(AV_KEYS) | {av.key("n", a) for a in av.ORDER}, 24, 32)
+    st.markdown(f"<style>{AV_CSS}{GAME_CSS}</style>{_game_bar()}",
+                unsafe_allow_html=True)
+
 if flat:
     st.markdown(PLAN_CSS + _plan_html(), unsafe_allow_html=True)
 else:
-    components.html(HTML.replace("__PAYLOAD__", payload), height=640,
+    components.html(HTML.replace("__PAYLOAD__", payload), height=800,
                     scrolling=False)
 
 # ---------------------------------------------------------------- legend
@@ -742,6 +1531,54 @@ core_chips = "".join(_chip(c, l) for c, l in [
 ])
 st.markdown(f'<div style="margin:0 0 4px">{core_chips}</div>',
             unsafe_allow_html=True)
+if AV_MODE != "off":
+    cast = "".join(f'<span><i class="av av-{av.key("n", a)}"></i>{ACT_LABEL[a]}</span>'
+                   for a in CAST)
+    st.markdown(f'<div style="margin:8px 0 2px;font-size:.8rem;font-weight:700;'
+                f'color:#33455c">{T("prop.av_cast")}</div>'
+                f'<div class="avcast">{cast}</div>', unsafe_allow_html=True)
+
+
+def _looks_editor():
+    """Managers say how each person is drawn. Nobody is guessed from a name."""
+    import pandas as pd
+    stored = _looks(st.session_state.get("prop_av_gen", 0))
+    names = {n for d in today.values() for n in (d.get("hk"), d.get("rqs"))
+             if av.is_person(n)}
+    names |= {r.get("housekeeper") for r in statuses.values()
+              if av.is_person(r.get("housekeeper"))}
+    names |= set(stored)
+    if not names:
+        st.caption(T("prop.av_none"))
+        return
+    df = pd.DataFrame({"Person": sorted(names, key=str.lower)})
+    df["Look"] = [av.LOOKS[av.look_of(stored, n)] for n in df["Person"]]
+    st.caption(T("prop.av_looks_help"))
+    with st.form("prop_av_form", border=False):
+        ed = st.data_editor(
+            df, hide_index=True, disabled=["Person"],
+            key=f"prop_av_ed_{st.session_state.get('prop_av_gen', 0)}",
+            column_config={"Look": st.column_config.SelectboxColumn(
+                options=list(av.LOOKS.values()), required=True)})
+        if st.form_submit_button(T("prop.av_save")):
+            code = {v: k for k, v in av.LOOKS.items()}
+            # neutral is the default, so only a real choice is stored
+            new = {p: code[l] for p, l in zip(ed["Person"], ed["Look"])
+                   if code.get(l, "n") != "n"}
+            try:
+                db._upsert_key(av.SETTING_KEY, new)
+            except Exception as ex:
+                st.error(str(ex))
+                return
+            st.session_state["prop_av_gen"] = st.session_state.get("prop_av_gen", 0) + 1
+            _looks.clear()
+            st.toast(T("prop.av_saved"))
+            st.rerun()
+
+
+if AV_MODE != "off" and auth.can("can_manage_users"):
+    with st.expander(T("prop.av_looks")):
+        _looks_editor()
 st.markdown(
     f'<div style="margin:0 0 18px;font-size:.76rem;color:#7b8798">'
     f'{T("prop.size_note")}</div>', unsafe_allow_html=True)
