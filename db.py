@@ -633,7 +633,7 @@ def login_summary(limit: int = 1000) -> list:
 # ════════════════════════════════════════════════════════════════════════════
 #  USER MANAGEMENT
 # ════════════════════════════════════════════════════════════════════════════
-ROLES = ["admin", "rqs", "housekeeper", "houseperson"]
+ROLES = ["admin", "rqs", "housekeeper", "houseperson", "frontdesk"]
 
 def _hash_pw(password: str, salt: str = "") -> str:
     if not salt:
@@ -661,14 +661,52 @@ def _check_pw(password: str, stored: str) -> bool:
     except Exception:
         return False
 
+# ── roles the database doesn't take yet ──────────────────────────────────────
+#: Roles the app has that this database's app_users_role_check may not accept
+#: yet -- supabase_setup.sql carries the ALTER that adds each (the frontdesk
+#: role, 21 Nov). Until it is run, such an account is stored as a housekeeper,
+#: the least anyone can do, and its real role is kept in app_settings
+#: "account_roles" {username: role}. Only get_user / load_users read it -- the
+#: one road every sign-in, session restore and the Admin page take. Once the
+#: ALTER is in, create_user / update_role store the real role and drop the entry.
+NEW_ROLES = ("frontdesk",)
+ACCOUNT_ROLES_KEY = "account_roles"
+
+
+def _pending_roles() -> dict:
+    try:
+        return _load_key_raw(ACCOUNT_ROLES_KEY) or {}
+    except Exception as ex:
+        print(f"[db] account roles not read: {ex}")
+        return {}
+
+
+def _set_pending_role(uname: str, role: str | None) -> None:
+    cur = _pending_roles()
+    if role:
+        cur[uname] = role
+    elif uname in cur:
+        cur.pop(uname)
+    else:
+        return
+    _upsert_key(ACCOUNT_ROLES_KEY, cur)
+
+
+def _role_refused(ex) -> bool:
+    return "app_users_role_check" in str(ex) or "23514" in str(ex)
+
+
 def load_users() -> list:
     """Return all users (without password hashes)."""
     try:
         r = _client().table("app_users").select("id,username,role,created_at,last_login").execute()
-        return r.data or []
+        rows = r.data or []
     except Exception as ex:
         print(f"[db] load_users error: {ex}")
         return []
+    pending = _pending_roles()
+    return [dict(u, role=pending[u["username"]]) if u.get("username") in pending else u
+            for u in rows]
 
 def get_user(username: str) -> dict | None:
     """Return full user row including password_hash."""
@@ -678,10 +716,14 @@ def get_user(username: str) -> dict | None:
              .eq("username", username.strip().lower())
              .execute())
         rows = r.data or []
-        return rows[0] if rows else None
     except Exception as ex:
         print(f"[db] get_user error: {ex}")
         return None
+    if not rows:
+        return None
+    user = rows[0]
+    pending = _pending_roles()
+    return dict(user, role=pending[user["username"]]) if user.get("username") in pending else user
 
 def create_user(username: str, password: str, role: str) -> tuple[bool, str]:
     """Create a new user. Returns (success, message)."""
@@ -693,16 +735,25 @@ def create_user(username: str, password: str, role: str) -> tuple[bool, str]:
     if get_user(uname):
         return False, f"User '{uname}' already exists."
     pw_hash = _hash_pw(password)
-    try:
+
+    def insert(stored):
         _client().table("app_users").insert({
             "username":     uname,
             "password_hash":pw_hash,
-            "role":         role,
+            "role":         stored,
             "created_at":   datetime.utcnow().isoformat(),
         }).execute()
-        return True, f"User '{uname}' created with role '{role}'."
+    try:
+        insert(role)
     except Exception as ex:
-        return False, str(ex)
+        if not (role in NEW_ROLES and _role_refused(ex)):
+            return False, str(ex)
+        try:
+            insert("housekeeper")          # the database doesn't take the role yet
+            _set_pending_role(uname, role)
+        except Exception as ex2:
+            return False, str(ex2)
+    return True, f"User '{uname}' created with role '{role}'."
 
 def authenticate(username: str, password: str) -> dict | None:
     """Verify credentials. Returns user dict on success, None on failure."""
@@ -782,17 +833,27 @@ def update_password(username: str, new_password: str) -> tuple[bool, str]:
 def update_role(username: str, new_role: str) -> tuple[bool, str]:
     if new_role not in ROLES:
         return False, f"Invalid role. Choose: {', '.join(ROLES)}"
+    uname = username.strip().lower()
+
+    def store(role):
+        _client().table("app_users").update({"role": role}).eq("username", uname).execute()
     try:
-        _client().table("app_users").update(
-            {"role": new_role}
-        ).eq("username", username.strip().lower()).execute()
-        return True, f"Role updated to '{new_role}'."
+        store(new_role)
+        _set_pending_role(uname, None)
     except Exception as ex:
-        return False, str(ex)
+        if not (new_role in NEW_ROLES and _role_refused(ex)):
+            return False, str(ex)
+        try:
+            store("housekeeper")           # the database doesn't take the role yet
+            _set_pending_role(uname, new_role)
+        except Exception as ex2:
+            return False, str(ex2)
+    return True, f"Role updated to '{new_role}'."
 
 def delete_user(username: str) -> tuple[bool, str]:
     try:
         _client().table("app_users").delete().eq("username", username.strip().lower()).execute()
+        _set_pending_role(username.strip().lower(), None)
         return True, f"User '{username}' deleted."
     except Exception as ex:
         return False, str(ex)
@@ -1076,6 +1137,36 @@ def _retrying(fn):
 for _name in ("_upsert_key", "_delete_key", "save_full_schedule", "bulk_upsert_room_statuses",
               "upsert_room_status"):
     globals()[_name] = _retrying(globals()[_name])
+
+
+# ── the floor (floor.py) ──────────────────────────────────────────────────────
+# Every page reads today's charts, statuses and the front desk's marks through
+# one shared snapshot. A write to any of them makes it stale here, in one
+# place, so whoever wrote sees their change on the next draw -- no page has to
+# remember to clear a cache of its own.
+_FLOOR_KEYS = ("fdmark_", "sheet_unplaced", "hotsos_status_sync")
+
+
+def _touches_floor(fn, by_key=False):
+    import functools
+
+    @functools.wraps(fn)
+    def run(*a, **k):
+        out = fn(*a, **k)
+        if not by_key or (a and str(a[0]).startswith(_FLOOR_KEYS)):
+            try:
+                import floor
+                floor.invalidate()
+            except Exception as ex:
+                print(f"[db] floor not refreshed: {ex}")
+        return out
+    return run
+
+
+for _name in ("save_full_schedule", "bulk_upsert_room_statuses", "upsert_room_status"):
+    globals()[_name] = _touches_floor(globals()[_name])
+for _name in ("_upsert_key", "_delete_key"):
+    globals()[_name] = _touches_floor(globals()[_name], by_key=True)
 
 
 # ── free-plan meter ───────────────────────────────────────────────────────────

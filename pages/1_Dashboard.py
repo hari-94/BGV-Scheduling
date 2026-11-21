@@ -129,17 +129,24 @@ ui.topnav("Dashboard")
 TODAY = clock.today_iso()
 
 
-@st.cache_data(ttl=20, show_spinner=False)
-def today_plan(_gen):
+import floor  # noqa: E402
+
+
+@st.cache_data(ttl=600, show_spinner=False, max_entries=4)
+def today_plan(_floor, stamp):
     """Today's rooms, each with the times its housekeeper is working to.
 
     The plan is built per person, exactly as the phone page builds it, so a
     bar here is the same window she is reading there. Building a second,
     prettier plan for the office to look at would be worse than useless.
+
+    Off the shared floor (floor.py): the charts every page reads, the front
+    desk's late checkouts and departures on them. Worked out again only when
+    the floor changed (`stamp`).
     """
-    sched = db.load_full_schedule() or {}
+    groups = _floor.charts
     by_hk = {}
-    for g in (sched.get("groups_data") or []):
+    for g in groups:
         hk = (g.get("housekeeper", "") or "").strip() or "— unassigned —"
         for r in (g.get("rooms") or []):
             if str(r.get("room", "")).strip():
@@ -167,17 +174,16 @@ def today_plan(_gen):
 
 
 gen = st.session_state.get("dsh_gen", 0)
-PLAN = today_plan(gen)
+FLOOR = floor.today(fresh=bool(gen) and st.session_state.get("_dsh_seen") != gen)
+st.session_state["_dsh_seen"] = gen
+PLAN = today_plan(FLOOR, FLOOR.fetched)
 
 if PLAN.empty:
     st.markdown('<p class="dtitle">Nothing scheduled today</p>', unsafe_allow_html=True)
     st.info("Generate today's schedule on the main page and it will appear here.")
     st.stop()
 
-try:
-    statuses = db.get_room_statuses()
-except Exception:
-    statuses = {}
+statuses = FLOOR.statuses
 MARK = {k: _rst.normalise(v.get("status")) for k, v in statuses.items()}
 DONE = set(_rst.CLEANED)
 # An unmarked room is "" rather than None: a column of Nones comes back out of

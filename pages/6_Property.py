@@ -43,22 +43,25 @@ def _inventory():
     return db.all_known_rooms()
 
 
-@st.cache_data(ttl=20, show_spinner=False)
+import floor  # noqa: E402
+
+
 def _statuses(_gen):
-    return db.get_room_statuses()
+    """Today's room statuses, off the shared floor (floor.py)."""
+    return floor.today(fresh=bool(_gen) and st.session_state.get("_prop_seen") != _gen).statuses
 
 
-@st.cache_data(ttl=20, show_spinner=False)
-def _today(_gen):
+@st.cache_data(ttl=600, show_spinner=False, max_entries=4)
+def _today_from(_floor, stamp):
     """What each room is actually down for today: service, minutes, who has it.
 
     The inventory says the building exists; only the day's schedule says a room
     is a 140-minute Full Clean rather than a Dust n Vac touch-up, and that is
-    what the boxes are sized and labelled by.
+    what the boxes are sized and labelled by. Off the shared floor, worked out
+    again only when it changed (`stamp`).
     """
-    sched = db.load_full_schedule() or {}
     out = {}
-    for g in (sched.get("groups_data") or []):
+    for g in (_floor.charts or []):
         for r in (g.get("rooms") or []):
             code = str(r.get("room", "")).strip().upper()
             if not code:
@@ -93,7 +96,9 @@ boxes = pmap.layout(rooms)
 spans = pmap.bridge_spans()
 gen = st.session_state.get("prop_gen", 0)
 statuses = _statuses(gen)
-today = _today(gen)
+st.session_state["_prop_seen"] = gen
+_FLOOR = floor.today()
+today = _today_from(_FLOOR, _FLOOR.fetched)
 
 # ---------------------------------------------------------------- controls
 c1, c2, c3 = st.columns([2.6, 1.2, 2.6])
@@ -110,8 +115,6 @@ with c2:
     show_extras = st.toggle(T("prop.show_amenities"), value=True, key="prop_extras")
     if st.button(T("prop.refresh"), use_container_width=True):
         st.session_state["prop_gen"] = st.session_state.get("prop_gen", 0) + 1
-        _statuses.clear()
-        _today.clear()
         st.rerun()
 with c3:
     done = sum(1 for b in boxes

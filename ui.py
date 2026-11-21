@@ -28,6 +28,7 @@ NAV_ITEMS = [
     ("cleaning_scheduler.py",    "Schedule",      ":material/cleaning_services:", "can_generate", "nav.schedule"),
     ("pages/1_Dashboard.py",     "Dashboard",     ":material/dashboard:", "can_view_dashboard", "nav.dashboard"),
     ("pages/13_Whos_Working.py", "Who's Working", ":material/groups:", "_whos_working", "nav.whos_working"),
+    ("pages/14_Front_Desk.py",   "Front Desk",    ":material/room_service:", "can_view_frontdesk", "nav.front_desk"),
     ("pages/3_Roster_Import.py", "Roster Import", ":material/upload_file:", "can_manage_users", "nav.roster_import"),
     ("pages/6_Property.py",      "Property",      ":material/apartment:", "can_view_insp_tab", "nav.property"),
     ("pages/9_Forecast.py",      "Forecast",      ":material/trending_up:", "can_view_dashboard", "nav.forecast"),
@@ -384,6 +385,10 @@ def _visible(perm) -> bool:
     page only on the days they are carrying rooms themselves, so the link
     appears only then.
     """
+    # The front desk's menu is the Front Desk page alone (Hari, 21 Nov).
+    # getattr: a deploy reloads this module before auth (fresh.py).
+    if getattr(auth, "is_frontdesk", lambda: False)():
+        return perm == "can_view_frontdesk"
     if perm is None:
         return True
     if perm == "_whos_working":
@@ -417,6 +422,9 @@ def topnav(active: str = "", hide_sidebar: bool = True):
     the attendance controls.
     """
     st.markdown(CHROME_CSS, unsafe_allow_html=True)
+    # The front desk has one page; any other address takes them back to it.
+    if getattr(auth, "is_frontdesk", lambda: False)() and active != "Front Desk":
+        st.switch_page(auth.home_page())
     # Free plan watch: this process's memory (and caches dropped if it's high),
     # and the read meter flushed every 10 minutes. Never lets a page fail.
     try:
@@ -438,6 +446,25 @@ def topnav(active: str = "", hide_sidebar: bool = True):
                     unsafe_allow_html=True)
 
     i18n.load_lang_for_user()
+    # While the connection to the server is down -- a push redeploys the app,
+    # Wi-Fi changes, a laptop wakes -- Streamlit greys out every link and
+    # button, and its own "Connecting" sign is hidden with the status widget
+    # (CHROME_CSS). So the menu just looked dead (Hari, 19 Nov). Say so,
+    # keyed on the state Streamlit writes on the app; the phone app too.
+    _msg = {"PINGING_SERVER": i18n.t("conn.reconnecting"),
+            "CONNECTING": i18n.t("conn.reconnecting"),
+            "DISCONNECTED_FOREVER": i18n.t("conn.lost")}
+    st.markdown("<style>" + "".join(
+        f'[data-testid="stApp"][data-test-connection-state="{k}"]::before{{content:"{v}";}}'
+        for k, v in _msg.items())
+        + '[data-testid="stApp"]:is([data-test-connection-state="PINGING_SERVER"],'
+          '[data-test-connection-state="CONNECTING"],'
+          '[data-test-connection-state="DISCONNECTED_FOREVER"])::before{'
+          'position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:1000001;'
+          'background:#1f2733;color:#fff;padding:9px 18px;border-radius:999px;'
+          'font-size:.88rem;font-weight:600;white-space:nowrap;pointer-events:none;'
+          'box-shadow:0 6px 20px rgba(16,26,42,.25);}</style>',
+        unsafe_allow_html=True)
     # The sign-in page writes the cookie and then switches page, so the write
     # can be lost before the browser runs it. Every page tries again until the
     # browser is actually carrying it.

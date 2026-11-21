@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS app_users (
   username      TEXT        NOT NULL UNIQUE,
   password_hash TEXT        NOT NULL,
   role          TEXT        NOT NULL DEFAULT 'housekeeper'
-                            CHECK (role IN ('admin','rqs','housekeeper','houseperson')),
+                            CHECK (role IN ('admin','rqs','housekeeper','houseperson','frontdesk')),
   created_at    TIMESTAMPTZ DEFAULT now(),
   last_login    TIMESTAMPTZ
 );
@@ -74,3 +74,9 @@ CREATE TRIGGER trg_schedule_full_updated
 --   ALTER TABLE app_users DROP CONSTRAINT app_users_role_check;
 --   ALTER TABLE app_users ADD CONSTRAINT app_users_role_check
 --     CHECK (role IN ('admin','rqs','housekeeper','houseperson'));
+
+-- 21 Nov: the frontdesk role (the Front Desk page). On a database made before
+-- then, run once:
+--   ALTER TABLE app_users DROP CONSTRAINT app_users_role_check;
+--   ALTER TABLE app_users ADD CONSTRAINT app_users_role_check
+--     CHECK (role IN ('admin','rqs','housekeeper','houseperson','frontdesk'));

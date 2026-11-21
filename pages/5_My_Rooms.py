@@ -197,6 +197,8 @@ div[data-testid="stButton"] button:active{transform:scale(.97)}
 .tkchip.early{background:#dbeafe;color:#12447e}
 .tkchip.pet{background:#fff0e0;color:#8a4b00}
 .tkchip.late{background:#fde8ef;color:#9b1c48}
+.tkchip.left{background:#d6f2df;color:#14532d}
+.tkchip.fdnote{background:#e7effa;color:#1e3a5f}
 .tkwhen{font-size:.72rem;font-weight:800;color:#12447e;background:#e8effa;
   border-radius:6px;padding:1px 6px;white-space:nowrap;font-variant-numeric:tabular-nums}
 /* The day, as a shape. One strip from the first cart out to the last room
@@ -476,15 +478,18 @@ today = clock.today()
 
 
 # ── today's published schedule ───────────────────────────────────────────────
-@st.cache_data(ttl=5, show_spinner=False)
-def _fresh(_tick=0):
-    """Today's charts and statuses, held for a few seconds.
+import floor  # noqa: E402
+
+
+def _fresh():
+    """Today's charts and statuses, off the shared floor (floor.py).
 
     Every tap reruns the page, and reading the schedule and the whole status
-    table again each time is what made marking a room feel like waiting. Five
-    seconds is short enough that a change made upstairs still arrives on the
-    next poll, and the cache is dropped outright the moment this page writes
-    anything, so your own marks never lag.
+    table again each time is what made marking a room feel like waiting. The
+    floor is read once for the whole app every few seconds, so a change made
+    upstairs still arrives on the next poll, and any write -- this page's own
+    marks included -- makes it fresh at once (db._touches_floor), so your own
+    marks never lag.
     """
     return assignments.todays_charts()
 
@@ -916,7 +921,7 @@ def _mark(room, chart, new_status, who=None):
         # the change is on screen in the same breath rather than up to five
         # seconds later.
         st.session_state["mr_gen"] = st.session_state.get("mr_gen", 0) + 1
-        _fresh.clear()
+        floor.invalidate()
     except Exception as ex:
         print(f"[my_rooms] save failed for {room}: {ex}")
         st.session_state["mr_error"] = room
@@ -971,6 +976,13 @@ def _flags_for(r):
         at = _day.late_out_at(r)
         lo = _t("flag.late", "LATE OUT")
         out.append(("late", f"{lo} {at}" if at else lo))
+    # The front desk's marks (frontdesk.py, 21 Nov): the guest has gone, so
+    # the room can be done now; and a note for whoever cleans it.
+    if r.get("fd_departed"):
+        import frontdesk as _fdk
+        out.append(("left", f'{_t("flag.departed", "GUEST LEFT")} {_fdk.local_hhmm(r["fd_departed"])}'))
+    if r.get("fd_notes"):
+        out.append(("fdnote", _t("flag.fd_note", "FRONT DESK NOTE")))
     return out
 
 
@@ -1108,7 +1120,7 @@ def _save_score(code, g, owner, skeys, note_key):
                            by_name=me_display or me_user, note=note)
         st.session_state["mr_flash"] = code
         st.session_state["mr_gen"] = st.session_state.get("mr_gen", 0) + 1
-        _fresh.clear()
+        floor.invalidate()
     except Exception as ex:
         print(f"[my_rooms] score failed for {code}: {ex}")
         st.session_state["mr_error"] = code
@@ -1129,7 +1141,7 @@ def _save_note(code, g, owner, note_key):
             "updated_by": me_display or me_user})
         st.session_state["mr_flash"] = code
         st.session_state["mr_gen"] = st.session_state.get("mr_gen", 0) + 1
-        _fresh.clear()
+        floor.invalidate()
     except Exception as ex:
         print(f"[my_rooms] note failed for {code}: {ex}")
         st.session_state["mr_error"] = code
@@ -1138,6 +1150,11 @@ def _save_note(code, g, owner, note_key):
 def _toggle_more(code):
     st.session_state["mr_more"] = (
         None if st.session_state.get("mr_more") == code else code)
+
+
+def _fd_hhmm(iso):
+    import frontdesk as _fdk
+    return _fdk.local_hhmm(iso)
 
 
 def _detail_html(g, r, rec, owner):
@@ -1193,6 +1210,9 @@ def _detail_html(g, r, rec, owner):
         # Under Arrival, because it is the other half of the same question:
         # can this room be done now, or does it have to wait?
         + _row(T("rooms.late_out"), str(r.get("late_checkout") or "").strip())
+        + (_row(_t("rooms.departed_at", "Guest left"), _fd_hhmm(r.get("fd_departed")))
+           if r.get("fd_departed") else "")
+        + "".join(_row(_t("rooms.fd_note", "Front desk"), n) for n in r.get("fd_notes") or [])
         + f'<div class="dthead">{e(T("rooms.the_room"))}</div>'
         + _row(T("rooms.building_l"), r.get("bld"))
         + _row(T("rooms.floor_l"), r.get("floor"))

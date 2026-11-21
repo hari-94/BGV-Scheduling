@@ -291,7 +291,8 @@ def live_stats():
     daily = freetier.daily_usage()
     mem = db._load_key(freetier.USAGE_PREFIX + "memory_app") or {}
     sync = db._load_key(getattr(hs, "STATUS_SYNC_KEY", "hotsos_status_sync")) or {}
-    rooms = db.get_room_statuses() or {}
+    import floor
+    rooms = floor.today().statuses      # the shared floor (floor.py)
     now = clock.now()
     days_in = calendar.monthrange(now.year, now.month)[1]
 
@@ -465,7 +466,8 @@ def health():
         cur = db._load_key(hs.RESULT_KEY) or {}
         att = db._load_key("hotsos_attendants") or {}
         events = (db._load_key(hs.EVENTS_KEY) or {}).get("events") or []
-        sched = db.load_full_schedule() or {}
+        import floor
+        sched = floor.today().schedule      # the shared floor (floor.py)
         db_ok, db_err = True, ""
     except Exception as ex:
         db_ok, db_err = False, str(ex)

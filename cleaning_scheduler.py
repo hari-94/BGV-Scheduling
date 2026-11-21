@@ -1180,6 +1180,14 @@ def _render_set_aside(rows, where):
     </style>""", unsafe_allow_html=True)
 
 
+def _floor_statuses():
+    """Today's room statuses off the shared floor (floor.py) -- the snapshot
+    every page reads. A copy: this page updates them in place as it marks."""
+    import copy as _cp
+    import floor as _fl
+    return _cp.deepcopy(_fl.today().statuses)
+
+
 def _save_reassignment(fg):
     """Persist a manual housekeeper/RQS change.
 
@@ -1382,7 +1390,10 @@ auth.init_auth()
 # rather than to the Schedule (HP, 7 Nov). Not with ?authdebug=1.
 if (st.session_state.pop("_restored_now", False) and st.session_state.get("logged_in")
         and st.query_params.get("authdebug") != "1"):
-    st.switch_page("pages/4_My_Home.py")
+    st.switch_page(auth.home_page())
+# The front desk's one page is the Front Desk (Hari, 21 Nov); never the Schedule.
+if st.session_state.get("logged_in") and auth.is_frontdesk():
+    st.switch_page(auth.home_page())
 # Reachable from any phone at ?authdebug=1 -- shows whether the browser's
 # session cookie reached the server and what restore() made of it. Names and
 # booleans only, never the token. Gated, so normal visitors never see it.
@@ -1544,9 +1555,9 @@ footer{visibility:hidden!important;}
                 except Exception:
                     pass
                 # Everyone lands on their own schedule first. Managers navigate
-                # on to the scheduler from there.
+                # on to the scheduler from there. The front desk lands on theirs.
                 try:
-                    st.switch_page("pages/4_My_Home.py")
+                    st.switch_page(auth.home_page())
                 except Exception:
                     st.rerun()
             else:
@@ -6412,6 +6423,17 @@ if run:
                         inspectors = assign_inspectors(fg, present_insp, groups_per_insp, rqs1, rqs2)
                         return fg, inspectors, used_hk_set, released
 
+                    # The manager's calls for the day (borrow_off[<date>]).
+                    try:
+                        _day_rule = (db._load_key("borrow_off") or {}).get(
+                            st.session_state.get("sched_day") or _today_iso()) or {}
+                    except Exception:
+                        _day_rule = {}
+                    # Inspectors kept off rounds for the day ("insp_off"): working,
+                    # just not inspecting.
+                    from roster_import import norm_name as _nn
+                    _insp_off = {_nn(n) for n in _day_rule.get("insp_off") or []}
+                    present_insp = [n for n in present_insp if _nn(n) not in _insp_off]
                     fg, inspectors, used_hk_set, _ = _staff(fg, present_hk, present_insp)
                     # Still short: people on Dust and Vac, then projects and
                     # other non-room duties that day, are counted as working --
@@ -6449,11 +6471,6 @@ if run:
                             st.session_state["borrowed"] = _taken
                     # Still an inspection nobody has, and the manager's call for
                     # the day is RQS 1 and 2 (borrow_off "inspect_overflow").
-                    try:
-                        _day_rule = (db._load_key("borrow_off") or {}).get(
-                            st.session_state.get("sched_day") or _today_iso()) or {}
-                    except Exception:
-                        _day_rule = {}
                     if _day_rule.get("inspect_overflow") == "rqs12":
                         fg, inspectors = overflow_to_rqs12(fg, inspectors, rqs1, rqs2)
                     # Charts handed from one inspector to another (the manager's call).
@@ -6534,13 +6551,15 @@ if run:
                     if _bw:
                         st.info("Short of people — moved onto rooms from other duties: "
                                 + "; ".join(f"**{n}** ({r}, was {d})" for n, r, d in _bw))
-                    for _a, _b, _ls in st.session_state.get("moved_insp") or []:
+                    # "quiet": the manager's calls are applied without a word.
+                    _quiet = bool(_day_rule.get("quiet"))
+                    for _a, _b, _ls in [] if _quiet else st.session_state.get("moved_insp") or []:
                         st.info(f"Inspections moved (the manager's call for the day): {', '.join(_ls)} "
                                 f"from **{_a}** to **{_b}**")
-                    for _a, _b in st.session_state.get("swapped_insp") or []:
+                    for _a, _b in [] if _quiet else st.session_state.get("swapped_insp") or []:
                         st.info(f"Inspections swapped (the manager's call for the day): "
                                 f"**{_a}** ⇄ **{_b}**")
-                    for _n, _rs in st.session_state.get("leftover_given") or []:
+                    for _n, _rs in [] if _quiet else st.session_state.get("leftover_given") or []:
                         st.info(f"Left over, given to **{_n}** (the manager's call for the day): "
                                 + ", ".join(_rs))
                     _bg = st.session_state.get("blocked") or []
@@ -6693,7 +6712,7 @@ if _is_hk:
     if not st.session_state.get("_live_loaded"):
         st.session_state["_live_loaded"] = True
         try:
-            st.session_state["room_statuses"] = db.get_room_statuses()
+            st.session_state["room_statuses"] = _floor_statuses()
         except Exception:
             pass
     rs = st.session_state["room_statuses"]
@@ -6917,7 +6936,7 @@ if _is_hk:
     # Refresh button
     if st.button("Refresh Status", key="hk_refresh", use_container_width=False):
         try:
-            st.session_state["room_statuses"] = db.get_room_statuses()
+            st.session_state["room_statuses"] = _floor_statuses()
         except Exception:
             pass
         st.rerun()
@@ -8085,9 +8104,9 @@ td{{transition:background .15s ease}}
                 pass
 
         def _live_load():
-            """Status rows for today, straight from the database."""
+            """Status rows for today, off the shared floor (floor.py)."""
             try:
-                return db.get_room_statuses() or {}
+                return _floor_statuses()
             except Exception:
                 return {}
 

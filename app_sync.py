@@ -328,13 +328,15 @@ def from_sheet(rows, save=True):
     fg = out
 
     # 2. Rooms added on the sheet by hand.
-    added, unplaced = [], []
+    added, unplaced, unplaced_rows = [], [], []
     for room, line in sheet.items():
         if room in charted:
             continue
         hk = staff_names.resolve(line["hskp"].split("/")[0].strip(), aliases) if line["hskp"] else ""
         if not hk:
             unplaced.append(room)
+            unplaced_rows.append({k: line.get(k, "") for k in
+                                  ("room", "service", "rqs", "guest", "arriving", "notes", "hskp")})
             continue
         svc = _service(line["service"])
         try:
@@ -345,7 +347,11 @@ def from_sheet(rows, save=True):
                "arriving": line.get("arriving", ""), "bld": int(room[0]),
                "floor": int(room[1]) if room[1].isdigit() else 0,
                "num": int("".join(c for c in room[2:] if c.isdigit()) or 0),
-               "late_checkout": "", "status": "", "notes": "added on the sheet",
+               "late_checkout": "", "status": "",
+               "notes": line.get("notes") or "added on the sheet",
+               # The front desk's board tags it (an early departure, say:
+               # Hari, 21 Nov), and says when the app first saw it.
+               "added_on_sheet": clock.stamp(),
                "verify": False, "res_type": ""}
         rqs = _rqs_name(line["rqs"], aliases)
         dest = next((g for g in fg if g.get("housekeeper") == hk and g.get("service_type") == svc
@@ -362,7 +368,8 @@ def from_sheet(rows, save=True):
         _recount(g)
 
     summary = {"changed": bool(rqs_changed or added or reserviced), "rqs": rqs_changed,
-               "split": split, "added": added, "unplaced": unplaced, "reserviced": reserviced}
+               "split": split, "added": added, "unplaced": unplaced,
+               "unplaced_rows": unplaced_rows, "reserviced": reserviced}
     if not summary["changed"] or not save:
         return summary
     roles = {i.get("name"): i.get("role") for i in sched.get("inspectors_data") or []}

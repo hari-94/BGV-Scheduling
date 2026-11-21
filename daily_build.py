@@ -1151,11 +1151,17 @@ def build(day: _dt.date, ssrs_xlsx: bytes, arrival_text: str, workbook_path,
                  f"{blocked_rooms.describe(_gone)}: {', '.join(r for r, _ in _gone)}")
     if _kept:
         note += " · blocked but a guest arrives, so on the sheet: " + ", ".join(r for r, _ in _kept)
-    for _a, _b, _n in getattr(generate, "moved_insp", []):
+    # A day rule marked "quiet" is applied without a word on the sheet.
+    try:
+        import db
+        _quiet = bool(((db._load_key("borrow_off") or {}).get(day.isoformat()) or {}).get("quiet"))
+    except Exception:
+        _quiet = False
+    for _a, _b, _n in [] if _quiet else getattr(generate, "moved_insp", []):
         note += f" · {_n} chart(s) inspected by {_b} instead of {_a} (manager's call)"
-    for _a, _b in getattr(generate, "swapped", []):
+    for _a, _b in [] if _quiet else getattr(generate, "swapped", []):
         note += f" · inspections swapped (manager's call): {_a} ⇄ {_b}"
-    for _n, _rs in getattr(generate, "leftover", []):
+    for _n, _rs in [] if _quiet else getattr(generate, "leftover", []):
         note += f" · left over, to {_n} (manager's call): {', '.join(_rs)}"
     borrowed = getattr(generate, "borrowed", [])
     ds_auto = getattr(generate, "ds_auto", {}) or {}

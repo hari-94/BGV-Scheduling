@@ -8,6 +8,8 @@ Roles:
   houseperson → the same phone-only access as a housekeeper; My Rooms shows
                 their carpet and stripping rooms (duties.py). Its own role so
                 the Admin page and the menu say what they are (HP, 21 Oct)
+  frontdesk   → the Front Desk page only: today's rooms, late checkouts,
+                departures and notes (Hari, 21 Nov)
 """
 import streamlit as st
 
@@ -48,12 +50,31 @@ ROLE_PERMISSIONS = {
 }
 # A houseperson sees what a housekeeper sees: their own day, nothing to edit.
 ROLE_PERMISSIONS["houseperson"] = dict(ROLE_PERMISSIONS["housekeeper"])
+# The front desk (Hari, 21 Nov): one shared account whose menu is the Front
+# Desk page alone -- today's rooms, and their late checkouts, departures and
+# notes. Managers (admin) have the page too; RQS and the floor don't.
+ROLE_PERMISSIONS["frontdesk"] = {p: False for p in ROLE_PERMISSIONS["admin"]}
+for _r in ROLE_PERMISSIONS:
+    ROLE_PERMISSIONS[_r]["can_view_frontdesk"] = _r in ("admin", "frontdesk")
+
+#: Where each role lands after signing in.
+HOME = {"frontdesk": "pages/14_Front_Desk.py"}
+
+
+def home_page(role=None) -> str:
+    return HOME.get(role if role is not None else st.session_state.get("role", ""),
+                    "pages/4_My_Home.py")
+
+
+def is_frontdesk() -> bool:
+    return st.session_state.get("role", "") == "frontdesk"
 
 ROLE_COLORS = {
     "admin":        ("#7C3AED", "#F5F3FF"),
     "rqs":          ("#0D9488", "#ECFDF5"),
     "housekeeper":  ("#2563EB", "#EFF6FF"),
     "houseperson":  ("#B45309", "#FFFBEB"),
+    "frontdesk":    ("#BE185D", "#FDF2F8"),
 }
 
 # Positive welcome messages per role

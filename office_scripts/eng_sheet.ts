@@ -1,6 +1,7 @@
 /**
  * ENG sheet update -- Office Script for "Daily Tasks Ops Departments.xlsx",
- * tab "RQS-ENG-Runners". Run by the Power Automate flow "BGV ENG sheet" with
+ * tab "RQS-ENG-Runners" (renamed "Runner Report " on 19 Nov; found by its
+ * layout when the name doesn't match). Run by the Power Automate flow "BGV ENG sheet" with
  * the text file the office PC drops into "App Outbox" after a Push
  * (eng_sheet.py builds it).
  *
@@ -20,8 +21,18 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
     housepersons_pm?: { [slot: string]: string[] };
     rqs: { [bld: string]: string[][] };
   };
-  const ws = workbook.getWorksheet("RQS-ENG-Runners");
-  if (!ws) throw new Error("Tab 'RQS-ENG-Runners' not found");
+  // The tab is found by its layout when its name has changed: on 19 Nov it was
+  // renamed "Runner Report " and the next run failed on the old name.
+  const isOurs = (w: ExcelScript.Worksheet) => {
+    try {
+      const v = w.getRange("A1:K20").getValues();
+      const has = (c: number, re: RegExp) => v.some(row => re.test(String(row[c] ?? "").trim()));
+      return has(1, /^am housepersons/i) && has(5, /^housekeeping rqs/i);
+    } catch (e) { return false; }
+  };
+  let ws = workbook.getWorksheet("RQS-ENG-Runners");
+  if (!ws) ws = workbook.getWorksheets().find(isOurs);
+  if (!ws) throw new Error("No tab with 'AM Housepersons' in column B and 'Housekeeping RQS' in column F");
 
   // One text style for every cell this script writes (HP, 4 Nov): the cells
   // had kept whatever font, size, colour and bold someone once gave them, so

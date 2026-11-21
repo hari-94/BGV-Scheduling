@@ -137,6 +137,7 @@ _HDR = {
     "time": ("time (min)", "time", "minutes", "credits"),
     "guest": ("current guest or status", "current guest", "guest"),
     "arriving": ("arriving guest", "arriving"),
+    "notes": ("notes", "note", "comments"),
 }
 
 
@@ -185,7 +186,10 @@ def read_rows(rows):
                     # hand needs its minutes and guest).
                     "time": _clean(cell(r, "time")),
                     "guest": _clean(cell(r, "guest")),
-                    "arriving": _clean(cell(r, "arriving"))})
+                    "arriving": _clean(cell(r, "arriving")),
+                    # A room added by hand carries the team's note to the
+                    # front desk's board ("early departure", 21 Nov).
+                    "notes": _clean(cell(r, "notes"))})
     return out
 
 

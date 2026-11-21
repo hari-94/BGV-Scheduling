@@ -58,6 +58,8 @@ several of them read the *real* schedule to test against a real day.
 | `daystart.py` | 210 | what to clean first, and when each room is reached |
 | `weekend_duties.py` | 170 | the sheet's Carpet and Stripping columns from the staff schedule |
 | `clock.py` | 35 | property-local time |
+| `floor.py` | 150 | **today's floor, read once for the whole app** -- the one snapshot every page reads (charts with the front desk's marks on them, room statuses, the sheet's unplaced rooms, the mirror's last read), fetched at most every 10 s and fresh after any write. See "How the live data flows" below. No Streamlit |
+| `frontdesk.py` + `pages/14_Front_Desk.py` + `frontdesk_board.py` | 900 | (Hari, 21 Nov) the Front Desk page: every room today with HotSOS's status, housekeeper, RQS, started / cleaned / inspected, the current and arriving guest, late checkouts (the Arrival Report's by themselves, the desk's added or changed), and a search that filters as you type. The desk marks a late checkout with the time, guest departed, or a note to housekeeping (`fdmark_<date>_<ROOM>`, one row a room); they reach the housekeeper's card and route at once (`frontdesk.apply` sets `late_checkout`, which daystart reads). The board is a static component (`components/frontdesk_board`): light / dark (remembered on the device; it also dresses the page via `data-fd-theme`), count-up tiles, a glow on a room whose status just moved, toasts that wait for the page's ack of each save. The `frontdesk` role sees this page only (`auth.HOME`, `ui._visible`, the topnav guard); managers (admin) have it too |
 | `appmode.py` | 130 | the Android app's view (BGVSchedulingApp, a WebView, recognised by its user agent or `?app=1`): no menu, phone margins, only My Home / My Rooms / Profile -- other pages say they are on the website; hidden page links the app's bottom tabs click; language + sign out on Profile. Browsers see no change |
 
 ### Inside `cleaning_scheduler.py`
@@ -100,6 +102,62 @@ swapped_from, updated_by, updated_at`.
 → inspected`, with `already_clean`, `dnd` and `help` off to the side. `NEXT` is the
 road, `RQS_ONLY` is the sign-off, `META` is the label and colours. Change a colour or
 a label there and both the phone page and the Live board follow.
+
+## How the live data flows -- one writer each, one reader (Hari, 21 Nov)
+
+"Use one process where it puts the data and from there deliver to all the
+tabs." Each kind of data has exactly one writer, and every page reads today
+through `floor.today()`:
+
+| data | the one writer | when |
+|---|---|---|
+| `schedule_full` (the plan) | the 5 AM build / a Generate; then **only the office PC** keeps it in line -- `app_sync.from_hotsos` after every mirror pass (rooms follow their HotSOS holder), `app_sync.from_sheet` every 10 min (RQS edits, rooms added on the tab) | build, then every 2 / 10 min |
+| `room_status` | the office PC's HotSOS mirror (`sync_room_status`); the floor's taps only on a day HotSOS is down (`roomstatus.mirrored()` off) | every 2 min |
+| `fdmark_<date>_<ROOM>` | the Front Desk page (`frontdesk.py`) | when the desk marks |
+| `sheet_unplaced` | the office PC's sheet pass: rooms on today's tab with no housekeeper yet | every 10 min, on change |
+| `hotsos_status_sync` | the mirror: when it last read HotSOS | every 2 min |
+
+**One reader.** `floor.today()` holds one snapshot per server process -- the
+saved charts with the desk's marks laid over them (`frontdesk.apply`), the
+statuses, the marks, the unplaced rooms and the sync record -- and refetches at
+most every `REFRESH_SECONDS` (10). `db._touches_floor` marks it stale after any
+write to those tables, so whoever wrote sees it on their next draw; the office
+PC's writes arrive within 10 s. Measured: the first read 6 queries, then 50
+page reads 0. Before this every page joined the tables itself on its own timer
+(My Rooms 5 s, Dashboard and Property 20 s, the desk 8 s, the Schedule page's
+Live tab on each load). `assignments.todays_charts`, the Dashboard, Property,
+Stats, the Schedule page's Live tab and hand-held view, and the Front Desk all
+read it now. It hands out the shared object: `floor.copies()` (and
+`todays_charts`) for anything that edits what it got.
+
+**Rooms follow HotSOS in one place.** `assignments._rehome` used to move rooms
+to their HotSOS holder at read time, by a looser rule than the office PC's (a
+moved room joined *any* chart of its new holder, the Dust n Vac round
+included), and the Dashboard didn't do it at all -- so tabs could name
+different housekeepers for one room. It is gone; `reconcile_charts` is the
+only place. What `_rehome` also covered -- a day no push got through (20 Nov:
+the 5:30 push failed on a changed HotSOS password and the team handed rooms out
+in HotSOS by hand) -- the office PC now covers: no push today, the 5 AM
+build's plan untouched (`generated_by` "auto-5am") and HotSOS holding at least
+`HAND_TRUTH_MIN` (5) of today's rooms (`held`, counted by the mirror) and
+HotSOS becomes the truth for the day, logged and recorded in
+`hotsos_truth_since`.
+
+**After a deploy:** Streamlit Cloud does not restart the process on a push,
+and `floor`, `assignments`, `db` and `auth` are imported modules (fresh.py
+reloads only what a page asks for). A change to them goes out with a
+requirements.txt touch, which does restart it; the office PC agent picks up
+its side (`reconcile_charts`, `sync_sheet`) on its next start.
+
+**A role the database doesn't take yet** (`db.NEW_ROLES`). `app_users` has a
+CHECK on role (supabase_setup.sql), and the publishable key can't ALTER it.
+Until the ALTER for `frontdesk` is run in Supabase's SQL editor, such an
+account is stored as a housekeeper -- the least it could do if anything went
+wrong -- and its real role is in app_settings `account_roles`
+{username: role}, which only `db.get_user` / `load_users` read (every
+sign-in, session restore and the Admin page go through them).
+`create_user` / `update_role` store the real role once the database takes it,
+and drop the entry.
 
 ## The building
 
@@ -1038,6 +1096,8 @@ must sit well above the deterministic limit (fcsolve `STEP_WALL`, `_ds_fill`
 uses `interleave_search`), or a busy PC changes the charts.
 
 ## Agreed but not built
+
+**The front desk's late checkouts into GC8 Inspections** (Hari, 21 Nov). He asked for a desk late checkout to land in the room's Notes on the day's tab as well as on the phones. The tab is open in Excel Online all day, so the office PC can't write the synced file; it needs what the ENG sheet has -- a file in an outbox folder, a Power Automate flow, an Office Script that edits only that room's Notes cell. A folder of its own: the ENG flow fires on any file created in App Outbox. `frontdesk.SHEET_KEY_PREFIX` is reserved for the record of what was written.
 
 `docs/inspection-scoring.md` — the RQS inspection checklist and the per-housekeeper
 score that rolls up weekly, monthly and yearly. Two lists (studio for 70-minute rooms,

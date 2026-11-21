@@ -415,10 +415,13 @@ def sync_room_status(cfg):
     # times in October -- a quarter of everything the free plan counted.
     names = staff_names.aliases()
     rows, counts, unknown = [], collections.Counter(), set()
+    held = 0          # today's rooms HotSOS has somebody on (reconcile_charts)
     for r in board:
         code = str(_pick(r, _ROOM_CODE, "room number")).upper().strip()
         if code not in chart:
             continue
+        if str(r.get("assignedTo") or "").strip():
+            held += 1
         key, label, hk_chart, insp = chart[code]
         enum = str(r.get("serviceStatusEnum") or "")
         if enum and enum.upper() not in rs.HOTSOS:
@@ -473,7 +476,7 @@ def sync_room_status(cfg):
     for batch in shapes.values():
         db.bulk_upsert_room_statuses(batch)
     rec = {"at": clock.stamp(), "rooms": sum(counts.values()), "changed": len(rows),
-           "counts": dict(counts), "unknown": sorted(unknown)}
+           "counts": dict(counts), "unknown": sorted(unknown), "held": held}
     if rows or unknown:
         log(f"room status: {len(rows)} changed of {rec['rooms']} "
             f"({', '.join(f'{k} {v}' for k, v in counts.most_common())})"
@@ -481,16 +484,34 @@ def sync_room_status(cfg):
     return rec
 
 
-def reconcile_charts():
-    """After the mirror: if HotSOS is the truth for today (pushed, or
-    reconciled by hand) and nobody has generated a new schedule since, bring
-    today's charts in line with who holds each room in HotSOS. A schedule
-    generated after the push is newer than HotSOS -- left alone until it is
-    pushed too."""
+#: No push reached HotSOS today, yet it holds at least this many of today's
+#: rooms: the team is handing rooms out there by hand (reconcile_charts).
+HAND_TRUTH_MIN = 5
+
+
+def reconcile_charts(held=0):
+    """After the mirror: if HotSOS is the truth for today (pushed) and nobody
+    has generated a new schedule since, bring today's charts in line with who
+    holds each room in HotSOS. A schedule generated after the push is newer
+    than HotSOS -- left alone until it is pushed too.
+
+    This is the ONLY place the app's charts follow HotSOS's holders (floor.py).
+    The pages used to do it again at read time (assignments._rehome), which
+    is what kept the phones right on a day no push got through -- 20 Nov: the
+    5:30 push failed on a changed password and the team handed rooms out in
+    HotSOS by hand. So: no push today, the 5 AM build's charts untouched since
+    (nobody generated a new plan), and HotSOS holding `held` >= HAND_TRUTH_MIN
+    of today's rooms -- HotSOS is the truth from now, said so in the log."""
     import app_sync
     truth = db._load_key(hs.TRUTH_KEY) or {}
     if truth.get("date") != clock.today_iso():
-        return None
+        sched = db.load_full_schedule() or {}
+        if held < HAND_TRUTH_MIN or not sched.get("groups_data")                 or sched.get("generated_by") != "auto-5am":
+            return None
+        truth = {"date": clock.today_iso(), "at": clock.stamp(),
+                 "by": f"HotSOS holds {held} of today's rooms; no push today"}
+        db._upsert_key(hs.TRUTH_KEY, truth)
+        log(f"no push today, but {truth['by'].split(';')[0]}: the charts follow HotSOS from now")
     gen = (db.load_full_schedule() or {}).get("generated_at")
     if gen and _dt.datetime.fromisoformat(gen) > _dt.datetime.fromisoformat(truth["at"]):
         return "generated after the push; waiting for the next push"
@@ -542,6 +563,13 @@ def sync_sheet(cfg):
     tab, rows = hs.read_workbook(path, clock.today())
     out = app_sync.from_sheet(rows, save=True)
     _SHEET_SEEN.update(mtime=mtime, day=clock.today_iso())
+    # Rooms typed on the tab with nobody to clean them yet (an early departure,
+    # say) aren't on any chart; the front desk's board still lists them.
+    try:
+        import frontdesk
+        frontdesk.keep_unplaced(out.get("unplaced_rows") or [])
+    except Exception as ex:
+        log(f"sheet -> front desk: {type(ex).__name__}: {ex}")
     try:
         follow_sheet(cfg, rows)
     except Exception as ex:
@@ -720,7 +748,7 @@ def _mirror_loop():
                     except Exception as ex:
                         log(f"inspect -> HotSOS: {type(ex).__name__}: {ex}")
                     rec = sync_room_status(cfg)
-                    rec["reconciled"] = reconcile_charts()
+                    rec["reconciled"] = reconcile_charts(rec.get("held", 0))
                     # On this thread, after the reconcile, so the two never
                     # write today's charts at the same moment.
                     if time.time() - _SHEET_SEEN.get("at", 0) > SHEET_SYNC_SECONDS:
