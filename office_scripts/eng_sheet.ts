@@ -20,7 +20,31 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
     housepersons: { [slot: string]: string[] };
     housepersons_pm?: { [slot: string]: string[] };
     rqs: { [bld: string]: string[][] };
+    repair_only?: boolean;
   };
+
+  // One-off repair (22 Nov 2026). The find() below used to return the FIRST
+  // tab, so three runs wrote this script's title over the front desk's own
+  // heading in "FD Daily Task List" B2. Put it back as it was -- only while
+  // the cell still holds one of our "11/22/2026 · Updated ..." lines.
+  try {
+    const fd = workbook.getWorksheet("FD Daily Task List");
+    const h = fd ? fd.getRange("B2") : undefined;
+    if (h && /^\d{1,2}\/\d{1,2}\/\d{4}\s+\S\s+Updated /.test(String(h.getValue()))) {
+      h.setValue("GC8 Front Desk Daily Tasks");
+      const hf = h.getFormat();
+      const font = hf.getFont();
+      font.setName("Book Antiqua");
+      font.setSize(18);
+      font.setBold(true);
+      font.setColor("#000000");
+      hf.setHorizontalAlignment(ExcelScript.HorizontalAlignment.center);
+      hf.setVerticalAlignment(ExcelScript.VerticalAlignment.center);
+      hf.setWrapText(false);
+      console.log("Front desk heading in 'FD Daily Task List' B2 put back");
+    }
+  } catch (e) { console.log("Front desk heading not checked: " + e); }
+
   // The tab is found by its layout when its name has changed: on 19 Nov it was
   // renamed "Runner Report " and the next run failed on the old name.
   const isOurs = (w: ExcelScript.Worksheet) => {
@@ -30,8 +54,19 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
       return has(1, /^am housepersons/i) && has(5, /^housekeeping rqs/i);
     } catch (e) { return false; }
   };
+  // A plain loop, never getWorksheets().find(isOurs): Office Scripts runs any
+  // function that calls Excel asynchronously, so find() got a Promise back --
+  // always truthy -- and returned the first tab, "FD Daily Task List"
+  // (21-22 Nov). Array callbacks must not call Excel when their result matters.
   let ws = workbook.getWorksheet("RQS-ENG-Runners");
-  if (!ws) ws = workbook.getWorksheets().find(isOurs);
+  if (!ws) {
+    for (const w of workbook.getWorksheets()) {
+      if (isOurs(w)) {
+        ws = w;
+        break;
+      }
+    }
+  }
   if (!ws) throw new Error("No tab with 'AM Housepersons' in column B and 'Housekeeping RQS' in column F");
 
   // One text style for every cell this script writes (HP, 4 Nov): the cells
@@ -72,6 +107,14 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
     for (let r = from; r < vals.length; r++) if (test(cell(r, col))) return r;
     return -1;
   };
+
+  // Nothing is written unless this tab really is the Runner Report, checked on
+  // this tab's own cells -- so a wrong pick can't reach another team's tab.
+  if (find(B, s => /^am housepersons/i.test(s)) < 0 || find(F, s => /^housekeeping rqs/i.test(s)) < 0) {
+    throw new Error(`Tab '${ws.getName()}' has no 'AM Housepersons' (B) and 'Housekeeping RQS' (F) -- nothing written`);
+  }
+  console.log(`Runner Report tab: '${ws.getName()}'`);
+  if (p.repair_only) return;     // a repair run: the heading above, and this check
 
   // 1. date and time at the top
   ws.getRange("B2").setValue(p.title);

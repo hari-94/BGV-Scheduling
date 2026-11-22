@@ -113,9 +113,21 @@ def _display_names(full_names, directory=()):
     return out
 
 
+def rooms_text(rooms) -> str:
+    """Rooms the way the team types them on the Runner Report (22 Nov):
+    a lock-off's letters after one number, apartments joined with " + " --
+    "1010D + 1020AB + 3031EFGH", not "1010D 1020A 1020B 3031E ...".
+    An RQS with rooms in two buildings gets a line under each (Hari, 22 Nov:
+    his building 1 rooms were missing when the page was typed by hand)."""
+    by = {}
+    for r in sorted(set(rooms)):
+        by.setdefault(r[:4], []).append(r[4:])
+    return " + ".join(num + "".join(letters) for num, letters in by.items())
+
+
 def rqs_rooms(rows, directory=()) -> dict:
-    """{"1": [[name, "1424E 1424F"], ...], "2": [...], "3": [...]}: each RQS's
-    Full Clean rooms, by the building the rooms are in."""
+    """{"1": [[name, "1424EF + 1426A"], ...], "2": [...], "3": [...]}: each
+    RQS's Full Clean rooms, by the building the rooms are in."""
     by = {}
     for r in rows:
         svc = str(r.get("service") or "").lower()
@@ -127,7 +139,7 @@ def rqs_rooms(rows, directory=()) -> dict:
             continue
         by.setdefault(room[0], {}).setdefault(who, []).append(room)
     names = _display_names({w for b in by.values() for w in b}, directory)
-    return {b: [[names.get(w, w), " ".join(sorted(set(rs)))]
+    return {b: [[names.get(w, w), rooms_text(rs)]
                 for w, rs in sorted(people.items(), key=lambda kv: kv[0])]
             for b, people in sorted(by.items())}
 

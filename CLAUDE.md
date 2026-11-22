@@ -678,6 +678,19 @@ agent's signed-in `pa-browser` profile (stop the agent first; two Chromes
 can't share it), keeping `parameterInfo` as it is while `main`'s
 signature doesn't change.
 
+**In an Office Script, an array callback must not call Excel when its
+result matters** (22 Nov). The runtime makes any function that calls Excel
+asynchronous, so `getWorksheets().find(isOurs)` got a Promise back -- always
+truthy -- and `find` returned the first tab. The 21 Nov fix for the renamed
+"Runner Report " tab did exactly that: three runs on 22 Nov "succeeded"
+while writing only their title, over the front desk's heading in "FD Daily
+Task List" B2, and the team typed the Runner Report by hand. The script now
+loops with `for...of`, refuses to write to a tab without "AM Housepersons"
+(B) and "Housekeeping RQS" (F), and logs the tab it chose (Power Automate:
+the run's Run script step, raw outputs, `logs`). `forEach` is fine -- its
+result is not used. A payload `{"repair_only": true, ...}` runs only those
+checks and the guarded one-off repair of that heading.
+
 **At 9 PM the room list is pulled fresh** before the preview is built
 (`pull_ssrs` for tomorrow, the stored list kept if SSRS fails, and the card
 says so). Rooms held off every chart carry why: stayover, P/U model,
