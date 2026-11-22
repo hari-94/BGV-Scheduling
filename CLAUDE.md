@@ -669,8 +669,11 @@ is in. It goes to the `personal` webhook in `teams_webhooks`, else `test`;
 
 **The ENG sheet's cells are written in one style.** `office_scripts/eng_sheet.ts`
 sets the workbook's Normal font and size, black, not bold, left and wrapped
-on every cell it writes (the date bold), each step in try/catch so a
-formatting hiccup never stops the names being written. The script the flow
+on every cell it writes, each step in try/catch so a formatting hiccup never
+stops the names being written. The title bar (B2, the corner of the merged
+B2:J3) is the exception: date and "Updated" time, bold, 16 pt, centred (Hari,
+22 Nov). A payload with `"title_only": true` writes only the title -- for a
+day the team has typed the names by hand. The script the flow
 runs is `ENG sheet update.osts` in Hari's OneDrive (Documents/Documents/
 Office Scripts): JSON whose `body` is this file. A change reaches the flow
 when that `body` is replaced -- done on 4 Nov over SharePoint REST from the

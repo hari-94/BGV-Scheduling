@@ -21,6 +21,7 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
     housepersons_pm?: { [slot: string]: string[] };
     rqs: { [bld: string]: string[][] };
     repair_only?: boolean;
+    title_only?: boolean;
   };
 
   // One-off repair (22 Nov 2026). The find() below used to return the FIRST
@@ -116,9 +117,25 @@ function main(workbook: ExcelScript.Workbook, payload: string) {
   console.log(`Runner Report tab: '${ws.getName()}'`);
   if (p.repair_only) return;     // a repair run: the heading above, and this check
 
-  // 1. date and time at the top
-  ws.getRange("B2").setValue(p.title);
-  even(ws.getRange("B2"), true);
+  // 1. date and time at the top: the title bar, centred, bold and bigger than
+  // the names below (Hari, 22 Nov). B2 is the corner of the merged B2:J3, so
+  // centring it centres the text across the bar.
+  const top = ws.getRange("B2");
+  top.setValue(p.title);
+  try {
+    const tf = top.getFormat();
+    const tfont = tf.getFont();
+    tfont.setName(fontName);
+    tfont.setSize(16);
+    tfont.setBold(true);
+    tfont.setColor("#000000");
+    tfont.setItalic(false);
+    tf.setHorizontalAlignment(ExcelScript.HorizontalAlignment.center);
+    tf.setVerticalAlignment(ExcelScript.VerticalAlignment.center);
+    tf.setWrapText(false);
+  } catch (e) { /* the title is written; only its look is skipped */ }
+  console.log(`Title: ${p.title}`);
+  if (p.title_only) return;      // the names were typed by hand that day: leave them
 
   // 2. AM housepersons: between "AM Housepersons" and "PM Housepersons"
   const am = find(B, s => /^am housepersons/i.test(s));
