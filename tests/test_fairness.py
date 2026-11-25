@@ -26,6 +26,28 @@ class NeedOrder(unittest.TestCase):
         led = {"people": {"A B": {"rooms": 5}, "C D": {"rooms": 5}}}
         self.assertEqual(fairness.need_order(["C D", "A B"], led, {}, []), ["C D", "A B"])
 
+    def test_per_day_not_totals_a_new_hire_is_not_favoured_for_months(self):
+        # 200 days and 1,200 rooms against 20 days and 160: per day the new
+        # hire (8 a day) has had more than the veteran (6), so the veteran goes first.
+        led = {"people": {"Vera Old": {"rooms": 1200, "sched": 200, "rate": 6.0},
+                          "Nina New": {"rooms": 160, "sched": 20, "rate": 8.0}}}
+        self.assertEqual(fairness.need_order(["Nina New", "Vera Old"], led, {}, []),
+                         ["Vera Old", "Nina New"])
+
+    def test_recent_days_count_more(self):
+        day = lambda n: {"fc": ["x"] * n, "sched": [("hk", "B1", "working", "1")]}
+        # Busy a year ago, light lately -> a low rate; the reverse -> a high one.
+        early = {"2025-12-01": day(8), "2026-11-20": day(2)}
+        late = {"2025-12-01": day(2), "2026-11-20": day(8)}
+        r_early = fairness._weighted_rate(early, "2025-11-25", "2026-11-24", "hk")
+        r_late = fairness._weighted_rate(late, "2025-11-25", "2026-11-24", "hk")
+        self.assertLess(r_early, 3)
+        self.assertGreater(r_late, 7)
+
+    def test_a_day_with_rooms_is_a_day_on_whatever_the_sheet_said(self):
+        by_day = {"2026-11-20": {"fc": ["a", "b", "c", "d"], "sched": []}}
+        self.assertEqual(fairness._weighted_rate(by_day, "2026-11-01", "2026-11-24", "hk"), 4.0)
+
     def test_a_first_name_alone_finds_the_one_person_with_it(self):
         self.assertEqual(fairness.lookup("Robin", LED, {}, [])["rooms"], 20)
         led = {"people": {"Sam Tide": {"rooms": 1}, "Sam Lake": {"rooms": 2}}}

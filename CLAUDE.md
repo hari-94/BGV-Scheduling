@@ -478,11 +478,16 @@ in its building's pool, each RQS round the next inspector -- so whoever sat at
 the bottom was left free whenever there were more people than work, the same
 people day after day (four weeks to 24 Nov: Miguel Castor on 21 days,
 inspecting on 5; Mayra, Grace, Alejandro, Sayra free 10-11 of 18-19).
-`fairness.py` now orders both lists before `_staff`: the fewest rooms over the
-last 28 synced days first (cleaned for a housekeeper, inspected for an RQS --
-`report_data`'s own counts, so the Report and the build can't disagree), then
-the most free days, then the fewest days with rooms; level people keep the
-sheet's order. `assign_hk_building_aware` hands out the biggest chart first
+`fairness.py` now orders both lists before `_staff`: the fewest **rooms per
+day on the schedule over the year** first (Hari, 25 Nov: "the whole year, to
+be fair"; cleaned for a housekeeper, inspected for an RQS -- `report_data`'s
+own counts, so the Report and the build can't disagree), each day weighted
+0.5 ** (age / 60 days) so recent weeks count more (`rate`,
+`_weighted_rate`); then the larger share of days left free; then fewer rooms;
+level people keep the sheet's order. Per day, not a total: a total over a
+year favours a new hire or someone back from leave for months. Any day with
+rooms counts as a day on (older sheets' first-name rows matched no schedule
+row, and Janelly read 33 rooms in one day). `assign_hk_building_aware` hands out the biggest chart first
 within each service and building (buildings keep their incoming order, so who
 borrows across a bridge is unchanged), Daily Service the biggest round first,
 and `assign_inspectors` gives the biggest round to the first inspector (which

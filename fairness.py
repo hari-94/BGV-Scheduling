@@ -25,7 +25,8 @@ No Streamlit.
 """
 import datetime as _dt
 
-WINDOW_DAYS = 28
+WINDOW_DAYS = 365            # the whole year (Hari, 25 Nov: "to be fair")
+HALF_LIFE_DAYS = 60          # a day this old counts half as much as yesterday
 KEY = "fair_share"            # app_settings: {"days": {iso: the order a build used}}
 SWITCH_KEY = "fair_share_on"  # {"on": false} turns the ordering off
 KEEP_DAYS = 21                # recorded days kept
@@ -41,13 +42,18 @@ def enabled() -> bool:
 
 def ledger(end=None, window=WINDOW_DAYS):
     """The last `window` synced days up to `end` (ISO, inclusive), per person:
-    {"from", "to", "people": {name: {"role", "sched", "busy", "free", "rooms"}}}.
+    {"from", "to", "people": {name: {"role", "sched", "busy", "free", "rooms", "rate"}}}.
 
     sched = days the staff schedule had them working in their team (a
             housekeeper's room or Daily Service days; an RQS's days on)
     busy  = days they had rooms (cleaned / inspected)
     free  = sched - busy: on the schedule, no rooms
     rooms = rooms cleaned (housekeeper) or inspected (RQS)
+    rate  = rooms per day on the schedule, recent days weighted more (each
+            day counts 0.5 ** (age / HALF_LIFE_DAYS)): what decides the order.
+            A new hire, a part-timer or someone back from leave is compared
+            by their days on, not by a total they couldn't have reached;
+            None for someone with no days on yet.
     The role is the Report's: the team the schedule had them in most."""
     import db
     import report_data as rd
@@ -76,9 +82,33 @@ def ledger(end=None, window=WINDOW_DAYS):
             busy, rooms = t.get("days_clean", 0), t.get("cleaned", 0)
         else:
             sched, busy, rooms = t.get("sched", 0), t.get("days_in", 0), t.get("in", 0)
+        sched = max(sched, busy)              # a day with rooms was a day on
         people[p] = {"role": role, "sched": sched, "busy": busy,
-                     "free": max(0, sched - busy), "rooms": rooms}
+                     "free": max(0, sched - busy), "rooms": rooms,
+                     "rate": _weighted_rate((res.get("days") or {}).get(p, {}), frm, to, role)}
     return {"from": frm, "to": to, "people": people}
+
+
+def _weighted_rate(by_day, frm, to, role):
+    """Rooms per day on the schedule, each day weighted by how recent it is."""
+    import report_data as rd
+    end = _dt.date.fromisoformat(to)
+    w_rooms = w_days = 0.0
+    for iso, slot in by_day.items():
+        if not (frm <= iso <= to):
+            continue
+        w = 0.5 ** ((end - _dt.date.fromisoformat(iso)).days / HALF_LIFE_DAYS)
+        n = len(slot.get("in", ())) if role == "rqs" else len(slot.get("fc", ())) + len(slot.get("ds", ()))
+        mine = [e for e in slot.get("sched", ()) if e[0] == role and e[2] in rd.WORKED]
+        kinds = {e[2] for e in mine}
+        # A day on: in the team, and not a project day alone (as the ledger's sched)
+        # -- or any day they had rooms: they were working, whatever the sheet's
+        # row said (a first name alone on an older sheet matched no row, and
+        # Janelly read as 33 rooms in one day, 25 Nov).
+        on = (bool(mine) and (role == "rqs" or bool(kinds & {"working", "daily_service"}))) or n > 0
+        w_rooms += w * n
+        w_days += w if on else 0.0
+    return round(w_rooms / w_days, 2) if w_days else None
 
 
 def _names():
@@ -113,8 +143,15 @@ def lookup(name, led, table=None, attendant_list=None) -> dict:
 
 
 def need_key(rec) -> tuple:
-    """Fewest rooms first; then the more free days; then the fewer days with rooms."""
-    return (rec.get("rooms", 0), -rec.get("free", 0), rec.get("busy", 0))
+    """The fewest rooms per day on first (recent days weighted more); then
+    the larger share of days left free; then the fewer rooms in the year.
+    Somebody with no days on yet (new) counts as 0: first."""
+    rate = rec.get("rate")
+    if rate is None:
+        rate = 0.0 if not rec.get("sched") else rec.get("rooms", 0) / rec["sched"]
+    sched = rec.get("sched", 0) or 0
+    free_share = (rec.get("free", 0) / sched) if sched else 0.0
+    return (rate, -free_share, rec.get("rooms", 0))
 
 
 def need_order(names, led, table=None, attendant_list=None) -> list:
@@ -141,6 +178,7 @@ def snapshot(day, led, hk_order, rqs_order, table=None, attendant_list=None, not
         for i, n in enumerate(names, 1):
             r = lookup(n, led, table, attendant_list)
             out.append({"rank": i, "name": n, "rooms": r.get("rooms", 0), "free": r.get("free", 0),
+                        "rate": r.get("rate"),
                         "busy": r.get("busy", 0), "sched": r.get("sched", 0), "new": not r,
                         "note": notes.get(n, "")})
         return out

@@ -575,6 +575,26 @@ def timing_tab():
             f"the app's charts are copied from HotSOS, and a day the office PC was off has gaps.")
 
 
+_FS_CSS = """<style>
+.fs-list{display:flex;flex-direction:column;gap:8px;margin:6px 0 18px;}
+.fs-row{border:1px solid #e3e7ee;border-left:4px solid #94a3b8;border-radius:10px;padding:10px 14px;background:#fff;}
+.fs-row.work{border-left-color:#1a9e4b;} .fs-row.free{border-left-color:#2f6fd6;}
+.fs-row.odd{border-left-color:#e0730f;background:#fff8ef;} .fs-row.role{border-left-color:#7c3aed;}
+.fs-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+.fs-name{font-weight:700;font-size:15px;color:#1f2733;}
+.fs-name i{font-style:normal;font-size:11px;font-weight:700;background:#eef2f7;color:#475569;border-radius:5px;padding:1px 6px;margin-left:6px;}
+.fs-tag{font-size:12.5px;font-weight:600;border-radius:999px;padding:3px 10px;background:#eef2f7;color:#334155;white-space:nowrap;}
+.work .fs-tag{background:#e3f5ea;color:#14532d;} .free .fs-tag{background:#e6eefb;color:#12447e;}
+.odd .fs-tag{background:#fde7d4;color:#8a3b05;} .role .fs-tag{background:#efe7fb;color:#4c1d95;}
+.fs-bar{display:flex;align-items:center;gap:10px;margin:7px 0 6px;}
+.fs-track{flex:0 0 180px;height:7px;border-radius:999px;background:#edf0f4;overflow:hidden;}
+.fs-track i{display:block;height:100%;background:#64748b;border-radius:999px;}
+.fs-num{font-size:12.5px;color:#5b6675;} .fs-num b{color:#1f2733;font-size:14px;}
+.fs-why{font-size:14px;color:#1f2733;line-height:1.45;}
+@media (max-width:640px){ .fs-track{flex-basis:110px;} }
+</style>"""
+
+
 def fair_tab():
     """Fair share (Hari, 25 Nov): who got rooms on a day and who was left
     free, and whether that was fair -- in plain words first, the numbers
@@ -582,10 +602,13 @@ def fair_tab():
     import pandas as pd
     import fairness
     fresh.latest("fairness")
+    st.markdown(_FS_CSS, unsafe_allow_html=True)
     st.markdown('<div class="rp-h1">⚖️ Fair share</div><div class="rp-src">'
-                '<b>The rule:</b> whoever has had the <b>fewest rooms</b> in the last four weeks '
-                'gets work first. When there are more people than work, whoever has had the '
-                '<b>most rooms</b> gets the day free.</div>', unsafe_allow_html=True)
+                '<b>The rule:</b> over the whole year, whoever has averaged the <b>fewest rooms '
+                'per day on the schedule</b> gets work first, and the last few weeks count more '
+                'than months ago. When there are more people than work, whoever has averaged the '
+                '<b>most</b> gets the day free. Per day, so a new hire, a part-timer or someone '
+                'back from leave is compared fairly.</div>', unsafe_allow_html=True)
     rec = (db._load_key(fairness.KEY) or {}).get("days") or {}
     today = clock.today().isoformat()
     days = sorted(set(rec) | {today}, reverse=True)
@@ -594,7 +617,7 @@ def fair_tab():
                         + ("" if d in rec else " (worked out now)"))
     snap = rec.get(pick)
     if snap is None:
-        with st.spinner("Counting the last four weeks…"):
+        with st.spinner("Counting the year…"):
             led = fairness.ledger(end=(_dt.date.fromisoformat(pick) - _dt.timedelta(days=1)).isoformat())
             s0 = db.load_full_schedule(pick) or {}
             hk = [n for n, v in (s0.get("hk_roster") or {}).items() if v.get("present")]
@@ -632,6 +655,13 @@ def fair_tab():
         if i and g.get("service_type") == "Full Clean":
             rooms[i] = rooms.get(i, 0) + len(g.get("rooms") or [])
 
+    def rate(r):
+        """Rooms per day on the schedule over the year, recent days counting
+        more -- the number the order is made on (fairness.ledger)."""
+        if r.get("rate") is not None:
+            return float(r["rate"])
+        return (r.get("rooms", 0) / r["sched"]) if r.get("sched") else 0.0
+
     def verdict(rows, got):
         """People left free who had fewer rooms than someone who worked --
         the cases worth a look. A note (RQS 1/2, light duty) or a newcomer
@@ -639,8 +669,8 @@ def fair_tab():
         plain = [r for r in rows if not r.get("note") and not r.get("new")]
         working = [r for r in plain if got.get(r["name"])]
         free = [r for r in plain if not got.get(r["name"])]
-        most_worked = max((r["rooms"] for r in working), default=None)
-        odd = [r for r in free if most_worked is not None and r["rooms"] < most_worked]
+        most_worked = max((rate(r) for r in working), default=None)
+        odd = [r for r in free if most_worked is not None and rate(r) < most_worked]
         return working, free, odd, most_worked
 
     for title, key, got, unit in (("Housekeepers", "hk", mins, "min of rooms"), ("RQS", "rqs", rooms, "rooms to inspect")):
@@ -657,19 +687,19 @@ def fair_tab():
         if not free:
             st.success("✅ Everyone on the schedule had work this day.")
         elif not odd:
-            st.success(f"✅ Fair: the {len(free)} free had more rooms in the last four weeks "
-                       f"({min(r['rooms'] for r in free)}+) than anyone who worked "
-                       f"(at most {most_worked}).")
+            st.success(f"✅ Fair: the {len(free)} free have averaged more rooms a day this year "
+                       f"({min(rate(r) for r in free):.1f}+) than anyone who worked "
+                       f"(at most {most_worked:.1f}).")
         else:
             st.warning("⚠️ Worth a look: " + "; ".join(
-                f"**{r['name']}** was free with only {r['rooms']} rooms" for r in odd)
-                + f" — someone who worked had {most_worked}. (A sheet change after the build, "
+                f"**{r['name']}** was free averaging only {rate(r):.1f} rooms a day" for r in odd)
+                + f" — someone who worked averages {most_worked:.1f}. (A sheet change after the build, "
                 "or a building with no chart left, can do this.)")
 
-        top = max((r["rooms"] for r in rows), default=0) or 1
+        top = max((rate(r) for r in rows), default=0) or 1
         plain = [r for r in rows if not r.get("note") and not r.get("new")]
-        most = max((r["rooms"] for r in plain), default=0)
-        avg = round(sum(r["rooms"] for r in plain) / len(plain)) if plain else 0
+        most = max((rate(r) for r in plain), default=0)
+        avg = (sum(rate(r) for r in plain) / len(plain)) if plain else 0
         odd_names = {r["name"] for r in odd}
 
         def why(r, g):
@@ -677,47 +707,56 @@ def fair_tab():
             if r.get("note"):
                 return "Has a set role this day, so the order doesn't apply."
             if r.get("new"):
-                return ("New: no rooms yet in the last four weeks, so first in line." if g else
-                        "New: no rooms yet in the last four weeks — should have been first in line.")
-            n = r["rooms"]
+                return ("New: no rooms yet this year, so first in line." if g else
+                        "New: no rooms yet this year — should have been first in line.")
+            n = rate(r)
             if g:
                 if n < avg:
-                    return (f"Had {n} rooms, {avg - n} below the team average ({avg}) — "
+                    return (f"Averages {n:.1f} rooms a day, {avg - n:.1f} below the team ({avg:.1f}) — "
                             "behind on rooms, so they get work first.")
-                return (f"Had {n} rooms ({n - avg} above the average of {avg}) — "
+                return (f"Averages {n:.1f} rooms a day ({n - avg:.1f} above the team's {avg:.1f}) — "
                         "there was enough work for them too.")
             if r["name"] in odd_names:
-                return (f"Had only {n} rooms, yet someone with {most_worked} worked — "
-                        "this one wasn't decided by fair share.")
-            return (f"Had {n} rooms — more than anyone who worked (at most {most_worked}), so "
-                    "this is their turn for a lighter day.")
+                return (f"Averages only {n:.1f} rooms a day, yet someone averaging {most_worked:.1f} "
+                        "worked — this one wasn't decided by fair share.")
+            return (f"Averages {n:.1f} rooms a day — more than anyone who worked (at most "
+                    f"{most_worked:.1f}), so this is their turn for a lighter day.")
 
-        table = []
-        for r in sorted(rows, key=lambda r: (r["rooms"], r["rank"])):
+        # One row per person, the reason in full under the name (Hari, 25 Nov:
+        # "make sure the reasons are clearly visible" -- a table cell cut them off).
+        st.caption(f"Team average: **{avg:.1f} rooms a day on** · highest: **{most:.1f}** "
+                   "(this year, recent weeks counting more). Fewest first.")
+        out = ['<div class="fs-list">']
+        for r in sorted(rows, key=lambda r: (rate(r), r["rank"])):
             g = got.get(r["name"])
             if r.get("note"):
-                today_txt = r["note"].replace(" -- ", " · ")
+                tag, cls = r["note"].replace(" -- ", " · "), "role"
             elif g:
-                today_txt = f"Working · {g} {unit}"
+                tag, cls = f"Working · {g} {unit}", "work"
+            elif r["name"] in odd_names:
+                tag, cls = "Free · worth a look", "odd"
             else:
-                today_txt = "Free"
-            table.append({"Person": r["name"] + (" (new)" if r.get("new") else ""),
-                          "Rooms, last 4 weeks": r["rooms"],
-                          "This day": today_txt,
-                          "Why": why(r, g)})
-        st.caption(f"Team average over the four weeks: **{avg} rooms** · busiest: **{most}**.")
-        st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True,
-                     column_config={"Rooms, last 4 weeks": st.column_config.ProgressColumn(
-                         "Rooms, last 4 weeks", format="%d", min_value=0, max_value=top, width="small"),
-                         "This day": st.column_config.TextColumn("This day", width="medium"),
-                         "Why": st.column_config.TextColumn("Why", width="large")})
+                tag, cls = "Free", "free"
+            w = 100 * rate(r) / top if top else 0
+            out.append(
+                f'<div class="fs-row {cls}"><div class="fs-top">'
+                f'<span class="fs-name">{html.escape(r["name"])}{" <i>new</i>" if r.get("new") else ""}</span>'
+                f'<span class="fs-tag">{html.escape(tag)}</span></div>'
+                f'<div class="fs-bar"><span class="fs-track"><i style="width:{w:.0f}%"></i></span>'
+                f'<span class="fs-num"><b>{rate(r):.1f}</b> a day · {r.get("rooms", 0):,} this year</span></div>'
+                f'<div class="fs-why">{html.escape(why(r, g))}</div></div>')
+        out.append("</div>")
+        st.markdown("".join(out), unsafe_allow_html=True)
 
     with st.expander("How it's counted, and the full numbers"):
         st.markdown(
             f"- **Rooms** are rooms cleaned (housekeepers) or inspected (RQS) from "
             f"{snap.get('from')} to {snap.get('to')}, counted from the GC8 Inspections tabs — "
             "the same counts as the Rooms view.\n"
-            "- People level on rooms: the one with **more free days** goes first.\n"
+            "- **Rooms a day** = rooms ÷ days on the schedule. Each day counts by how recent it "
+            f"is: a day {fairness.HALF_LIFE_DAYS} days ago counts half, twice that a quarter. "
+            "Any day with rooms counts as a day on.\n"
+            "- People level on that: the one left free more often goes first.\n"
             "- **RQS 1 and RQS 2** keep their own rounds whatever the order; **light duty** "
             "and **new** people are shown but not judged.\n"
             "- The order is worked out at each morning's build and kept, so a past day shows "
@@ -727,7 +766,8 @@ def fair_tab():
             if rows:
                 st.markdown(f"**{title}**")
                 st.dataframe(pd.DataFrame([{
-                    "Order used": r["rank"], "Person": r["name"], "Rooms": r["rooms"],
+                    "Order used": r["rank"], "Person": r["name"], "Rooms a day": round(rate(r), 2),
+                    "Rooms": r["rooms"],
                     "Days on the schedule": r["sched"], "Days with rooms": r["busy"],
                     "Free days": r["free"], "Note": r.get("note") or ("new" if r.get("new") else "")}
                     for r in rows]), hide_index=True, use_container_width=True)
