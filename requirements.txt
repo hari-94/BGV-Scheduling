@@ -4,7 +4,7 @@
 streamlit==1.62.0
 # A change here restarts the Cloud app. db.py changes reach a running app only
 # on a restart (CLAUDE.md: a deploy does not reload an imported module).
-# Last bumped 25 Nov (late) for cache keys, pilot configs, Late notice, m365 hand-over, prereg (before: 21 Nov
+# Last bumped 25 Nov (eve) for db passwords + sign-in limit, cache keys, pilot configs (before: 21 Nov
 # floor.py, the frontdesk role, db's account_roles; 23 Oct roster_import.match_person, fcsolve).
 # streamlit installs `watchdog` and its file watcher imports it: no module in
 # this repo may be called watchdog.py (it was, until 15 Oct -- see agent_watch.py).
