@@ -3,9 +3,15 @@ name: Watchdog
 # goes quiet, the 5 AM build hasn't happened, or the app stops answering.
 # See .github/watchdog.py. Public repo, public logs: it prints counts only.
 
+# GitHub starts scheduled runs late and drops many -- on 23-25 Nov they came
+# 4 to 12 hours apart, not every 30 min. So a run stays up and checks every 30
+# minutes for about 5.5 hours, then starts the next run itself (a
+# workflow_dispatch made with GITHUB_TOKEN is allowed to start one). The
+# schedule stays as the net that restarts the chain if it ever breaks; the
+# concurrency group keeps it to one run at a time. Free: public repo.
 on:
   schedule:
-    - cron: "7,37 * * * *"   # every 30 min, off the top of the hour (GitHub runs late at :00)
+    - cron: "7,37 * * * *"   # the net: every 30 min, as often as GitHub honours it
   workflow_dispatch:
     inputs:
       test:
@@ -15,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  actions: write      # to start the next run of the chain
 
 concurrency:
   group: watchdog
@@ -23,7 +30,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 345
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,9 +38,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Check the office PC, today's build and the app
-        run: python .github/watchdog.py
+      - name: Check the office PC, today's build and the app -- every 30 min
+        # A test run checks once. Otherwise 11 passes, 30 minutes apart; a
+        # failed pass is reported in the log and the next one still runs.
+        run: |
+          passes=11
+          if [ "${WATCHDOG_TEST}" = "true" ]; then passes=1; fi
+          for i in $(seq 1 $passes); do
+            echo "pass $i of $passes at $(date -u +%H:%M)Z"
+            python .github/watchdog.py || echo "pass $i failed"
+            if [ "$i" -lt "$passes" ]; then sleep 1800; fi
+          done
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           WATCHDOG_TEST: ${{ inputs.test }}
+      - name: Start the next run
+        if: ${{ !cancelled() && inputs.test != true }}
+        run: gh workflow run watchdog.yml --ref main --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
