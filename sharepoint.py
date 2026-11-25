@@ -27,7 +27,32 @@ CDP = "http://127.0.0.1:9333"
 # The browser profile that was signed in to Microsoft 365 for Power Automate.
 # Its cookies keep the sign-in, so a hidden Chrome on the same profile is
 # signed in too -- no window has to stay open on the desk.
-PROFILE = os.path.join(os.path.expanduser("~"), ".bgv-agent", "pa-browser")
+DEFAULT_PROFILE = os.path.join(os.path.expanduser("~"), ".bgv-agent", "pa-browser")
+
+
+def _configured_profile():
+    """The profile the Admin page's hand-over signed in (m365_login.py), if
+    one has: agent.json "m365_profile"."""
+    try:
+        import json
+        path = os.path.join(os.path.expanduser("~"), ".bgv-agent", "agent.json")
+        with open(path, encoding="utf-8") as f:
+            prof = (json.load(f) or {}).get("m365_profile")
+        return prof if prof and os.path.isdir(prof) else None
+    except Exception:
+        return None
+
+
+PROFILE = _configured_profile() or DEFAULT_PROFILE
+
+
+def _cdp(p):
+    """The visible Chrome window on CDP, which was started on the original
+    profile: used only while that is still the profile in use -- after a
+    hand-over it would read with the old account's sign-in."""
+    if PROFILE != DEFAULT_PROFILE:
+        raise RuntimeError("hand-over profile in use: no CDP window")
+    return p.chromium.connect_over_cdp(CDP, timeout=3000)
 SITE = "https://grandtimber.sharepoint.com/sites/GC8HSKP"
 FOLDER = "/sites/GC8HSKP/Shared Documents/Office/GC8 Inspections"
 
@@ -82,7 +107,7 @@ def list_folder(sub, top=20):
         with sync_playwright() as p:
             hidden = None
             try:
-                browser = p.chromium.connect_over_cdp(CDP, timeout=3000)
+                browser = _cdp(p)
                 ctx = browser.contexts[0] if browser.contexts else browser.new_context()
             except Exception:
                 hidden = ctx = p.chromium.launch_persistent_context(
@@ -160,7 +185,7 @@ def _upload(file_name, data, expect_modified, timeout_ms):
         with sync_playwright() as p:
             hidden = None
             try:
-                browser = p.chromium.connect_over_cdp(CDP, timeout=3000)
+                browser = _cdp(p)
                 ctx = browser.contexts[0] if browser.contexts else browser.new_context()
             except Exception:
                 hidden = ctx = p.chromium.launch_persistent_context(
@@ -207,7 +232,7 @@ def _fetch(file_name, timeout_ms, site=SITE, url=None):
         with sync_playwright() as p:
             hidden = None
             try:                                   # the visible window, if it's open
-                browser = p.chromium.connect_over_cdp(CDP, timeout=3000)
+                browser = _cdp(p)
                 ctx = browser.contexts[0] if browser.contexts else browser.new_context()
             except Exception:                      # otherwise its profile, hidden
                 hidden = ctx = p.chromium.launch_persistent_context(

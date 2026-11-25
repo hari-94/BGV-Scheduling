@@ -18,10 +18,14 @@ Admin page does it:
     must not lock the PC out of HotSOS. Then it deletes the request and writes
     what happened (cred_status_<host>_<svc>), which the page shows.
 
-Microsoft 365 is not a stored password: SharePoint is read through a Chrome
-profile that somebody signed in to by hand (with a phone approval, usually).
-So for it the page can only ask a PC to *test* that sign-in, or to open the
-sign-in window so whoever is at that PC can redo it.
+Microsoft 365: SharePoint and Outlook are read through a Chrome profile
+signed in to an account. Somebody signed the first one in by hand; since 25
+Nov the page can also *hand over* to another account (a manager's, if the
+one in use is switched off): the e-mail and password go sealed like a
+HotSOS password, the PC signs a new profile in with them (m365_login.py),
+shows the phone-approval number on the page while it waits, checks it can
+read everything the app reads, and only then switches to it. It can still
+*test* the sign-in, or open the sign-in window for whoever is at the PC.
 
 No Streamlit here, so the agent imports it too.
 """
@@ -44,8 +48,9 @@ KEYRING_KEY = ("BGV agent key", "private")
 SERVICES = {
     "hotsos": {"label": "HotSOS", "kind": "password",
                "used_for": "Preview / Push to HotSOS, and the room-status mirror"},
-    "m365": {"label": "Microsoft 365 (SharePoint)", "kind": "signin",
-             "used_for": "reading GC8 Inspections and the daily sheet live"},
+    "m365": {"label": "Microsoft 365 (SharePoint + Outlook)", "kind": "account",
+             "used_for": "GC8 Inspections, Schedule, the front desk's Pre-Reg, the ENG sheet "
+                         "outbox, App Alerts and the Arrival Report e-mail"},
 }
 
 #: Shown on the page so nobody hunts for these in the wrong place.
@@ -54,6 +59,17 @@ NOT_HERE = [
                      "nothing is stored by the app"),
     ("Supabase key", "Streamlit Cloud > the app > Settings > Secrets, and "
                      ".streamlit/secrets.toml on each agent PC"),
+    ("Windows sign-in on the office PC", "the agent and OneDrive run in that sign-in. A new "
+     "account signs in to the PC, lets OneDrive sync the GC8 Inspections and Schedules "
+     "folders, and runs run_agent.bat once; then hand over Microsoft 365 and HotSOS here"),
+    ("Power Automate flows", "Save Arrival Report to SharePoint, ENG sheet update, App Alerts "
+     "e-mails, BGV Teams notes. They belong to whoever made them: add a manager as co-owner "
+     "now (flow > Share), or they stop with that account"),
+    ("ENG sheet Office Script", "'ENG sheet update.osts' sits in its owner's OneDrive; a "
+     "co-owner of the flow should save a copy to a shared library"),
+    ("E-mails the app depends on", "the Arrival Report e-mail and the 5 AM SSRS Housekeeping "
+     "Dashboard go to one mailbox; add a second recipient (front desk list, SSRS "
+     "subscription)"),
 ]
 
 
@@ -220,11 +236,15 @@ def _apply(req, cfg_path, keyring_service, log):
             return True, "signed in", user
     if svc == "m365":
         import sharepoint
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+        who = cfg.get("m365_user") or None
+        if action == "set":
+            return _m365_handover(req, cfg, cfg_path, host, log)
         if action == "test":
             data, info = sharepoint.fetch("GC8 Daily Schedule.xlsx")
             if data is None:
-                return False, f"SharePoint not readable: {info.get('error', '')}", None
-            return True, "SharePoint read OK", None
+                return False, f"SharePoint not readable: {info.get('error', '')}", who
+            return True, "SharePoint read OK", who
         if action == "signin":
             import subprocess
             chrome = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
@@ -233,6 +253,38 @@ def _apply(req, cfg_path, keyring_service, log):
             return True, ("sign-in window opened -- whoever is at this PC signs in, "
                           "closes the window, then press Test"), None
     return False, f"unknown request {svc}/{action}", None
+
+
+def _m365_handover(req, cfg, cfg_path, host, log):
+    """Sign a new profile in as the account the page sent; switch to it only
+    once it reads everything (m365_login.py)."""
+    import m365_login
+    import sharepoint
+    email = (req.get("username") or "").strip()
+    if "@" not in email:
+        return False, "an e-mail address is needed", email
+
+    def report(msg):           # the phone-approval number, while the sign-in waits
+        db._upsert_key(f"{STATUS_PREFIX}{host}_m365", {
+            "id": req.get("id"), "host": host, "service": "m365", "action": "set",
+            "ok": True, "waiting": True, "msg": msg, "username": email,
+            "by": req.get("by"), "asked_at": req.get("at"), "at": clock.stamp()})
+
+    pw = _open(_private_key(), req["sealed"], host, "m365")
+    if not sharepoint._ONE_AT_A_TIME.acquire(timeout=150):
+        return False, "the browser was busy -- send it again", email
+    try:
+        ok, msg, profile = m365_login.sign_in(email, pw, report=report)
+    finally:
+        sharepoint._ONE_AT_A_TIME.release()
+    if not ok:
+        return False, f"{msg} -- still using {cfg.get('m365_user') or 'the original sign-in'}", email
+    m365_login.save_password(email, pw)
+    cfg.update(m365_user=email, m365_profile=profile)
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(json.dumps(cfg, indent=2))
+    sharepoint.PROFILE = profile
+    return True, f"{msg}. This PC now works as {email}", email
 
 
 def agent_poll(cfg_path, keyring_service, log):

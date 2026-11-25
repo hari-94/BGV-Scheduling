@@ -315,6 +315,21 @@ with tab_users:
     else:
         st.info("No other users to edit.")
 
+def _welcome_box(key, btn):
+    """The login details to send someone, ready to copy (the box's copy
+    button, top right). Kept in this session only, until Done."""
+    w = st.session_state.get(key)
+    if not w:
+        return
+    with st.container(border=True):
+        st.markdown(f"**Message for {_html.escape(w['for'])}** — copy it with the button "
+                    "at the top right of the box and send it to them.")
+        st.code(w["text"], language=None, wrap_lines=True)
+        if st.button("Done — clear this message", key=btn):
+            st.session_state.pop(key, None)
+            st.rerun()
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CREATE USER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -376,7 +391,13 @@ with tab_create:
                             msg += f" Linked to “{new_link}” on the schedule."
                     except Exception as _ex:
                         st.warning(f"Account made, but the link was not saved: {_ex}")
+                    # The message to send them, shown below until dismissed.
+                    st.session_state["_welcome"] = {
+                        "for": new_uname, "text": account_links.welcome_text(
+                            new_uname, new_pw, new_disp.strip() or new_link, new_role)}
                 st.success(msg) if ok else st.error(msg)
+
+    _welcome_box("_welcome", "welcome_done")
 
     st.markdown("""
 <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;
@@ -408,6 +429,13 @@ with tab_pw:
                 else:
                     ok, msg = db.update_password(target_user, new_pw_r)
                     st.success(msg) if ok else st.error(msg)
+                    if ok:
+                        _u = next((u for u in all_users if u["username"] == target_user), {})
+                        st.session_state["_reset_msg"] = {
+                            "for": target_user, "text": account_links.welcome_text(
+                                target_user, new_pw_r, _u.get("display_name") or "",
+                                _u.get("role") or "", reset=True)}
+    _welcome_box("_reset_msg", "reset_msg_done")
 
     # Change own password
     st.markdown('<p class="sec"style="margin-top:1.2rem">Change My Password</p>', unsafe_allow_html=True)
@@ -553,7 +581,12 @@ with tab_svc:
                 if _p:
                     _bits.append(_pill(True, f"waiting for this PC · {_p.get('action')} "
                                              f"asked {_when(_p.get('at'))}"))
-                if _s:
+                if _s and _s.get("waiting"):
+                    # A hand-over waiting on a phone approval: the number, big.
+                    _bits.append(f"<span style='background:#fff7e6;color:#8a4b00;border-radius:8px;"
+                                 f"padding:4px 12px;font-weight:700'>⏳ {_html.escape(str(_s.get('msg')))}"
+                                 f" ({_html.escape(str(_s.get('username') or ''))})</span>")
+                elif _s:
                     _who = f" as {_s['username']}" if _s.get("username") else ""
                     _bits.append(_pill(bool(_s.get("ok")), f"{_s.get('action')}{_who}: {_s.get('msg')}"))
                     _bits.append(f"<span style='color:#8a93a1;font-size:.74rem'>{_when(_s.get('at'))}"
@@ -566,7 +599,7 @@ with tab_svc:
                     _cr.request_action(_h, _svc, "test", cu["username"])
                     st.toast(f"Asked {_h} to test its {_meta['label']} sign-in.")
                     st.rerun()
-                if _meta["kind"] == "signin" and _c2.button(
+                if _meta["kind"] in ("signin", "account") and _c2.button(
                         "Open sign-in", key=f"svc_signin_{_svc}_{_h}", use_container_width=True,
                         help="Opens the Microsoft 365 sign-in window on that PC; someone "
                              "there signs in, closes the window, then you press Test."):
@@ -574,14 +607,23 @@ with tab_svc:
                     st.toast(f"Asked {_h} to open the sign-in window.")
                     st.rerun()
 
-            if _meta["kind"] == "password" and _agents:
+            if _meta["kind"] in ("password", "account") and _agents:
+                _acct = _meta["kind"] == "account"
+                if _acct:
+                    st.caption("**Hand over** to another Microsoft 365 account -- a manager's, if the "
+                               "one in use is switched off. Each PC signs in with it in a new browser "
+                               "profile and shows the phone-approval number above while it waits; "
+                               "it switches only once it can read GC8 Inspections, the front desk's "
+                               "Daily Tasks and Outlook. Until then the current sign-in stays in use.")
                 with st.form(f"svc_pw_{_svc}", clear_on_submit=True):
                     _known = next((s.get("username") for (h, sv), s in _stat.items()
-                                   if sv == _svc and s.get("username")), "")
-                    _u = st.text_input(f"{_meta['label']} username", value=_known)
+                                   if sv == _svc and s.get("username") and s.get("ok")), "")
+                    _u = st.text_input("Microsoft 365 e-mail" if _acct else f"{_meta['label']} username",
+                                       value=_known)
                     _p1 = st.text_input("New password", type="password")
                     _p2 = st.text_input("Confirm new password", type="password")
-                    if st.form_submit_button(f"Update on all agent PCs", type="primary"):
+                    if st.form_submit_button("Hand over on all agent PCs" if _acct
+                                             else "Update on all agent PCs", type="primary"):
                         if not _u.strip() or not _p1:
                             st.error("Username and password are both needed.")
                         elif _p1 != _p2:
@@ -590,7 +632,7 @@ with tab_svc:
                             _sent = _cr.request_password(_svc, _u.strip(), _p1, cu["username"])
                             st.success(f"Sent to {', '.join(_sent)}. Each PC signs in with it "
                                        "within five minutes; refresh to see the result.")
-            elif _meta["kind"] == "signin":
+            if _meta["kind"] == "signin":
                 st.caption("Microsoft 365 isn't a stored password: SharePoint is read through a "
                            "browser sign-in on each PC (usually with a phone approval). After a "
                            "password change, press Open sign-in for that PC and have someone "

@@ -160,6 +160,21 @@ and phone numbers are never copied. The tab has no date: a list identical to
 an earlier day's is `carried` and not counted. A failed read keeps the last
 list and records `error`.
 
+**Handing the PCs to another account** (Hari, 25 Nov). Admin → Service
+Passwords → Microsoft 365 takes an e-mail and password (a manager's, if the
+account in use is switched off), sealed per PC like HotSOS. The PC signs a
+*new* profile (`~/.bgv-agent/pa-browser-<email>`) in with them
+(m365_login.py: Microsoft's page, then GPLRINC's ADFS at fs.grandtimber.com,
+then a phone approval whose number is shown on the Admin page), checks it
+reads GC8 Inspections, the Daily Tasks workbook and Outlook, and only then
+switches (`agent.json` m365_user / m365_profile; sharepoint.PROFILE). The
+password stays in that PC's Credential Manager ("BGV M365") so the agent can
+sign in again when the session lapses (from sync_prereg's signed-out error,
+at most every 2 hours). After a hand-over the CDP window (the original
+profile) is never used. What the app can't take over is listed under "Not
+set here": the PC's Windows sign-in and OneDrive, the Power Automate flows,
+the Office Script, and the e-mails that go to one mailbox.
+
 **A role the database doesn't take yet** (`db.NEW_ROLES`). `app_users` has a
 CHECK on role (supabase_setup.sql), and the publishable key can't ALTER it.
 Until the ALTER for `frontdesk` is run in Supabase's SQL editor, such an

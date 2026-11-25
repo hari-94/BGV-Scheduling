@@ -585,6 +585,15 @@ def sync_sheet(cfg):
 
 
 PREREG_SECONDS = 300
+
+
+def cfg_m365_user():
+    """The Microsoft 365 account this PC was handed over to, if any."""
+    try:
+        return json.loads(CONFIG.read_text()).get("m365_user")
+    except Exception:
+        return None
+
 _PREREG_SEEN = {}
 
 
@@ -603,6 +612,28 @@ def sync_prereg():
         if _PREREG_SEEN.get("err") != rec["error"]:
             log(f"pre-reg: couldn't read the tab: {rec['error']}")
         _PREREG_SEEN["err"] = rec["error"]
+        # Signed out of Microsoft 365 after a hand-over (Admin page): sign the
+        # handed-over account in again with its saved password, at most every
+        # two hours; a phone approval shows on the Admin page as it waits.
+        if "signed in" in rec["error"].lower():
+            try:
+                import credentials
+                import m365_login
+                host = socket.gethostname()
+
+                def report(msg):
+                    db._upsert_key(f"{credentials.STATUS_PREFIX}{host}_m365", {
+                        "host": host, "service": "m365", "action": "sign in again", "ok": True,
+                        "waiting": True, "msg": msg, "username": cfg_m365_user(),
+                        "by": "agent", "at": clock.stamp()})
+                out = m365_login.keep_signed_in(load_config(required=False), report, log)
+                if out is not None:
+                    db._upsert_key(f"{credentials.STATUS_PREFIX}{host}_m365", {
+                        "host": host, "service": "m365", "action": "sign in again",
+                        "ok": out[0], "msg": out[1], "username": cfg_m365_user(),
+                        "by": "agent", "at": clock.stamp()})
+            except Exception as ex:
+                log(f"m365: signing in again failed: {type(ex).__name__}: {ex}")
         return rec
     _PREREG_SEEN["err"] = None
     sig = [e["unit"] for e in rec.get("entries") or []]

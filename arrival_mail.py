@@ -29,7 +29,8 @@ import clock
 import db
 
 KEY = "arrival_fetch"
-PROFILE = os.path.join(os.path.expanduser("~"), ".bgv-agent", "pa-browser")
+# The profile is sharepoint.PROFILE, read at the moment of use: a hand-over
+# on the Admin page (m365_login.py) moves it to the new account's.
 OWA = "https://outlook.office.com/mail/inbox"
 
 
@@ -59,7 +60,7 @@ def fetch(day: _dt.date, folder, log=print, headless=True):
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            ctx = p.chromium.launch_persistent_context(PROFILE, channel="chrome", headless=headless,
+            ctx = p.chromium.launch_persistent_context(sharepoint.PROFILE, channel="chrome", headless=headless,
                                                        viewport={"width": 1500, "height": 1000})
             try:
                 pg = ctx.pages[0] if ctx.pages else ctx.new_page()

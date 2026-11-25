@@ -120,3 +120,28 @@ def unaccounted(users, people=None, aliases=None) -> list:
             matched.add(hit)
     return [(n, s) for n, s in people.items()
             if n not in matched and ri.norm_name(n) not in linked]
+
+
+APP_URL = "https://bgv-scheduling-qvt9nhbqqbusvbcpm7kidq.streamlit.app"
+
+#: Where each role starts, for the welcome message.
+_START = {
+    "housekeeper": "open My Home to see your week, and My Rooms for your rooms today",
+    "houseperson": "open My Home to see your week and your tasks",
+    "frontdesk": "the Front Desk page shows today's rooms, live",
+}
+
+
+def welcome_text(username, password, name="", role="", reset=False) -> str:
+    """The message an admin copies to a new user (or one whose password was
+    reset) after the Admin page makes the account (Hari, 25 Nov)."""
+    first = (str(name or "").split() or [""])[0]
+    hi = f"Hi {first}," if first else "Hi,"
+    start = _START.get(str(role or "").lower(), "the menu at the top takes you to every page you can use")
+    lead = ("your password for the GC8 Housekeeping app has been reset." if reset else
+            "welcome to the GC8 Housekeeping app!")
+    return (f"{hi} {lead}\n"
+            f"Website: {APP_URL}\n"
+            f"Login ID: {username}\n"
+            f"Password: {password}\n"
+            f"After you sign in, {start}. Please change your password on the Profile page.")
