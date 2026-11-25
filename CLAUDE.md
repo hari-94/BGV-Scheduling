@@ -446,6 +446,29 @@ Adrian's "Breck Inn" days were read as an ordinary other duty, and on a short
 morning `borrowable` pulled him onto 4 rooms while he was working there.
 `_NEVER_BORROW` lists it now, beside HSP, sick and VTO.
 
+**Fair share: rooms first to whoever has had the fewest** (Hari, 25 Nov).
+Charts went out in the staff sheet's order -- each chart took the next person
+in its building's pool, each RQS round the next inspector -- so whoever sat at
+the bottom was left free whenever there were more people than work, the same
+people day after day (four weeks to 24 Nov: Miguel Castor on 21 days,
+inspecting on 5; Mayra, Grace, Alejandro, Sayra free 10-11 of 18-19).
+`fairness.py` now orders both lists before `_staff`: the fewest rooms over the
+last 28 synced days first (cleaned for a housekeeper, inspected for an RQS --
+`report_data`'s own counts, so the Report and the build can't disagree), then
+the most free days, then the fewest days with rooms; level people keep the
+sheet's order. `assign_hk_building_aware` hands out the biggest chart first
+within each service and building (buildings keep their incoming order, so who
+borrows across a bridge is unchanged), Daily Service the biggest round first,
+and `assign_inspectors` gives the biggest round to the first inspector (which
+charts make a round is unchanged; small rounds come last, where the RQS 2
+rule takes them). RQS 1 and RQS 2 keep their roles; light duty still frees
+its person first. Every Generate and 5 AM build records the order it used with
+each person's numbers (`fair_share` in app_settings, 21 days kept; previews
+write nothing); the Report page's **⚖️ Fair share** view shows it beside what
+each person got. Off switch: `fair_share_on` {"on": false}. Dry run of
+26 Nov: Minoska (46 rooms) on a chart where the sheet order left her free,
+Lilliam (65) free instead; Mayra (70) the 11-room round, Hari (112) the 3.
+
 Inspectors are batched the same way: a building at a time, its trailing
 part-batch left alone until there are not enough inspectors, then merged
 cheapest-bridge-first. RQS rounds crossing a building 245 → 192.

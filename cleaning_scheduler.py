@@ -4281,7 +4281,9 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
     # (Need Housekeeper 1, 2, ...) instead of a name, so the gap is visible.
     if ds_set:
         need_n = 0
-        for g in groups:
+        # The biggest round first: the team comes in order of need
+        # (fairness.py), so the one with the fewest rooms lately gets the most.
+        for g in sorted(groups, key=lambda g: -(g.get("time") or 0)):
             if g["label"] in assignment: continue
             if g.get("service_type") != SVC_DS: continue
             if g.get("dv_rqs2"): assignment[g["label"]]=""; continue
@@ -4310,7 +4312,17 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
     # schedule view has one row per housekeeper name, so a shared name merged
     # every unstaffed chart into one row far over the cap.
     no_hk_n = 0
-    for g in sorted(groups, key=_order):
+    # Within a service and a building, the biggest chart first: each pool is in
+    # order of need (fairness.py), so the person with the fewest rooms lately
+    # gets the fullest chart and whoever has had the most is the one left over
+    # (Hari, 25 Nov). Buildings keep the order they came in, so who borrows
+    # across a bridge is unchanged.
+    _bseen = {}
+    for g in groups:
+        _bseen.setdefault(min(g.get("blds") or {9}), len(_bseen))
+    def _hand_out(g):
+        return (_order(g), _bseen.get(min(g.get("blds") or {9}), 9), -(g.get("time") or 0))
+    for g in sorted(groups, key=_hand_out):
         if g["label"] in assignment: continue
         if g.get("verify_group"):
             assignment[g["label"]] = ""; continue
@@ -5410,6 +5422,13 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
             if moved: break
         if not moved: break
         batches=_optimize_batches(batches)
+    # The biggest round to the first inspector: the list comes in order of need
+    # (fairness.py), so the RQS with the fewest rooms inspected lately gets the
+    # most, and whoever has had the most is the one left without a round
+    # (Hari, 25 Nov). Which charts make a round is decided above, for walking;
+    # this only decides who takes it -- and leaves the small rounds for last,
+    # where the rule below puts them on RQS 2.
+    batches.sort(key=lambda b: -sum(len(g["rooms"]) for g in b))
     fc_inspectors_q = list(fc_inspectors)
     # Out of inspectors: a batch of under 6 rooms goes to RQS 2 on top of the
     # Daily Service / Dust n Vac round (the manager's rule), as long as RQS 2's
@@ -6434,6 +6453,35 @@ if run:
                     from roster_import import norm_name as _nn
                     _insp_off = {_nn(n) for n in _day_rule.get("insp_off") or []}
                     present_insp = [n for n in present_insp if _nn(n) not in _insp_off]
+                    # Fair share (Hari, 25 Nov). Charts went out in the staff
+                    # sheet's order, so whoever sat at the bottom of a building's
+                    # list was the one left free whenever there were more people
+                    # than work -- the same people day after day. Both lists now
+                    # go in order of need: the fewest rooms over the last four
+                    # weeks first (fairness.py, the Report's own counts). With
+                    # the bigger charts and rounds handed out first, the neediest
+                    # get the fullest days and whoever has had the most is the
+                    # one left free. Any failure keeps the sheet's order.
+                    st.session_state["fair_share"] = None
+                    try:
+                        import fairness as _fair
+                        if _fair.enabled():
+                            from datetime import timedelta as _td
+                            _fday = _datetime.strptime(st.session_state.get("sched_day")
+                                                       or _today_iso(), "%Y-%m-%d").date()
+                            _led = _fair.ledger(end=(_fday - _td(days=1)).isoformat())
+                            present_hk = _fair.need_order(present_hk, _led)
+                            present_insp = _fair.need_order(present_insp, _led)
+                            # What the order doesn't decide, beside the numbers.
+                            _notes = {n: "light duty" for n in light_duty_names() if n in present_hk}
+                            if rqs1:
+                                _notes[rqs1] = "RQS 1 -- no rooms by role"
+                            if rqs2:
+                                _notes[rqs2] = "RQS 2 -- the Daily Service round"
+                            st.session_state["fair_share"] = _fair.snapshot(
+                                _fday, _led, present_hk, present_insp, notes=_notes)
+                    except Exception as _ex:
+                        print(f"[app] fair share skipped, sheet order kept: {_ex}")
                     fg, inspectors, used_hk_set, _ = _staff(fg, present_hk, present_insp)
                     # Still short: people on Dust and Vac, then projects and
                     # other non-room duties that day, are counted as working --
@@ -6527,6 +6575,15 @@ if run:
                         db.save_snapshot(_build_snapshot(fg,len(df),inspectors))
                     except Exception:
                         pass
+                    # The order this plan was staffed in, with every person's
+                    # numbers, for the Report's Fair share view (a preview's
+                    # writes are stubbed out, so it records nothing).
+                    try:
+                        if st.session_state.get("fair_share"):
+                            import fairness as _fair
+                            _fair.record(st.session_state["fair_share"])
+                    except Exception as _ex:
+                        print(f"[app] fair share not recorded: {_ex}")
 
                     _loader.empty()
                     st.success(f"Schedule generated — {len(fg)} groups from {len(df)} rooms."

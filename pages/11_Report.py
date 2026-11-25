@@ -575,10 +575,75 @@ def timing_tab():
             f"the app's charts are copied from HotSOS, and a day the office PC was off has gaps.")
 
 
-view = st.segmented_control("View", ["📋 Rooms", "⏱️ Timing"], default="📋 Rooms",
+def fair_tab():
+    """Fair share (Hari, 25 Nov): the order each build handed rooms out in, and
+    the numbers behind it, so a free day can be checked against its reason."""
+    import pandas as pd
+    import fairness
+    fresh.latest("fairness")
+    st.markdown('<div class="rp-h1">⚖️ Fair share</div><div class="rp-src">Who gets rooms '
+                'first. Each morning everyone on the schedule is put in order of the rooms '
+                'they have had over the last four weeks -- rooms cleaned for a housekeeper, '
+                'rooms inspected for an RQS, counted from the GC8 Inspections tabs as the '
+                'team left them (the same counts as the Rooms view). The fewest go first and '
+                'get the biggest charts; whoever has had the most is the one left free when '
+                'there are more people than work. RQS 1 and RQS 2 keep their fixed roles.'
+                '</div>', unsafe_allow_html=True)
+    rec = (db._load_key(fairness.KEY) or {}).get("days") or {}
+    days = sorted(rec, reverse=True)
+    today = clock.today().isoformat()
+    if not days:
+        st.info("No build has used the fair-share order yet; the first is tomorrow's 5 AM build. "
+                "Below: the order it would use today, worked out now.")
+    pick = st.selectbox("Day", days or [today], key="fs_day",
+                        format_func=lambda d: _dt.date.fromisoformat(d).strftime("%a %d %b"))
+    snap = rec.get(pick)
+    if snap is None:
+        with st.spinner("Counting the last four weeks…"):
+            led = fairness.ledger(end=(_dt.date.fromisoformat(pick) - _dt.timedelta(days=1)).isoformat())
+            s = db.load_full_schedule(pick) or {}
+            hk = [n for n, v in (s.get("hk_roster") or {}).items() if v.get("present")]
+            rq = [n for n, v in (s.get("insp_roster") or {}).items() if v]
+            snap = fairness.snapshot(pick, led, fairness.need_order(hk, led), fairness.need_order(rq, led))
+    st.caption("Rooms counted %s to %s (%d days, the last synced day before %s). Order: fewest "
+               "rooms first, then the most free days, then the fewest days with rooms."
+               % (snap.get("from"), snap.get("to"), snap.get("window", fairness.WINDOW_DAYS), pick))
+    sched = db.load_full_schedule(pick) or {}
+    mins, rooms = {}, {}
+    for g in sched.get("groups_data") or []:
+        if g.get("verify_group"):
+            continue
+        h, i = g.get("housekeeper") or "", g.get("inspector") or ""
+        if h:
+            mins[h] = mins.get(h, 0) + int(float(g.get("time") or 0))
+        if i and g.get("service_type") == "Full Clean":
+            rooms[i] = rooms.get(i, 0) + len(g.get("rooms") or [])
+    for title, key, got, unit in (("Housekeepers", "hk", mins, "min"), ("RQS", "rqs", rooms, "rooms")):
+        rows = snap.get(key) or []
+        if not rows:
+            continue
+        df = pd.DataFrame([{
+            "Order": r["rank"], "Person": r["name"],
+            "Rooms, 4 weeks": r["rooms"], "Free days": r["free"],
+            "Days with rooms": r["busy"], "Days on": r["sched"],
+            "That day": (f"{got[r['name']]} {unit}" if got.get(r["name"]) else "Free"),
+            "Note": r.get("note") or ("new -- no rooms yet" if r.get("new") else ""),
+        } for r in rows])
+        st.markdown(f"**{title}** · {len(rows)} on that day · "
+                    f"{sum(1 for r in rows if not got.get(r['name']))} free")
+        st.dataframe(df, hide_index=True, use_container_width=True)
+    st.caption("Checking a day: the people marked Free should be at the bottom of the order -- "
+               "the most rooms in the window. RQS 1 and RQS 2 may show Free for Full Clean while "
+               "doing their own round.")
+
+
+view = st.segmented_control("View", ["📋 Rooms", "⏱️ Timing", "⚖️ Fair share"], default="📋 Rooms",
                             key="rp_view", label_visibility="collapsed")
 if view == "⏱️ Timing":
     timing_tab()
+    st.stop()
+if view == "⚖️ Fair share":
+    fair_tab()
     st.stop()
 
 sync = db._load_key(rd.SYNC_KEY) or {}
