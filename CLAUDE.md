@@ -819,6 +819,24 @@ the key carries a token derived from the parsed file.
 
 ## Traps — each of these has already bitten
 
+**A cached function's `_` arguments are not in its cache key** (25 Nov).
+Streamlit skips hashing any argument named with a leading underscore -- the
+way to pass a big object -- so a change token passed as `_token`, `_tick`,
+`_gen` or `_before` did nothing: My Home's name list, My Rooms' duties,
+Property's looks and three Roster Import readers served old data until the
+ttl, and Roster Import's daily-service shape ignored the week it was asked
+for. Name a token without the `_`; tests/test_caches.py fails otherwise.
+
+**Nothing per room may read the database** (25 Nov). My Rooms asked
+`hotsos_push.config()` and `room_scores.config()` once per room: 240 reads,
+18 s a draw on a manager's 119 rooms, every 20 s refresh. Both are now kept
+30 s in memory (`CFG_SECONDS`).
+
+**The red cells are "Late notice"** (Hari, 25 Nov), "Aviso tardío" in
+Spanish -- never "no call / no show" on screen. Inside the code the kind is
+still `no_call` / `KIND_NOCALL`, and NC / NCNS typed in still count.
+
+
 **No OR-Tools means quietly worse charts, not an error.** `fcsolve` and
 `_ds_fill` are CP-SAT; without `ortools` they log "exact solve skipped ...
 No module named 'ortools'" and fall back. The office PC's `.venv` (the web

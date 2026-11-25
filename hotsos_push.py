@@ -21,9 +21,21 @@ CFG_KEY = "hotsos_inspect_cfg"
 QUEUE_KEY = "hotsos_inspect_queue"
 
 
+#: config() is asked once per room on My Rooms -- 119 database reads for a
+#: manager's list, ~16 s (25 Nov). Kept for CFG_SECONDS; a change made here
+#: is seen at once, one made elsewhere within that time.
+CFG_SECONDS = 30
+_CFG = {"at": 0.0, "val": None}
+
+
 def config() -> dict:
+    import time
+    if _CFG["val"] is not None and time.time() - _CFG["at"] < CFG_SECONDS:
+        return {"on": _CFG["val"]["on"], "users": list(_CFG["val"]["users"])}
     c = db._load_key(CFG_KEY) or {}
-    return {"on": bool(c.get("on")), "users": list(c.get("users") or [])}
+    val = {"on": bool(c.get("on")), "users": list(c.get("users") or [])}
+    _CFG.update(at=time.time(), val=val)
+    return {"on": val["on"], "users": list(val["users"])}
 
 
 def enabled_for(username: str) -> bool:
@@ -34,6 +46,7 @@ def enabled_for(username: str) -> bool:
 
 def set_config(on: bool, users) -> None:
     db._upsert_key(CFG_KEY, {"on": bool(on), "users": sorted(set(users or []))})
+    _CFG.update(at=0.0, val=None)
 
 
 def enqueue_inspection(room: str, by: str) -> None:

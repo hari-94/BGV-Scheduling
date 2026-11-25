@@ -79,7 +79,7 @@ def _today_from(_floor, stamp):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _looks(_gen):
+def _looks(gen):
     """Who is drawn as a woman, a man or neutral -- set below, never guessed."""
     try:
         return db._load_key(av.SETTING_KEY) or {}

@@ -173,7 +173,7 @@ KIND_STYLE = {
     ri.KIND_OTHER:   ("#ffdc73", "#6f3d00", "Working — other duty"),
     ri.KIND_VTO:     ("#b9c2ff", "#1d24a3", "VTO — paid"),
     # Red is reserved for the thing the workbook paints red.
-    ri.KIND_NOCALL:  ("#ff8f8f", "#6d0b0b", "No call / no show"),
+    ri.KIND_NOCALL:  ("#ff8f8f", "#6d0b0b", "Late notice"),
     ri.KIND_OFF:     ("#e9eef4", "#7d8896", "Off"),
     ri.KIND_UNKNOWN: ("#ddb3ff", "#4c1580", "Check with your lead"),
 }
@@ -199,7 +199,7 @@ except Exception as _ex:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _all_rows(_token: str):
+def _all_rows(token: str):
     rows = ri.history_rows(db.load_staff_weeks(), db.load_staff_overrides())
     # One person, one name: every spelling ("Luis U.", "Luis U", "Luis Urbina")
     # and every section of a person under their full name (Hari, 25 Nov).
@@ -690,7 +690,7 @@ def _sect_t(s):
 # sheet with the in-app edits, the same way the Schedule page fills its RQS
 # 1 / RQS 2 boxes ("RQS 1 + RQS 2" is one person doing both).
 @st.cache_data(ttl=300, show_spinner=False)
-def _rqs_today(iso, _token):
+def _rqs_today(iso, token):
     wk = ri.find_week_key(db.staff_week_keys(), iso)
     if not wk:
         return "", ""

@@ -208,12 +208,12 @@ ES = {
     "The name and the two tallies stay put while the days slide past. **In** "
     "is days worked, **DS** days on daily service — the pair to compare "
     "people on. Codes: a building number, **DS** daily service, **H1** "
-    "houseperson zone, **VTO** paid time off, **NC** no call, blank for off.":
+    "houseperson zone, **VTO** paid time off, **NC** late notice, blank for off.":
         "El nombre y los dos totales se quedan fijos mientras los días pasan de "
         "lado. **In** son días trabajados y **DS** días de servicio diario: con "
         "esos dos se compara a la gente. Claves: número de edificio, **DS** "
         "servicio diario, **H1** zona de houseperson, **VTO** tiempo libre "
-        "pagado, **NC** no llamó, vacío si descansó.",
+        "pagado, **NC** aviso tardío, vacío si descansó.",
 
     # ── upload and sync ──────────────────────────────────────────────────
     "Upload Housekeeping Dashboard (.xlsx)":
@@ -252,9 +252,9 @@ ES = {
     "No in-app edits to write back yet.":
         "Todavía no hay cambios de la app para escribir de vuelta.",
     "Same layout as the source workbook — section headers, formulas and the "
-    "red no-call marks all intact.":
+    "red late-notice marks all intact.":
         "El mismo formato del archivo original: encabezados, fórmulas y las "
-        "marcas rojas de no llamó, intactas.",
+        "marcas rojas de aviso tardío, intactas.",
 
     # ── the week grid ────────────────────────────────────────────────────
     "Every cell is a dropdown, with the choices that fit that role. Pick and "
@@ -267,7 +267,7 @@ ES = {
     "list and stays available from then on.":
         "Escribe lo que la lista no ofrezca. Se agrega a las opciones de ese "
         "puesto y queda disponible desde entonces.",
-    "No call / no show": "No llamó / no vino",
+    "Late notice": "Aviso tardío",
     "VTO — paid": "VTO — pagado",
     "What the numbers mean (from the workbook's own legend)":
         "Qué significan los números (según la leyenda del archivo)",

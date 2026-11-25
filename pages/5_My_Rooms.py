@@ -529,7 +529,7 @@ _dday = today.isoformat()
 
 
 @st.cache_data(ttl=10, show_spinner=False)
-def _duty_rooms(day_iso, _tick=0):
+def _duty_rooms(day_iso, tick=0):
     return _duties.assigned(day_iso)
 
 

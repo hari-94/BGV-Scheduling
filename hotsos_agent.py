@@ -587,6 +587,24 @@ def sync_sheet(cfg):
 PREREG_SECONDS = 300
 
 
+def _off_thread(fn, timeout):
+    """fn() on a fresh thread, waited for -- for Playwright work called from a
+    thread that already has a Playwright session open. {"error"} on a raise
+    or a timeout."""
+    import threading
+    box = {}
+
+    def run():
+        try:
+            box["out"] = fn()
+        except Exception as ex:
+            box["out"] = {"error": f"{type(ex).__name__}: {str(ex).splitlines()[0][:160] if str(ex) else ''}"}
+    t = threading.Thread(target=run, daemon=True, name="playwright-side")
+    t.start()
+    t.join(timeout)
+    return box.get("out") or {"error": f"no answer in {timeout} s"}
+
+
 def cfg_m365_user():
     """The Microsoft 365 account this PC was handed over to, if any."""
     try:
@@ -607,7 +625,10 @@ def sync_prereg():
     known = set(db.get_room_statuses(day) or {})
     for g in (db.load_full_schedule(day) or {}).get("groups_data") or []:
         known.update(str(r.get("room", "")).strip().upper() for r in g.get("rooms") or [])
-    rec = prereg.refresh(known)
+    # On a thread of its own: this runs on the mirror's thread, where HotSOS's
+    # Playwright session is already open, and a second sync Playwright on
+    # the same thread refuses ("Sync API inside the asyncio loop", 25 Nov).
+    rec = _off_thread(lambda: prereg.refresh(known), timeout=240)
     if rec.get("error"):
         if _PREREG_SEEN.get("err") != rec["error"]:
             log(f"pre-reg: couldn't read the tab: {rec['error']}")
@@ -626,7 +647,9 @@ def sync_prereg():
                         "host": host, "service": "m365", "action": "sign in again", "ok": True,
                         "waiting": True, "msg": msg, "username": cfg_m365_user(),
                         "by": "agent", "at": clock.stamp()})
-                out = m365_login.keep_signed_in(load_config(required=False), report, log)
+                out = _off_thread(lambda: m365_login.keep_signed_in(load_config(required=False), report, log),
+                                   timeout=300)
+                out = None if out in (None, {}) or isinstance(out, dict) else out
                 if out is not None:
                     db._upsert_key(f"{credentials.STATUS_PREFIX}{host}_m365", {
                         "host": host, "service": "m365", "action": "sign in again",

@@ -131,7 +131,7 @@ KIND_STYLE = {
 }
 KIND_LABEL = {ri.KIND_DAILY: "Daily Service", ri.KIND_WORKING: "Working",
               ri.KIND_OFF: "Off", ri.KIND_OTHER: "Other duty (counts as worked)",
-              ri.KIND_NOCALL: "No call / no show", ri.KIND_VTO: "VTO — paid",
+              ri.KIND_NOCALL: "Late notice", ri.KIND_VTO: "VTO — paid",
               ri.KIND_UNKNOWN: "Unrecognised"}
 #: Must match the Schedule page's RQS selectbox "nobody" option exactly.
 RQS_NONE = "— none —"
@@ -162,7 +162,7 @@ def week_download(week, wk_key, key_prefix):
             file_name=f"Schedule_{wk_key}.xlsx", mime=XLSX_MIME,
             key=f"{key_prefix}_dl")
         st.caption("Same layout as the source workbook — section headers, "
-                   "formulas and the red no-call marks all intact.")
+                   "formulas and the red late-notice marks all intact.")
 
 def human_ago(iso):
     try:
@@ -222,7 +222,7 @@ def _backfill_fills():
     sample = db.load_staff_week(week_keys[-1])
     if not ri.needs_fill_backfill(sample):
         return None
-    with st.spinner("Reading the red no-call marks from the stored workbook…"):
+    with st.spinner("Reading the red late-notice marks from the stored workbook…"):
         raw, _i = db.load_staff_file()
         if not raw:
             return None
@@ -249,9 +249,9 @@ try:
     _bf = _backfill_fills()
 except Exception as _ex:
     _bf = None
-    st.warning(f"Could not read the no-call marks from the stored workbook: {_ex}")
+    st.warning(f"Could not read the late-notice marks from the stored workbook: {_ex}")
 if _bf:
-    st.success(f"Picked up **{_bf[0]}** no-call/no-show marks across "
+    st.success(f"Picked up **{_bf[0]}** late-notice marks across "
                f"**{_bf[1]}** stored weeks, straight from the saved workbook — "
                f"no re-upload needed.")
 
@@ -292,7 +292,7 @@ else:
 # attendance drives time-off decisions, applying is occasional now that it
 # happens automatically, and uploading is weekly.
 @st.cache_data(ttl=300, show_spinner="Reading attendance history…")
-def _history(_token: str):
+def _history(token: str):
     """Flatten every stored week once. Keyed on a token so it refreshes when
     the workbook or the in-app edits change."""
     weeks = db.load_staff_weeks()
@@ -526,7 +526,7 @@ with tab_week:
                 tips = []
                 if kind == ri.KIND_NOCALL:
                     cls += " nocall"
-                    tips.append("No call / no show")
+                    tips.append("Late notice")
                 means = ri.legend_for(rec, raw)
                 if means: tips.append(means)
                 if rec["group"] != "hk" and ri.is_room_cover(raw):
@@ -674,7 +674,7 @@ with tab_month:
             if False else None
 
         @st.cache_data(ttl=600, show_spinner="Building the month…")
-        def _month_grid(_token, ym, grp):
+        def _month_grid(token, ym, grp):
             """Every stored day in one month, as a person-by-day grid."""
             weeks = {}
             for k in db.staff_week_keys():
@@ -810,7 +810,7 @@ with tab_month:
                        "past. **In** is days worked, **DS** days on daily service — "
                        "the pair to compare people on. Codes: a building number, "
                        "**DS** daily service, **H1** houseperson zone, **VTO** paid "
-                       "time off, **NC** no call, blank for off.")
+                       "time off, **NC** late notice, blank for off.")
 
             _hk = [r for r in _rows if r["In"]]
             if _hk and _grp == "Housekeepers":
@@ -1163,7 +1163,7 @@ with tab_plan:
         # How many each day: what the same weekday carried last week, which is
         # the honest starting point, and editable.
         @st.cache_data(ttl=300, show_spinner=False)
-        def _ds_shape(_token, _before):
+        def _ds_shape(token, before):
             """How many the most recent filled-in week put on each weekday.
 
             The week just gone is the obvious template, but upcoming weeks
@@ -1172,7 +1172,7 @@ with tab_plan:
             would put two people on a Tuesday that has taken six.
             """
             for _k in sorted(db.staff_week_keys(), reverse=True):
-                if _k >= _before:
+                if _k >= before:
                     continue
                 _w = db.load_staff_week(_k)
                 if not _w:
@@ -1487,14 +1487,14 @@ with tab_att:
             m[1].metric("Days in period", worked_days,
                         delta=f'{done_days} already worked', delta_color="off")
             m[2].metric("Avg days / person", f'{worked_days/max(len(people),1):.1f}')
-            m[3].metric("No call / no show", sum(1 for r in sub if r.get("no_call")),
+            m[3].metric("Late notice", sum(1 for r in sub if r.get("no_call")),
                         delta=f'{sum(1 for r in sub if r.get("paid_off"))} VTO days',
                         delta_color="off")
 
             # Fills are only read on upload, so weeks stored before this release
             # carry no no-call marks. Say so rather than implying nobody has any.
             if not any(r.get("no_call") for r in rows):
-                st.info("No no-call/no-show marks found. These come from the **red "
+                st.info("No late-notice marks found. These come from the **red "
                         "cells** in the workbook, which are only read when the file is "
                         "uploaded — re-upload on **Upload & sync** to pick them up for "
                         "the weeks already stored.")
@@ -1515,7 +1515,7 @@ with tab_att:
                     "So far": done,
                     "Ahead": s["n_worked"] - done,
                     "Off": s["off"],
-                    "No call": s["n_no_call"],
+                    "Late notice": s["n_no_call"],
                     "VTO (paid)": s["n_paid_off"],
                     "Daily Service": s["shifts"].get("Daily Service", 0),
                     "Room cover": s["shifts"].get("Room cover", 0),

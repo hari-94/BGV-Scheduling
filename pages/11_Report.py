@@ -829,7 +829,7 @@ RQS_COLS = [
      "is why those days have few Full Clean inspections." + NEITHER),
     ("project", "Days on the schedule", "Other work",
      "Days on their RQS row that weren't inspecting: projects, ENG, ULLR, rollaways…" + NEITHER),
-    ("nocall", None, "Last minute inform",
+    ("nocall", None, "Late notice",
      "Days the staff schedule marks red (or NCNS typed in): they let us know at the last minute "
      "that they weren't coming." + LESS),
 ]
@@ -852,7 +852,7 @@ HK_COLS = [
     ("project", "Days on the schedule", "Other work",
      "Days on their row that were other work: projects, garages, food, HSP cover, stripping "
      "linen…" + NEITHER),
-    ("nocall", None, "Last minute inform",
+    ("nocall", None, "Late notice",
      "Days the staff schedule marks red (or NCNS typed in): they let us know at the last minute "
      "that they weren't coming." + LESS),
 ]
@@ -959,7 +959,7 @@ def _card(label, t, role):
                  f'Days: {t.get("main", 0)} FC · {t.get("ds_days", 0)} DS'
                  + (f' · {t["project"]} other work' if t.get("project") else "")]
     if t.get("nocall"):
-        lines.append(f'<span class="nc">Last minute inform: {n(t["nocall"], "day", "days")}</span>')
+        lines.append(f'<span class="nc">Late notice: {n(t["nocall"], "day", "days")}</span>')
     empty = not (t.get("sched") or t.get("in") or t.get("cleaned") or t.get("nocall"))
     return (f'<div class="rp-k{" empty" if empty else ""}"><div class="kt">{e(label)}</div>'
             f'<div class="kv">{main}</div>'
@@ -1021,13 +1021,13 @@ def show(role):
     if role == "rqs":
         tot = sum(r.get("in", 0) for r in rows)
         sub = (f"{people} · <b>{tot:,}</b> rooms inspected · "
-               f"{sum(r.get('nocall', 0) for r in rows)} days of last minute inform")
+               f"{sum(r.get('nocall', 0) for r in rows)} days of late notice")
     else:
         tot = sum(r.get("cleaned", 0) for r in rows)
         sub = (f"{people} · <b>{tot:,}</b> rooms cleaned "
                f"({sum(r.get('fc', 0) for r in rows):,} Full Clean · "
                f"{sum(r.get('ds', 0) for r in rows):,} Daily Service) · "
-               f"{sum(r.get('nocall', 0) for r in rows)} days of last minute inform")
+               f"{sum(r.get('nocall', 0) for r in rows)} days of late notice")
     report_table.table(html=table_html(rows, role, start, end, f"{label} · {period}{so_far}", sub),
                        css=TABLE_CSS, key=f"rp_table_{role}")
     st.markdown('<div class="rp-hint">Click a column name to sort by it — again to reverse · '
@@ -1054,13 +1054,13 @@ EXCEL = {
             ("Days inspecting (days)", "days_in"), ("Rooms per day", "per_day"),
             ("On the schedule: total (days)", "sched"), ("RQS 1 (days)", "rqs1"),
             ("RQS 2 (days)", "rqs2"), ("Other work (days)", "project"),
-            ("Last minute inform (days)", "nocall"), ("Dust n Vac inspected (rooms)", "dv"),
+            ("Late notice (days)", "nocall"), ("Dust n Vac inspected (rooms)", "dv"),
             ("With another team (days)", "other_team"), ("VTO (days)", "vto")],
     "hk": [("Rank", "rank"), ("Name", "person"), ("Rooms cleaned (rooms)", "cleaned"),
            ("Full Clean (rooms)", "fc"), ("Daily Service (rooms)", "ds"),
            ("On the schedule: Full Clean (days)", "main"),
            ("On the schedule: Daily Service (days)", "ds_days"), ("Other work (days)", "project"),
-           ("Last minute inform (days)", "nocall"), ("Rooms on the sheet (days)", "days_clean"),
+           ("Late notice (days)", "nocall"), ("Rooms on the sheet (days)", "days_clean"),
            ("With another team (days)", "other_team"), ("VTO (days)", "vto")],
 }
 
@@ -1120,12 +1120,12 @@ def _excel(who, start, end, token):
              "Rooms cleaned (rooms)", "Full Clean cleaned (rooms)",
              "Daily Service cleaned (rooms)", "On the schedule (days)",
              "Full Clean / RQS (days)", "Daily Service (days)", "Other work (days)",
-             "Last minute inform (days)", "RQS 1 (days)", "RQS 2 (days)"], by_month)
+             "Late notice (days)", "RQS 1 (days)", "RQS 2 (days)"], by_month)
     sheets["By day"] = (["Name", "Role", "Date", "Day", "On the schedule", "Sheet tab",
                          "Rooms inspected (rooms)", "Inspected rooms",
                          "Full Clean cleaned (rooms)", "Full Clean rooms",
                          "Daily Service cleaned (rooms)", "Daily Service rooms",
-                         "Dust n Vac inspected (rooms)", "Last minute inform"], by_day)
+                         "Dust n Vac inspected (rooms)", "Late notice"], by_day)
     lo = rd.loose_for(res, start, end)
     notes = [f"BGV Peak 8 report — {who} — {start} to {end}",
              f"Rooms: GC8 Inspections, synced {sync.get('at', '')} ({sync.get('source', '')}). "
