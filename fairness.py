@@ -27,6 +27,22 @@ import datetime as _dt
 
 WINDOW_DAYS = 365            # the whole year (Hari, 25 Nov: "to be fair")
 HALF_LIFE_DAYS = 60          # a day this old counts half as much as yesterday
+#: A housekeeper's room is worth its work (Hari, 25 Nov): a Full Clean (or a
+#: deep clean) is ~94 min on the charts, a Daily Service ~28. Dust n Vac is
+#: left out -- housekeepers rarely have it. An RQS counts Full Clean (and deep
+#: clean) inspections only -- report_data's "in" is exactly those.
+HK_POINTS = {"fc": 3.0, "ds": 1.0}
+
+
+def points(slot_or_tally, role) -> float:
+    """The work in a day's slot (or a tally): points for a housekeeper, Full
+    Clean inspections for an RQS."""
+    def n(k):
+        v = slot_or_tally.get(k, 0)
+        return len(v) if isinstance(v, (list, tuple)) else (v or 0)
+    if role == "rqs":
+        return float(n("in"))
+    return sum(w * n(k) for k, w in HK_POINTS.items())
 KEY = "fair_share"            # app_settings: {"days": {iso: the order a build used}}
 SWITCH_KEY = "fair_share_on"  # {"on": false} turns the ordering off
 KEEP_DAYS = 21                # recorded days kept
@@ -49,7 +65,9 @@ def ledger(end=None, window=WINDOW_DAYS):
     busy  = days they had rooms (cleaned / inspected)
     free  = sched - busy: on the schedule, no rooms
     rooms = rooms cleaned (housekeeper) or inspected (RQS)
-    rate  = rooms per day on the schedule, recent days weighted more (each
+    mix   = {"fc", "ds"}: rooms of each kind (an RQS: {"fc": inspected})
+    points= HK_POINTS over the mix (an RQS: Full Clean inspections)
+    rate  = points per day on the schedule, recent days weighted more (each
             day counts 0.5 ** (age / HALF_LIFE_DAYS)): what decides the order.
             A new hire, a part-timer or someone back from leave is compared
             by their days on, not by a total they couldn't have reached;
@@ -77,14 +95,19 @@ def ledger(end=None, window=WINDOW_DAYS):
         if role not in ("hk", "rqs"):
             continue
         t = rd.tally((res.get("days") or {}).get(p, {}), frm, to, role)
+        by_day = (res.get("days") or {}).get(p, {})
         if role == "hk":
             sched = t.get("main", 0) + t.get("ds_days", 0)
-            busy, rooms = t.get("days_clean", 0), t.get("cleaned", 0)
+            rooms = t.get("cleaned", 0)
+            busy = t.get("days_clean", 0)
+            mix = {"fc": t.get("fc", 0), "ds": t.get("ds", 0)}
         else:
             sched, busy, rooms = t.get("sched", 0), t.get("days_in", 0), t.get("in", 0)
+            mix = {"fc": t.get("in", 0)}
         sched = max(sched, busy)              # a day with rooms was a day on
         people[p] = {"role": role, "sched": sched, "busy": busy,
-                     "free": max(0, sched - busy), "rooms": rooms,
+                     "free": max(0, sched - busy), "rooms": rooms, "mix": mix,
+                     "points": round(points(t, role), 1),
                      "rate": _weighted_rate((res.get("days") or {}).get(p, {}), frm, to, role)}
     return {"from": frm, "to": to, "people": people}
 
@@ -98,7 +121,7 @@ def _weighted_rate(by_day, frm, to, role):
         if not (frm <= iso <= to):
             continue
         w = 0.5 ** ((end - _dt.date.fromisoformat(iso)).days / HALF_LIFE_DAYS)
-        n = len(slot.get("in", ())) if role == "rqs" else len(slot.get("fc", ())) + len(slot.get("ds", ()))
+        n = points(slot, role)
         mine = [e for e in slot.get("sched", ()) if e[0] == role and e[2] in rd.WORKED]
         kinds = {e[2] for e in mine}
         # A day on: in the team, and not a project day alone (as the ledger's sched)
@@ -178,7 +201,7 @@ def snapshot(day, led, hk_order, rqs_order, table=None, attendant_list=None, not
         for i, n in enumerate(names, 1):
             r = lookup(n, led, table, attendant_list)
             out.append({"rank": i, "name": n, "rooms": r.get("rooms", 0), "free": r.get("free", 0),
-                        "rate": r.get("rate"),
+                        "rate": r.get("rate"), "mix": r.get("mix") or {}, "points": r.get("points"),
                         "busy": r.get("busy", 0), "sched": r.get("sched", 0), "new": not r,
                         "note": notes.get(n, "")})
         return out

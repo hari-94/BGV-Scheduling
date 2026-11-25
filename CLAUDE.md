@@ -483,7 +483,10 @@ day on the schedule over the year** first (Hari, 25 Nov: "the whole year, to
 be fair"; cleaned for a housekeeper, inspected for an RQS -- `report_data`'s
 own counts, so the Report and the build can't disagree), each day weighted
 0.5 ** (age / 60 days) so recent weeks count more (`rate`,
-`_weighted_rate`); then the larger share of days left free; then fewer rooms;
+`_weighted_rate`). Work is points for a housekeeper -- a Full Clean (or deep
+clean) room 3, a Daily Service 1, Dust n Vac not counted (`HK_POINTS`, Hari
+25 Nov) -- and Full Clean inspections for an RQS. Then the larger share of
+days left free; then fewer rooms;
 level people keep the sheet's order. Per day, not a total: a total over a
 year favours a new hire or someone back from leave for months. Any day with
 rooms counts as a day on (older sheets' first-name rows matched no schedule

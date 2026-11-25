@@ -41,12 +41,17 @@ class NeedOrder(unittest.TestCase):
         late = {"2025-12-01": day(2), "2026-11-20": day(8)}
         r_early = fairness._weighted_rate(early, "2025-11-25", "2026-11-24", "hk")
         r_late = fairness._weighted_rate(late, "2025-11-25", "2026-11-24", "hk")
-        self.assertLess(r_early, 3)
-        self.assertGreater(r_late, 7)
+        self.assertLess(r_early, 3 * 3)        # mostly the 2 recent Full Cleans (6 points)
+        self.assertGreater(r_late, 3 * 7)      # mostly the 8 recent ones (24 points)
 
     def test_a_day_with_rooms_is_a_day_on_whatever_the_sheet_said(self):
         by_day = {"2026-11-20": {"fc": ["a", "b", "c", "d"], "sched": []}}
-        self.assertEqual(fairness._weighted_rate(by_day, "2026-11-01", "2026-11-24", "hk"), 4.0)
+        self.assertEqual(fairness._weighted_rate(by_day, "2026-11-01", "2026-11-24", "hk"), 12.0)
+
+    def test_full_clean_outweighs_daily_service_and_dust_n_vac_is_not_counted(self):
+        day = {"fc": ["a"], "ds": ["b", "c"], "dvc": ["d", "e"], "in": ["x"]}
+        self.assertEqual(fairness.points(day, "hk"), 3 + 2)
+        self.assertEqual(fairness.points(day, "rqs"), 1)      # Full Clean inspections only
 
     def test_a_first_name_alone_finds_the_one_person_with_it(self):
         self.assertEqual(fairness.lookup("Robin", LED, {}, [])["rooms"], 20)

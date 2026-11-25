@@ -604,11 +604,13 @@ def fair_tab():
     fresh.latest("fairness")
     st.markdown(_FS_CSS, unsafe_allow_html=True)
     st.markdown('<div class="rp-h1">⚖️ Fair share</div><div class="rp-src">'
-                '<b>The rule:</b> over the whole year, whoever has averaged the <b>fewest rooms '
+                '<b>The rule:</b> over the whole year, whoever has averaged the <b>least work '
                 'per day on the schedule</b> gets work first, and the last few weeks count more '
                 'than months ago. When there are more people than work, whoever has averaged the '
                 '<b>most</b> gets the day free. Per day, so a new hire, a part-timer or someone '
-                'back from leave is compared fairly.</div>', unsafe_allow_html=True)
+                'back from leave is compared fairly.<br><b>Work</b> for a housekeeper is points: '
+                'a Full Clean room <b>3</b>, a Daily Service <b>1</b>. '
+                'For an RQS it is <b>Full Clean inspections</b> only.</div>', unsafe_allow_html=True)
     rec = (db._load_key(fairness.KEY) or {}).get("days") or {}
     today = clock.today().isoformat()
     days = sorted(set(rec) | {today}, reverse=True)
@@ -655,6 +657,16 @@ def fair_tab():
         if i and g.get("service_type") == "Full Clean":
             rooms[i] = rooms.get(i, 0) + len(g.get("rooms") or [])
 
+    def mix_txt(r, key):
+        """This year's rooms by kind: "541 FC · 621 DS", or "926 FC inspected"."""
+        m = r.get("mix") or {}
+        if key != "hk":
+            return f'{m.get("fc", r.get("rooms", 0)):,} FC inspected'
+        if not m:
+            return f'{r.get("rooms", 0):,} rooms'
+        return " · ".join(f"{m.get(k, 0):,} {lab}" for k, lab in (("fc", "FC"), ("ds", "DS"))
+                          if m.get(k))  or "none"
+
     def rate(r):
         """Rooms per day on the schedule over the year, recent days counting
         more -- the number the order is made on (fairness.ledger)."""
@@ -678,6 +690,7 @@ def fair_tab():
         if not rows:
             continue
         working, free, odd, most_worked = verdict(rows, got)
+        u = "points a day" if key == "hk" else "Full Clean inspections a day"
         n_free = sum(1 for r in rows if not got.get(r["name"]))
         st.markdown(f"#### {title}")
         c1, c2, c3 = st.columns(3)
@@ -687,12 +700,12 @@ def fair_tab():
         if not free:
             st.success("✅ Everyone on the schedule had work this day.")
         elif not odd:
-            st.success(f"✅ Fair: the {len(free)} free have averaged more rooms a day this year "
+            st.success(f"✅ Fair: the {len(free)} free have averaged more {u} this year "
                        f"({min(rate(r) for r in free):.1f}+) than anyone who worked "
                        f"(at most {most_worked:.1f}).")
         else:
             st.warning("⚠️ Worth a look: " + "; ".join(
-                f"**{r['name']}** was free averaging only {rate(r):.1f} rooms a day" for r in odd)
+                f"**{r['name']}** was free averaging only {rate(r):.1f} {u}" for r in odd)
                 + f" — someone who worked averages {most_worked:.1f}. (A sheet change after the build, "
                 "or a building with no chart left, can do this.)")
 
@@ -707,24 +720,24 @@ def fair_tab():
             if r.get("note"):
                 return "Has a set role this day, so the order doesn't apply."
             if r.get("new"):
-                return ("New: no rooms yet this year, so first in line." if g else
-                        "New: no rooms yet this year — should have been first in line.")
+                return ("New: no work yet this year, so first in line." if g else
+                        "New: no work yet this year — should have been first in line.")
             n = rate(r)
             if g:
                 if n < avg:
-                    return (f"Averages {n:.1f} rooms a day, {avg - n:.1f} below the team ({avg:.1f}) — "
-                            "behind on rooms, so they get work first.")
-                return (f"Averages {n:.1f} rooms a day ({n - avg:.1f} above the team's {avg:.1f}) — "
+                    return (f"Averages {n:.1f} {u}, {avg - n:.1f} below the team ({avg:.1f}) — "
+                            "behind on work, so they get work first.")
+                return (f"Averages {n:.1f} {u} ({n - avg:.1f} above the team's {avg:.1f}) — "
                         "there was enough work for them too.")
             if r["name"] in odd_names:
-                return (f"Averages only {n:.1f} rooms a day, yet someone averaging {most_worked:.1f} "
+                return (f"Averages only {n:.1f} {u}, yet someone averaging {most_worked:.1f} "
                         "worked — this one wasn't decided by fair share.")
-            return (f"Averages {n:.1f} rooms a day — more than anyone who worked (at most "
+            return (f"Averages {n:.1f} {u} — more than anyone who worked (at most "
                     f"{most_worked:.1f}), so this is their turn for a lighter day.")
 
         # One row per person, the reason in full under the name (Hari, 25 Nov:
         # "make sure the reasons are clearly visible" -- a table cell cut them off).
-        st.caption(f"Team average: **{avg:.1f} rooms a day on** · highest: **{most:.1f}** "
+        st.caption(f"Team average: **{avg:.1f} {u} on** · highest: **{most:.1f}** "
                    "(this year, recent weeks counting more). Fewest first.")
         out = ['<div class="fs-list">']
         for r in sorted(rows, key=lambda r: (rate(r), r["rank"])):
@@ -743,7 +756,7 @@ def fair_tab():
                 f'<span class="fs-name">{html.escape(r["name"])}{" <i>new</i>" if r.get("new") else ""}</span>'
                 f'<span class="fs-tag">{html.escape(tag)}</span></div>'
                 f'<div class="fs-bar"><span class="fs-track"><i style="width:{w:.0f}%"></i></span>'
-                f'<span class="fs-num"><b>{rate(r):.1f}</b> a day · {r.get("rooms", 0):,} this year</span></div>'
+                f'<span class="fs-num"><b>{rate(r):.1f}</b> {u} · this year: {mix_txt(r, key)}</span></div>'
                 f'<div class="fs-why">{html.escape(why(r, g))}</div></div>')
         out.append("</div>")
         st.markdown("".join(out), unsafe_allow_html=True)
@@ -753,7 +766,10 @@ def fair_tab():
             f"- **Rooms** are rooms cleaned (housekeepers) or inspected (RQS) from "
             f"{snap.get('from')} to {snap.get('to')}, counted from the GC8 Inspections tabs — "
             "the same counts as the Rooms view.\n"
-            "- **Rooms a day** = rooms ÷ days on the schedule. Each day counts by how recent it "
+            "- **Housekeepers:** points = 3 a Full Clean (or deep clean) room, 1 a Daily Service — "
+            "roughly the minutes each takes on the charts (≈94 and ≈28). Dust n Vac isn't counted. "
+            "**RQS:** Full Clean (and deep clean) inspections only.\n"
+            "- **A day** = that ÷ days on the schedule. Each day counts by how recent it "
             f"is: a day {fairness.HALF_LIFE_DAYS} days ago counts half, twice that a quarter. "
             "Any day with rooms counts as a day on.\n"
             "- People level on that: the one left free more often goes first.\n"
@@ -766,8 +782,8 @@ def fair_tab():
             if rows:
                 st.markdown(f"**{title}**")
                 st.dataframe(pd.DataFrame([{
-                    "Order used": r["rank"], "Person": r["name"], "Rooms a day": round(rate(r), 2),
-                    "Rooms": r["rooms"],
+                    "Order used": r["rank"], "Person": r["name"], "A day": round(rate(r), 2),
+                    "This year": mix_txt(r, key),
                     "Days on the schedule": r["sched"], "Days with rooms": r["busy"],
                     "Free days": r["free"], "Note": r.get("note") or ("new" if r.get("new") else "")}
                     for r in rows]), hide_index=True, use_container_width=True)
