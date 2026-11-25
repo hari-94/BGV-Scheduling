@@ -132,6 +132,20 @@ html[data-theme="dark"] .theme .moon{display:block;}
 .dc .sub{display:block;font-size:11.5px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .dc.on{border-color:var(--c);background:var(--accbg);box-shadow:0 0 0 4px var(--glow);}
 .dc.zero .n{opacity:.45;}
+/* each service type and its progress */
+.svcs{display:grid;gap:10px;}
+.sv{text-align:left;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:9px 12px;
+  cursor:pointer;color:var(--ink);min-width:0;transition:border-color .2s,background .2s,box-shadow .2s;}
+.sv:hover{border-color:var(--acc);}
+.sv.on{border-color:var(--acc);background:var(--accbg);box-shadow:0 0 0 3px var(--glow);}
+.sv .st{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;white-space:nowrap;}
+.sv .st > b{overflow:hidden;text-overflow:ellipsis;}
+.sv .ct{color:var(--ink2);font-size:12.5px;}
+.sv .ct b{color:var(--ink);font-size:15px;}
+.sv .sb{display:flex;height:7px;border-radius:999px;overflow:hidden;background:var(--line2);margin:7px 0 5px;}
+.sv .sb i{display:block;height:100%;transition:width .7s cubic-bezier(.22,1,.36,1);}
+.sv .ss{display:block;font-size:11.5px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+@media (max-width:760px){ .svcs{grid-template-columns:1fr !important;gap:6px;} }
 /* housekeeping's stages: one slim row of filters */
 .pills{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
 .pl-list{display:flex;gap:6px;flex-wrap:wrap;}
@@ -302,6 +316,7 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
     <button class="btn tr" id="clear" title="Clear the search and the filter">Clear filter</button>
   </div>
   <div class="desk" id="desk"></div>
+  <div class="svcs" id="svcs"></div>
   <div class="pills tr" id="pills"></div>
   <div class="wrap tr" id="wrap"><table><thead id="head"></thead><tbody id="body"></tbody></table>
     <div class="empty" id="empty" style="display:none"></div></div>
@@ -313,7 +328,7 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
   var root = document.getElementById("root");
   var qEl = document.getElementById("q"), sbox = document.getElementById("sbox");
   var args = {rows: []}, pending = null, firstData = true;
-  var state = {q: "", tile: "all", sort: "room", dir: 1, open: null, saving: {}};
+  var state = {q: "", tile: "all", svc: "", sort: "room", dir: 1, open: null, saving: {}};
   var prevStatus = {}, flashAt = {}, lastCounts = {}, lastAct = null, enterNext = false;
   var REDUCED = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -506,6 +521,43 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
     });
   }
 
+  // Each service type and how far it has got (Hari, 25 Nov). A click keeps
+  // the list to that service; the stage filters below then count it alone.
+  var SVC_ORDER = {FC: 0, IH: 1, DS: 2, "D&V": 3};
+  var STAGES = [["inspected", "inspected", "#1a9e4b"], ["toinspect", "cleaned", "#2f80ed"],
+                ["cleaning", "cleaning", "#e89611"], ["awaiting", "not started", "#94a3b8"],
+                ["other", "DND / refused / later", "#a855f7"]];
+  function drawSvcs(rows) {
+    var box = document.getElementById("svcs"), by = {};
+    rows.forEach(function (r) {
+      var k = r.svc || "?";
+      if (!by[k]) { by[k] = {name: r.service || k, n: 0, c: {}}; }
+      by[k].n += 1;
+      var b = bucket(r);
+      by[k].c[b] = (by[k].c[b] || 0) + 1;
+    });
+    var keys = Object.keys(by).sort(function (a, b) {
+      var oa = a in SVC_ORDER ? SVC_ORDER[a] : 9, ob = b in SVC_ORDER ? SVC_ORDER[b] : 9;
+      return oa - ob || by[b].n - by[a].n;
+    });
+    if (state.svc && !by[state.svc]) { state.svc = ""; }
+    box.style.gridTemplateColumns = "repeat(" + Math.max(keys.length, 1) + ",minmax(0,1fr))";
+    box.innerHTML = keys.map(function (k) {
+      var v = by[k], ins = v.c.inspected || 0;
+      var segs = STAGES.map(function (st) {
+        var n = v.c[st[0]] || 0;
+        return n ? '<i style="width:' + (100 * n / v.n) + '%;background:' + st[2] + '"></i>' : "";
+      }).join("");
+      var tip = STAGES.map(function (st) { return (v.c[st[0]] || 0) + " " + st[1]; }).join(" \u00b7 ");
+      var left = (v.c.awaiting || 0) + (v.c.cleaning || 0);
+      return '<button class="sv tr' + (state.svc === k ? " on" : "") + '" data-svc="' + esc(k) + '" title="' + esc(tip) + '">' +
+        '<span class="st"><b>' + esc(v.name) + '</b><span class="ct"><b>' + ins + '</b> / ' + v.n + ' ready</span></span>' +
+        '<span class="sb">' + segs + '</span>' +
+        '<span class="ss">' + (v.c.toinspect || 0) + ' cleaned \u00b7 ' + left + ' to go' +
+        ((v.c.other || 0) ? ' \u00b7 ' + v.c.other + ' DND/refused' : '') + '</span></button>';
+    }).join("");
+  }
+
   function drawPills(rows) {
     var box = document.getElementById("pills");
     if (!box.firstChild) {
@@ -637,9 +689,11 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
     sbox.classList.toggle("has", !!state.q);
     var inSearch = rows.filter(function (r) { return matches(r, ts); });
     drawDesk(inSearch);
-    drawPills(inSearch);
+    drawSvcs(inSearch);
+    var inSvc = state.svc ? inSearch.filter(function (r) { return (r.svc || "?") === state.svc; }) : inSearch;
+    drawPills(inSvc);
     var test = TEST[state.tile] || TEST.all;
-    var shown = rows.filter(function (r) { return matches(r, ts) && test(r); });
+    var shown = inSvc.filter(function (r) { return test(r); });
     // The Pre-Reg list: rooms still to be ready first, then the ready ones.
     var preFirst = state.tile === "prereg";
     shown.sort(function (a, b) {
@@ -694,7 +748,7 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
   qEl.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { qEl.value = ""; state.q = ""; draw(); } });
   document.getElementById("qx").addEventListener("click", function () { qEl.value = ""; state.q = ""; draw(); qEl.focus(); });
   document.getElementById("clear").addEventListener("click", function () {
-    qEl.value = ""; state.q = ""; state.tile = "all"; state.open = null; applyPending(); enterNext = true; draw();
+    qEl.value = ""; state.q = ""; state.tile = "all"; state.svc = ""; state.open = null; applyPending(); enterNext = true; draw();
   });
   document.addEventListener("keydown", function (ev) {
     if (ev.key === "/" && document.activeElement !== qEl && !(ev.target && /INPUT|SELECT|TEXTAREA/.test(ev.target.tagName))) {
@@ -703,8 +757,13 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
   });
 
   root.addEventListener("click", function (ev) {
-    var t = ev.target.closest ? ev.target.closest("[data-tile],[data-sort],[data-open],[data-do]") : null;
+    var t = ev.target.closest ? ev.target.closest("[data-tile],[data-svc],[data-sort],[data-open],[data-do]") : null;
     if (!t) { return; }
+    if (t.hasAttribute("data-svc")) {
+      var v = t.getAttribute("data-svc");
+      state.svc = state.svc === v ? "" : v;
+      enterNext = true; draw(); return;
+    }
     if (t.hasAttribute("data-tile")) {
       var k = t.getAttribute("data-tile");
       state.tile = (state.tile === k && k !== "all") ? "all" : k;
