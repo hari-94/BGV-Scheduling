@@ -6,6 +6,7 @@ worked. Everyone signed in gets this page, housekeepers included.
 """
 import streamlit as st
 import sys, os, re, datetime
+import hashlib, json
 import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -188,13 +189,37 @@ if not week_keys:
     st.info(i18n.t("home.no_sheet_body"))
     st.stop()
 
+try:
+    fresh.latest("staff_names")     # one_name_each is newer than a running app
+    import staff_names
+    _aliases = staff_names.aliases()
+except Exception as _ex:
+    print(f"[my_home] name directory: {_ex}")
+    staff_names, _aliases = None, {}
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _all_rows(_token: str):
-    return ri.history_rows(db.load_staff_weeks(), db.load_staff_overrides())
+    rows = ri.history_rows(db.load_staff_weeks(), db.load_staff_overrides())
+    # One person, one name: every spelling ("Luis U.", "Luis U", "Luis Urbina")
+    # and every section of a person under their full name (Hari, 25 Nov).
+    try:
+        return staff_names.one_name_each(rows, _aliases)
+    except Exception as ex:
+        print(f"[my_home] names left as typed: {ex}")
+        return rows
 
 meta = db.load_staff_meta() or {}
 overrides = db.load_staff_overrides()
-rows = _all_rows(f'{meta.get("uploaded_at","")}|{len(week_keys)}|{len(overrides)}')
+# Every week saved -- an import, an edit, a spelling renamed to the full name --
+# bumps the weeks' version. Keyed only on the upload time and the counts, the
+# rows stayed five minutes stale after "Luis U." became "Luis Urbina" (25 Nov):
+# nothing counted had changed, so his week still read "not on the sheet".
+_wv_key = getattr(db, "WEEKS_VERSION_KEY", "")
+_weeks_v = ((db._load_key(_wv_key) or {}).get("v", "") if _wv_key else "")
+_ov_sig = hashlib.md5(json.dumps(overrides, sort_keys=True, default=str).encode()).hexdigest()[:12]
+_al_sig = hashlib.md5(json.dumps(_aliases, sort_keys=True).encode()).hexdigest()[:12]
+rows = _all_rows(f'{meta.get("uploaded_at","")}|{len(week_keys)}|{_ov_sig}|{_weeks_v}|{_al_sig}')
 index = ri.people_index(rows)
 
 
@@ -255,8 +280,24 @@ can_browse = auth.can("can_manage_users")
 _me_pid = mine
 
 if mine is None or can_browse:
-    order = sorted(index, key=lambda p: index[p]["label"].lower())
-    labels = [person_label(index[p], now_section.get(p)) for p in order]
+    # Current staff only, one plain name each (Hari, 25 Nov): two years of the
+    # sheet listed everyone who ever worked here, and each spelling and each
+    # second section ("Nancy Ramirez · Houseperson PM") as a person of its own.
+    # Current = on the sheet in the last four weeks or any week posted ahead,
+    # and not marked as left on the Report page.
+    _cut = (clock.today() - datetime.timedelta(days=28)).isoformat()
+    try:
+        _left = {ri.norm_name(staff_names.canon(n, _aliases) if staff_names else n)
+                 for n in (db._load_key("staff_left") or {})}
+    except Exception:
+        _left = set()
+    _current = {r["pid"] for r in rows if r["date"] >= _cut and r["pid"].split("@")[0] not in _left}
+    order = sorted((p for p in index if p in _current or p == mine),
+                   key=lambda p: index[p]["label"].lower())
+    _names = [index[p]["label"] for p in order]
+    # Two people of one name (a visitor from another property): say which.
+    labels = [person_label(index[p], now_section.get(p)) if _names.count(_names[i]) > 1 else _names[i]
+              for i, p in enumerate(order)]
     # Somebody the schedule doesn't know starts on nobody, not on the first
     # name in the list: unmatched, Edgar Onofre Moran was shown Adrian Lopez's
     # week (23 Oct) until he changed it.
@@ -281,7 +322,9 @@ def _base(pid):
 
 
 _mine_all = {p for p in index if _base(p) == _base(mine)} | {mine}
-if len(_mine_all) > 1:
+# Every spelling and section is one id now (staff_names.one_name_each), so a
+# day on two rows shares an id too: always fold each day to one row.
+if True:
     _days = {}
     for _r in rows:
         if _r["pid"] not in _mine_all:

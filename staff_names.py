@@ -58,10 +58,66 @@ def full(name: str, table=None) -> str:
     table = aliases() if table is None else table
     base, sep, suffix = name.partition(SUFFIX)
     if base not in table:
-        # The sheet and old logins shout some names ("ARACELI", "DIANIS").
-        low = {k.lower(): v for k, v in table.items()}
-        return low.get(base.lower(), base) + sep + suffix
+        # The sheet and old logins shout some names ("ARACELI", "DIANIS"), and
+        # a trailing dot comes and goes: "Luis U." one week, "Luis U" the next
+        # (25 Nov) -- each missed the table and became a person of its own.
+        low = {_key(k): v for k, v in table.items()}
+        return low.get(_key(base), base) + sep + suffix
     return table[base] + sep + suffix
+
+
+def _key(name) -> str:
+    """How a typed name is looked up: case, spacing and a trailing dot don't count."""
+    return " ".join(str(name or "").split()).rstrip(".").strip().lower()
+
+
+def canon(name, table=None, attendant_list=None) -> str:
+    """The one name a person goes by in a list: the approved full name, else a
+    full name the directory can't get wrong ("Jose Z" -> Jose Zendejas), else
+    HotSOS's own name when only one attendant fits ("Ana H." -> Ana Hernandez),
+    else the name as typed -- never with a section after it."""
+    table = aliases() if table is None else table
+    base = " ".join(str(name or "").partition(SUFFIX)[0].split())
+    hit = full(base, table)                      # the approved table first
+    if hit != base:
+        return hit.partition(SUFFIX)[0].strip()
+    words = base.rstrip(".").split()
+    # A first and a last name is a full name already: "Ana Centeno" is not
+    # "Ana Caisa" because both begin "Ana C" (resolve matches only an initial).
+    if len(words) >= 2 and len(words[-1].rstrip(".")) > 1:
+        return base
+    # A first name, or a first name and an initial: the one person it can be
+    # among the approved full names and HotSOS's attendants together -- "Ana C."
+    # stays as typed while HotSOS has an Ana Caisa and an Ana Centeno.
+    people = ({v.partition(SUFFIX)[0].strip() for v in table.values()}
+              | {a["label"] for a in (attendant_list or [])})
+    first = words[0].rstrip(".").lower() if words else ""
+    init = words[1].rstrip(".")[:1].lower() if len(words) > 1 else None
+    hits = {p for p in people if p.split() and p.split()[0].lower() == first
+            and (init is None or (len(p.split()) > 1 and p.split()[1][:1].lower() == init))}
+    return hits.pop() if len(hits) == 1 else base
+
+
+def one_name_each(rows, table=None):
+    """roster_import.history_rows with every spelling and every section of a
+    person under one name and one id (Hari, 25 Nov): "Luis U.", "Luis U" and
+    "Luis Urbina" were three people in My Home's picker, and a second section
+    ("Nancy Ramirez · Houseperson PM") one more."""
+    import roster_import as ri
+    table = aliases() if table is None else table
+    try:
+        att = attendants()
+    except Exception:
+        att = []
+    memo, out = {}, []
+    for r in rows:
+        typed = r.get("person") or ""
+        if typed not in memo:
+            memo[typed] = canon(typed, table, att)
+        name = memo[typed]
+        out.append(dict(r, person=name,
+                        pid=ri.norm_name(name) + (f"@{r['home']}" if r.get("home") else "")))
+    return out
 
 
 def resolve(typed: str, table=None) -> str:

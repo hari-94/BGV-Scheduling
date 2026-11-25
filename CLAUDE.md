@@ -1030,6 +1030,23 @@ compared the display name to the chart's housekeeper exactly and showed
 "Senia" 0 rooms beside her four on Senia Fernandez's chart; it now matches
 with `assignments.match_name`, as My Rooms does.
 
+**One name per person, current staff only** (Hari, 25 Nov). The sheet wrote
+"Luis Urbina" for two years, then "Luis U." one week and "Luis U" the next:
+each became a person of its own -- in the 5 AM build's roster (his full name
+marked absent beside the short one present) and on My Home (his week "not on
+the sheet"). `staff_names.full` now ignores case, spacing and a trailing dot;
+`staff_names.canon` gives the one name a person goes by (the approved table,
+else the single person a first name or a first name and initial can be among
+the table and HotSOS's attendants -- a full surname is never swapped, so "Ana
+Centeno" is not "Ana Caisa"); `one_name_each` puts every spelling and section
+of a person under that name and one pid. My Home's picker lists only people
+on the sheet in the last four weeks or ahead, minus `staff_left`, as plain
+names (~200 entries to ~85), and its rows refresh as soon as any week is saved
+(the weeks' version marker is in the cache key; it used to wait five minutes
+when nothing counted had changed). The approved table took the short forms
+then in use (90 names), so imports store full names; first names only
+(Matilda, Karla, Gerardo, Steven...) wait for their surnames.
+
 **Test what a person does.** Two bugs survived a passing test because the test
 committed a value with a rerun before clicking, which nobody does.
 
