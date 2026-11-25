@@ -586,6 +586,7 @@ _FS_CSS = """<style>
 .fs-tag{font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 9px;background:#eef2f7;color:#334155;}
 .work .fs-tag{background:#e3f5ea;color:#14532d;} .free .fs-tag{background:#e6eefb;color:#12447e;}
 .odd .fs-tag{background:#fde7d4;color:#8a3b05;} .role .fs-tag{background:#efe7fb;color:#4c1d95;}
+.fs-row.away{border-top-color:#94a3b8;background:#f6f7f9;} .away .fs-tag{background:#fde2e2;color:#8a1f1f;}
 .fs-bar{display:flex;flex-direction:column;gap:3px;}
 .fs-track{display:block;width:100%;height:6px;border-radius:999px;background:#edf0f4;overflow:hidden;}
 .fs-track i{display:block;height:100%;background:#64748b;border-radius:999px;}
@@ -729,26 +730,50 @@ def fair_tab():
         """People left free who had fewer rooms than someone who worked --
         the cases worth a look. A note (RQS 1/2, light duty) or a newcomer
         is explained, not counted."""
-        plain = [r for r in rows if not r.get("note") and not r.get("new")]
+        plain = [r for r in rows if not r.get("note") and not r.get("new") and not r.get("away")]
         working = [r for r in plain if got.get(r["name"])]
         free = [r for r in plain if not got.get(r["name"])]
         most_worked = max((rate(r) for r in working), default=None)
         odd = [r for r in free if most_worked is not None and rate(r) < most_worked]
         return working, free, odd, most_worked
 
+    # Who wasn't in that day, off the staff sheet as it is now: a red cell is a
+    # late notice (Hari, 25 Nov: Yadira was red and read "Free -- worth a
+    # look"); a day off or VTO marked after the build likewise. Shown as such
+    # and left out of the free count and the check.
+    away = {}
+    try:
+        import roster_import as _ri
+        _wk = _ri.find_week_key(db.staff_week_keys(), pick)
+        if _wk:
+            for _r in _ri.history_rows({_wk: db.load_staff_week(_wk)}, db.load_staff_overrides()):
+                if _r["date"] != pick:
+                    continue
+                if _r.get("no_call"):
+                    away[full(_r["person"])] = "Late notice"
+                elif _r.get("kind") == "off":
+                    away.setdefault(full(_r["person"]), "Off")
+                elif _r.get("kind") == "vto":
+                    away.setdefault(full(_r["person"]), "VTO")
+    except Exception as _ex:
+        print(f"[report] fair share, who was away: {_ex}")
+
     for title, key, got, unit in (("Housekeepers", "hk", mins, "min of rooms"), ("RQS", "rqs", rooms, "rooms to inspect")):
-        rows = snap.get(key) or []
+        rows = [dict(r, away=away.get(full(r["name"]))) if away.get(full(r["name"])) and not got.get(r["name"])
+                else r for r in (snap.get(key) or [])]
         if not rows:
             continue
         working, free, odd, most_worked = verdict(rows, got)
         u = "points a day" if key == "hk" else "Full Clean inspections a day"
         big_label = "points a day (FC 3 · DS 1)" if key == "hk" else "FC rooms inspected a day"
-        n_free = sum(1 for r in rows if not got.get(r["name"]))
+        n_free = sum(1 for r in rows if not got.get(r["name"]) and not r.get("away"))
+        n_away = sum(1 for r in rows if r.get("away"))
         st.markdown(f"#### {title}")
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("On the schedule", len(rows))
-        c2.metric("Working", len(rows) - n_free)
+        c2.metric("Working", len(rows) - n_free - n_away)
         c3.metric("Free", n_free)
+        c4.metric("Not in", n_away, help="Late notice (red on the staff sheet), off or VTO that day.")
         if not free:
             st.success("✅ Everyone on the schedule had work this day.")
         elif not odd:
@@ -762,13 +787,17 @@ def fair_tab():
                 "or a building with no chart left, can do this.)")
 
         top = max((rate(r) for r in rows), default=0) or 1
-        plain = [r for r in rows if not r.get("note") and not r.get("new")]
+        plain = [r for r in rows if not r.get("note") and not r.get("new") and not r.get("away")]
         most = max((rate(r) for r in plain), default=0)
         avg = (sum(rate(r) for r in plain) / len(plain)) if plain else 0
         odd_names = {r["name"] for r in odd}
 
         def why(r, g):
             """In one sentence, why this person got what they got (Hari, 25 Nov)."""
+            if r.get("away") == "Late notice":
+                return "Late notice on the staff sheet: wasn't in this day, so not judged."
+            if r.get("away"):
+                return f"{r['away']} on the staff sheet this day, so not judged."
             if r.get("note"):
                 return "Has a set role this day, so the order doesn't apply."
             if r.get("new"):
@@ -794,7 +823,9 @@ def fair_tab():
         out = ['<div class="fs-list">']
         for r in sorted(rows, key=lambda r: (rate(r), r["rank"])):
             g = got.get(r["name"])
-            if r.get("note"):
+            if r.get("away"):
+                tag, cls = r["away"], "away"
+            elif r.get("note"):
                 tag, cls = r["note"].replace(" -- ", " · "), "role"
             elif g:
                 tag, cls = f"Working · {g} {unit}", "work"
