@@ -26,6 +26,11 @@ class NeedOrder(unittest.TestCase):
         led = {"people": {"A B": {"rooms": 5}, "C D": {"rooms": 5}}}
         self.assertEqual(fairness.need_order(["C D", "A B"], led, {}, []), ["C D", "A B"])
 
+    def test_a_first_name_alone_finds_the_one_person_with_it(self):
+        self.assertEqual(fairness.lookup("Robin", LED, {}, [])["rooms"], 20)
+        led = {"people": {"Sam Tide": {"rooms": 1}, "Sam Lake": {"rooms": 2}}}
+        self.assertEqual(fairness.lookup("Sam", led, {}, []), {})      # two Sams: no guess
+
     def test_snapshot_carries_numbers_and_notes(self):
         s = fairness.snapshot("2026-11-26", LED, ["Robin Mesa", "Pat Quill"], ["Pat Quill"],
                               {}, [], notes={"Pat Quill": "RQS 1 -- no rooms by role"})

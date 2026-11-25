@@ -576,38 +576,51 @@ def timing_tab():
 
 
 def fair_tab():
-    """Fair share (Hari, 25 Nov): the order each build handed rooms out in, and
-    the numbers behind it, so a free day can be checked against its reason."""
+    """Fair share (Hari, 25 Nov): who got rooms on a day and who was left
+    free, and whether that was fair -- in plain words first, the numbers
+    behind it underneath."""
     import pandas as pd
     import fairness
     fresh.latest("fairness")
-    st.markdown('<div class="rp-h1">⚖️ Fair share</div><div class="rp-src">Who gets rooms '
-                'first. Each morning everyone on the schedule is put in order of the rooms '
-                'they have had over the last four weeks -- rooms cleaned for a housekeeper, '
-                'rooms inspected for an RQS, counted from the GC8 Inspections tabs as the '
-                'team left them (the same counts as the Rooms view). The fewest go first and '
-                'get the biggest charts; whoever has had the most is the one left free when '
-                'there are more people than work. RQS 1 and RQS 2 keep their fixed roles.'
-                '</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-h1">⚖️ Fair share</div><div class="rp-src">'
+                '<b>The rule:</b> whoever has had the <b>fewest rooms</b> in the last four weeks '
+                'gets work first. When there are more people than work, whoever has had the '
+                '<b>most rooms</b> gets the day free.</div>', unsafe_allow_html=True)
     rec = (db._load_key(fairness.KEY) or {}).get("days") or {}
-    days = sorted(rec, reverse=True)
     today = clock.today().isoformat()
-    if not days:
-        st.info("No build has used the fair-share order yet; the first is tomorrow's 5 AM build. "
-                "Below: the order it would use today, worked out now.")
-    pick = st.selectbox("Day", days or [today], key="fs_day",
-                        format_func=lambda d: _dt.date.fromisoformat(d).strftime("%a %d %b"))
+    days = sorted(set(rec) | {today}, reverse=True)
+    pick = st.selectbox("Day", days, key="fs_day",
+                        format_func=lambda d: _dt.date.fromisoformat(d).strftime("%A %d %b")
+                        + ("" if d in rec else " (worked out now)"))
     snap = rec.get(pick)
     if snap is None:
         with st.spinner("Counting the last four weeks…"):
             led = fairness.ledger(end=(_dt.date.fromisoformat(pick) - _dt.timedelta(days=1)).isoformat())
-            s = db.load_full_schedule(pick) or {}
-            hk = [n for n, v in (s.get("hk_roster") or {}).items() if v.get("present")]
-            rq = [n for n, v in (s.get("insp_roster") or {}).items() if v]
-            snap = fairness.snapshot(pick, led, fairness.need_order(hk, led), fairness.need_order(rq, led))
-    st.caption("Rooms counted %s to %s (%d days, the last synced day before %s). Order: fewest "
-               "rooms first, then the most free days, then the fewest days with rooms."
-               % (snap.get("from"), snap.get("to"), snap.get("window", fairness.WINDOW_DAYS), pick))
+            s0 = db.load_full_schedule(pick) or {}
+            hk = [n for n, v in (s0.get("hk_roster") or {}).items() if v.get("present")]
+            rq = [n for n, v in (s0.get("insp_roster") or {}).items() if v]
+            # The build's own notes, worked out the same way: RQS 1 / RQS 2 off the
+            # staff sheet, light duty off its list.
+            notes = {}
+            try:
+                import roster_import as ri
+                wk = ri.find_week_key(db.staff_week_keys(), pick)
+                upd = ri.day_roster(db.load_staff_week(wk), db.load_staff_overrides(), wk, pick) if wk else None
+                for n in (db._load_key("light_duty") or {}).get("names") or []:
+                    notes[str(n).strip()] = "light duty"
+                if upd and upd.get("rqs1"):
+                    notes[upd["rqs1"]] = "RQS 1 -- no rooms by role"
+                if upd and upd.get("rqs2"):
+                    notes[upd["rqs2"]] = "RQS 2 -- the Daily Service round"
+            except Exception as ex:
+                print(f"[report] fair-share notes: {ex}")
+            snap = fairness.snapshot(pick, led, fairness.need_order(hk, led), fairness.need_order(rq, led),
+                                     notes=notes)
+        st.info("This day's charts were made **before fair share was switched on** (it starts with "
+                "the 26 Nov build), so they followed the sheet's order. The check below shows how "
+                "that compared with the fair-share rule.")
+
+    # What each person actually got that day, off the day's charts.
     sched = db.load_full_schedule(pick) or {}
     mins, rooms = {}, {}
     for g in sched.get("groups_data") or []:
@@ -618,23 +631,77 @@ def fair_tab():
             mins[h] = mins.get(h, 0) + int(float(g.get("time") or 0))
         if i and g.get("service_type") == "Full Clean":
             rooms[i] = rooms.get(i, 0) + len(g.get("rooms") or [])
-    for title, key, got, unit in (("Housekeepers", "hk", mins, "min"), ("RQS", "rqs", rooms, "rooms")):
+
+    def verdict(rows, got):
+        """People left free who had fewer rooms than someone who worked --
+        the cases worth a look. A note (RQS 1/2, light duty) or a newcomer
+        is explained, not counted."""
+        plain = [r for r in rows if not r.get("note") and not r.get("new")]
+        working = [r for r in plain if got.get(r["name"])]
+        free = [r for r in plain if not got.get(r["name"])]
+        most_worked = max((r["rooms"] for r in working), default=None)
+        odd = [r for r in free if most_worked is not None and r["rooms"] < most_worked]
+        return working, free, odd, most_worked
+
+    for title, key, got, unit in (("Housekeepers", "hk", mins, "min of rooms"), ("RQS", "rqs", rooms, "rooms to inspect")):
         rows = snap.get(key) or []
         if not rows:
             continue
-        df = pd.DataFrame([{
-            "Order": r["rank"], "Person": r["name"],
-            "Rooms, 4 weeks": r["rooms"], "Free days": r["free"],
-            "Days with rooms": r["busy"], "Days on": r["sched"],
-            "That day": (f"{got[r['name']]} {unit}" if got.get(r["name"]) else "Free"),
-            "Note": r.get("note") or ("new -- no rooms yet" if r.get("new") else ""),
-        } for r in rows])
-        st.markdown(f"**{title}** · {len(rows)} on that day · "
-                    f"{sum(1 for r in rows if not got.get(r['name']))} free")
-        st.dataframe(df, hide_index=True, use_container_width=True)
-    st.caption("Checking a day: the people marked Free should be at the bottom of the order -- "
-               "the most rooms in the window. RQS 1 and RQS 2 may show Free for Full Clean while "
-               "doing their own round.")
+        working, free, odd, most_worked = verdict(rows, got)
+        n_free = sum(1 for r in rows if not got.get(r["name"]))
+        st.markdown(f"#### {title}")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("On the schedule", len(rows))
+        c2.metric("Working", len(rows) - n_free)
+        c3.metric("Free", n_free)
+        if not free:
+            st.success("✅ Everyone on the schedule had work this day.")
+        elif not odd:
+            st.success(f"✅ Fair: the {len(free)} free had more rooms in the last four weeks "
+                       f"({min(r['rooms'] for r in free)}+) than anyone who worked "
+                       f"(at most {most_worked}).")
+        else:
+            st.warning("⚠️ Worth a look: " + "; ".join(
+                f"**{r['name']}** was free with only {r['rooms']} rooms" for r in odd)
+                + f" — someone who worked had {most_worked}. (A sheet change after the build, "
+                "or a building with no chart left, can do this.)")
+
+        top = max((r["rooms"] for r in rows), default=0) or 1
+        table = []
+        for r in sorted(rows, key=lambda r: (r["rooms"], r["rank"])):
+            g = got.get(r["name"])
+            if r.get("note"):
+                today_txt = r["note"].replace(" -- ", " · ")
+            elif g:
+                today_txt = f"Working · {g} {unit}"
+            else:
+                today_txt = "Free"
+            table.append({"Person": r["name"] + (" (new)" if r.get("new") else ""),
+                          "Rooms, last 4 weeks": r["rooms"],
+                          "This day": today_txt})
+        st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True,
+                     column_config={"Rooms, last 4 weeks": st.column_config.ProgressColumn(
+                         "Rooms, last 4 weeks", format="%d", min_value=0, max_value=top)})
+
+    with st.expander("How it's counted, and the full numbers"):
+        st.markdown(
+            f"- **Rooms** are rooms cleaned (housekeepers) or inspected (RQS) from "
+            f"{snap.get('from')} to {snap.get('to')}, counted from the GC8 Inspections tabs — "
+            "the same counts as the Rooms view.\n"
+            "- People level on rooms: the one with **more free days** goes first.\n"
+            "- **RQS 1 and RQS 2** keep their own rounds whatever the order; **light duty** "
+            "and **new** people are shown but not judged.\n"
+            "- The order is worked out at each morning's build and kept, so a past day shows "
+            "exactly what that build used.")
+        for title, key in (("Housekeepers", "hk"), ("RQS", "rqs")):
+            rows = snap.get(key) or []
+            if rows:
+                st.markdown(f"**{title}**")
+                st.dataframe(pd.DataFrame([{
+                    "Order used": r["rank"], "Person": r["name"], "Rooms": r["rooms"],
+                    "Days on the schedule": r["sched"], "Days with rooms": r["busy"],
+                    "Free days": r["free"], "Note": r.get("note") or ("new" if r.get("new") else "")}
+                    for r in rows]), hide_index=True, use_container_width=True)
 
 
 view = st.segmented_control("View", ["📋 Rooms", "⏱️ Timing", "⚖️ Fair share"], default="📋 Rooms",

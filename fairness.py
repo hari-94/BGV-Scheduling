@@ -99,7 +99,17 @@ def lookup(name, led, table=None, attendant_list=None) -> dict:
         return people[name]
     full = staff_names.canon(name, table, attendant_list)
     low = {k.lower(): v for k, v in people.items()}
-    return people.get(full) or low.get(full.lower()) or low.get(str(name).lower()) or {}
+    got = people.get(full) or low.get(full.lower()) or low.get(str(name).lower())
+    if got:
+        return got
+    # A first name alone ("Erick", from a sheet before the full names) that
+    # only one person in the window has.
+    first = str(name).strip().split(" ")[0].lower()
+    if first and len(str(name).split()) == 1:
+        hits = [v for k, v in people.items() if k.split(" ")[0].lower() == first]
+        if len(hits) == 1:
+            return hits[0]
+    return {}
 
 
 def need_key(rec) -> tuple:
