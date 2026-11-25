@@ -827,6 +827,21 @@ Property's looks and three Roster Import readers served old data until the
 ttl, and Roster Import's daily-service shape ignored the week it was asked
 for. Name a token without the `_`; tests/test_caches.py fails otherwise.
 
+**The staff history is one shared copy** (25 Nov). My Home and Roster
+Import read every stored week flattened -- 59,000 day-rows since August. As
+`st.cache_data` every call unpickled its own copy: My Home +36 MB a draw per
+phone, Roster Import +154 MB (five calls a run). Both are now
+`st.cache_resource(max_entries=2)`: one copy, shared, never changed by a
+reader (a person's days are copied before they are folded). My Home keeps it
+indexed by person (`_prepared`: by_pid, index, now_section, recent). Don't
+change a row you got from either -- copy it. The libraries themselves are
+~150 MB; the day's growth was these copies, not code.
+
+**The app warms its caches at start** (warm.py, from auth.init_auth): staff
+weeks, overrides, the floor and the name directory, on a thread, once per
+process. A first open was Dashboard ~6 s, My Home ~5 s; now ~1.6 s and
+~2.3 s.
+
 **Nothing per room may read the database** (25 Nov). My Rooms asked
 `hotsos_push.config()` and `room_scores.config()` once per room: 240 reads,
 18 s a draw on a manager's 119 rooms, every 20 s refresh. Both are now kept

@@ -291,12 +291,26 @@ else:
 # Ordered by how often each is actually used: the week grid is a daily glance,
 # attendance drives time-off decisions, applying is occasional now that it
 # happens automatically, and uploading is weekly.
-@st.cache_data(ttl=300, show_spinner="Reading attendance history…")
+def _weeks_v():
+    """The weeks' version: bumped by every week saved, imported or renamed."""
+    k = getattr(db, "WEEKS_VERSION_KEY", "")
+    try:
+        return (db._load_key(k) or {}).get("v", "") if k else ""
+    except Exception:
+        return ""
+
+
+@st.cache_resource(max_entries=2, show_spinner="Reading attendance history…")
 def _history(token: str):
     """Flatten every stored week once. Keyed on a token so it refreshes when
-    the workbook or the in-app edits change."""
+    the workbook or the in-app edits change -- and on the weeks' version, so
+    a rename (staff_names) shows at once.
+
+    One copy shared by every session, never changed by its readers (25 Nov):
+    as st.cache_data each of the page's five calls unpickled its own copy of
+    59,000 rows -- the page's 127 MB."""
     weeks = db.load_staff_weeks()
-    return ri.history_rows(weeks, db.load_staff_overrides())
+    return tuple(ri.history_rows(weeks, db.load_staff_overrides()))
 
 (tab_week, tab_month, tab_plan, tab_att, tab_apply, tab_changes,
  tab_sync) = st.tabs(
@@ -719,7 +733,7 @@ with tab_month:
             _grp = st.selectbox("Show", ["Housekeepers", "RQS", "Other teams", "All"],
                                 key="mv_grp")
         _days, _people = _month_grid(
-            f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}', _ym, _grp)
+            f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}|{_weeks_v()}', _ym, _grp)
         with mc3:
             st.markdown(f'<div style="padding-top:26px;font-size:.76rem;color:#5b6675">'
                         f'{len(_people)} people &nbsp;·&nbsp; {len(_days)} days stored'
@@ -866,7 +880,7 @@ with tab_plan:
                 rec["cells"] = {}
             sugg = {}
         else:
-            all_rows = _history(f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}')
+            all_rows = _history(f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}|{_weeks_v()}')
             sugg = ri.suggest_week(all_rows, tgt)
             idx_all = ri.people_index(all_rows)
             draft = ri.suggestion_to_week(idx_all, sugg, tgt, template, rows=all_rows)
@@ -1209,7 +1223,7 @@ with tab_plan:
                        "have that column empty, which is what this is for.")
         _per_day = {d: int(_dsc.iloc[i]["How many"] or 0) for i, d in enumerate(dates)}
 
-        _hist_rows = _history(f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}')
+        _hist_rows = _history(f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}|{_weeks_v()}')
         _ds = ri.suggest_daily_service([r for r in _hist_rows if r["date"] < tgt],
                                        draft, dates, _per_day)
         _lab = {p: (i.get("label") or p) for p, i in (idx_all or {}).items()}
@@ -1311,7 +1325,7 @@ with tab_plan:
                 st.markdown('<div class="mono">HOUSEKEEPERS — BUILDINGS BARELY MOVE</div>',
                             unsafe_allow_html=True)
                 bsug = ri.suggest_building(_history(
-                    f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}'))
+                    f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}|{_weeks_v()}'))
                 moved = [v for v in bsug.values() if v["moved"]]
                 st.markdown(
                     f'<div style="font-size:.8rem;color:#5b6675;line-height:1.55">'
@@ -1445,7 +1459,7 @@ with tab_att:
     if not week_keys:
         st.info("No weeks stored yet. Upload the workbook on the **Upload & sync** tab.")
     else:
-        token = f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}'
+        token = f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}|{_weeks_v()}'
         rows = _history(token)
         today = clock.today()
         wk_s, mo_s, yr_s = ri.period_bounds(today)
@@ -1715,7 +1729,7 @@ with tab_apply:
         # different building from the one they have always worked is worth a
         # second look — it is either a real transfer or a typo in the sheet.
         _bsug = ri.suggest_building(
-            _history(f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}'))
+            _history(f'{meta.get("uploaded_at","")}|{len(overrides)}|{len(week_keys)}|{_weeks_v()}'))
         _odd = []
         for p in people:
             if p["group"] != "hk" or not p["present"]:

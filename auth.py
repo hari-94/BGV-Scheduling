@@ -113,6 +113,13 @@ def get_welcome_msg(role: str) -> str:
 
 
 def init_auth():
+    # The first visit to a freshly started app also fills the shared caches,
+    # in the background (warm.py) -- once per process.
+    try:
+        import warm
+        warm.start()
+    except Exception:
+        pass
     fresh = "logged_in" not in st.session_state
     for k, v in [("logged_in",False),("username",""),("display_name",""),("role",""),("user_id",None)]:
         if k not in st.session_state:

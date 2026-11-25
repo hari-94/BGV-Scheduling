@@ -198,7 +198,6 @@ except Exception as _ex:
     staff_names, _aliases = None, {}
 
 
-@st.cache_data(ttl=300, show_spinner=False)
 def _all_rows(token: str):
     rows = ri.history_rows(db.load_staff_weeks(), db.load_staff_overrides())
     # One person, one name: every spelling ("Luis U.", "Luis U", "Luis Urbina")
@@ -219,10 +218,6 @@ _wv_key = getattr(db, "WEEKS_VERSION_KEY", "")
 _weeks_v = ((db._load_key(_wv_key) or {}).get("v", "") if _wv_key else "")
 _ov_sig = hashlib.md5(json.dumps(overrides, sort_keys=True, default=str).encode()).hexdigest()[:12]
 _al_sig = hashlib.md5(json.dumps(_aliases, sort_keys=True).encode()).hexdigest()[:12]
-rows = _all_rows(f'{meta.get("uploaded_at","")}|{len(week_keys)}|{_ov_sig}|{_weeks_v}|{_al_sig}')
-index = ri.people_index(rows)
-
-
 def _current_sections(rows):
     """{pid: "Building 3"} -- where each person is listed now: today's row if
     there is one, else the nearest day of this week, else their latest. The
@@ -243,7 +238,26 @@ def _current_sections(rows):
     return {pid: " · ".join(dict.fromkeys(next(iter(v[1].values())))) for pid, v in best.items()}
 
 
-now_section = _current_sections(rows)
+# The whole sheet's history -- 59,000 day-rows since August -- made once per
+# change and shared by every session (Hari, 25 Nov). It was st.cache_data,
+# which hands each run its own unpickled copy: ~60 MB and half a second per
+# draw, per phone, on a page housekeepers keep open. Nothing below changes a
+# row (a person's days are copied before they are folded), so one copy is
+# safe; `by_pid` lets a draw read only its own person's rows.
+@st.cache_resource(max_entries=2, show_spinner=False)
+def _prepared(token: str, day: str):
+    rows = _all_rows(token)
+    by_pid = {}
+    for r in rows:
+        by_pid.setdefault(r["pid"], []).append(r)
+    cut = (datetime.date.fromisoformat(day) - datetime.timedelta(days=28)).isoformat()
+    return {"index": ri.people_index(rows), "now_section": _current_sections(rows),
+            "by_pid": by_pid, "recent": {r["pid"] for r in rows if r["date"] >= cut}}
+
+
+_prep = _prepared(f'{meta.get("uploaded_at","")}|{len(week_keys)}|{_ov_sig}|{_weeks_v}|{_al_sig}',
+                  clock.today().isoformat())
+index, now_section = _prep["index"], _prep["now_section"]
 
 # Sign-in names rarely match the sheet exactly, so try the display name and the
 # username, which often carries digits or dots. A login named by a nickname
@@ -285,13 +299,12 @@ if mine is None or can_browse:
     # second section ("Nancy Ramirez · Houseperson PM") as a person of its own.
     # Current = on the sheet in the last four weeks or any week posted ahead,
     # and not marked as left on the Report page.
-    _cut = (clock.today() - datetime.timedelta(days=28)).isoformat()
     try:
         _left = {ri.norm_name(staff_names.canon(n, _aliases) if staff_names else n)
                  for n in (db._load_key("staff_left") or {})}
     except Exception:
         _left = set()
-    _current = {r["pid"] for r in rows if r["date"] >= _cut and r["pid"].split("@")[0] not in _left}
+    _current = {p for p in _prep["recent"] if p.split("@")[0] not in _left}
     order = sorted((p for p in index if p in _current or p == mine),
                    key=lambda p: index[p]["label"].lower())
     _names = [index[p]["label"] for p in order]
@@ -326,9 +339,7 @@ _mine_all = {p for p in index if _base(p) == _base(mine)} | {mine}
 # day on two rows shares an id too: always fold each day to one row.
 if True:
     _days = {}
-    for _r in rows:
-        if _r["pid"] not in _mine_all:
-            continue
+    for _r in (r for p in _mine_all for r in _prep["by_pid"].get(p, ())):
         _r = dict(_r, pid=mine)
         _was = _days.get(_r["date"])
         if _was is None:
@@ -337,7 +348,7 @@ if True:
             _days[_r["date"]] = _r
         elif _r["worked"] and _was["worked"] and _r["raw"] and _r["raw"] != _was["raw"]:
             _days[_r["date"]] = dict(_was, raw=f'{_was["raw"]} · {_r["raw"]}')
-    rows = [r for r in rows if r["pid"] not in _mine_all] + list(_days.values())
+    rows = sorted(_days.values(), key=lambda r: r["date"])
 
 info = index[mine]
 s_all = ri.summarise_person(rows, pid=mine)
