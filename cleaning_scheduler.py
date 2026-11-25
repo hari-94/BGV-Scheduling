@@ -1561,7 +1561,10 @@ footer{visibility:hidden!important;}
                 except Exception:
                     st.rerun()
             else:
-                st.error("Invalid username or password.")
+                _wait = db.login_locked(_uname.strip())
+                st.error(f"Too many wrong passwords. Try again in {_wait} minute"
+                         f"{'s' if _wait != 1 else ''}." if _wait else
+                         "Invalid username or password.")
 
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("""

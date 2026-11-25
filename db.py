@@ -635,11 +635,21 @@ def login_summary(limit: int = 1000) -> list:
 # ════════════════════════════════════════════════════════════════════════════
 ROLES = ["admin", "rqs", "housekeeper", "houseperson", "frontdesk"]
 
-def _hash_pw(password: str, salt: str = "") -> str:
-    if not salt:
-        salt = secrets.token_hex(16)
-    h = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-    return f"{salt}:{h}"
+#: Passwords are stored as PBKDF2-SHA256 (25 Nov): "pbkdf2$<rounds>$<salt>$<hex>".
+#: The older forms -- plain sha256 from the seed SQL, "salt:sha256" from
+#: create_user -- are one cheap hash, quick to guess at if the table ever
+#: leaked; they still sign in, and are rewritten in this form at that sign-in.
+PBKDF2_ROUNDS = 200_000
+
+
+def _hash_pw(password: str, salt: str = "", rounds: int = PBKDF2_ROUNDS) -> str:
+    salt = salt or secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), rounds).hex()
+    return f"pbkdf2${rounds}${salt}${h}"
+
+
+def _needs_rehash(stored: str) -> bool:
+    return not str(stored or "").startswith(f"pbkdf2${PBKDF2_ROUNDS}$")
 
 def _check_pw(password: str, stored: str) -> bool:
     """
@@ -648,18 +658,50 @@ def _check_pw(password: str, stored: str) -> bool:
       1. Plain sha256 hex (from seed SQL): 64-char hex string
       2. Salted format (from create_user): "salt:sha256(salt+pw)"
     """
+    import hmac
     if not stored:
         return False
     try:
+        if stored.startswith("pbkdf2$"):
+            _, rounds, salt, h = stored.split("$", 3)
+            got = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), int(rounds)).hex()
+            return hmac.compare_digest(got, h)
         # Format 1: plain sha256 (no colon, 64 hex chars) — used by seed SQL
         if ":" not in stored or len(stored) == 64:
-            import hashlib as _hl
-            return _hl.sha256(password.encode()).hexdigest() == stored
+            return hmac.compare_digest(hashlib.sha256(password.encode()).hexdigest(), stored)
         # Format 2: salted "salt:hash"
         salt, h = stored.split(":", 1)
-        return hashlib.sha256(f"{salt}{password}".encode()).hexdigest() == h
+        return hmac.compare_digest(hashlib.sha256(f"{salt}{password}".encode()).hexdigest(), h)
     except Exception:
         return False
+
+
+# ── sign-in attempts ──────────────────────────────────────────────────────────
+#: After LOGIN_MAX_FAILS wrong passwords for one username within
+#: LOGIN_WINDOW seconds, that username is refused for the rest of the window
+#: (25 Nov: there was no limit, so a password could be guessed at speed).
+#: Kept in the app's memory: one server process, and a restart forgetting
+#: a few failures is harmless.
+LOGIN_MAX_FAILS = 5
+LOGIN_WINDOW = 15 * 60
+_LOGIN_FAILS = {}
+
+
+def _fails(username, now=None):
+    now = now or _time.time()
+    key = str(username or "").strip().lower()
+    recent = [t for t in _LOGIN_FAILS.get(key, []) if now - t < LOGIN_WINDOW]
+    _LOGIN_FAILS[key] = recent
+    return key, recent
+
+
+def login_locked(username, now=None) -> int:
+    """Minutes left before this username may try again; 0 if it may."""
+    now = now or _time.time()
+    _, recent = _fails(username, now)
+    if len(recent) < LOGIN_MAX_FAILS:
+        return 0
+    return max(1, int((recent[0] + LOGIN_WINDOW - now) // 60) + 1)
 
 # ── roles the database doesn't take yet ──────────────────────────────────────
 #: Roles the app has that this database's app_users_role_check may not accept
@@ -756,12 +798,22 @@ def create_user(username: str, password: str, role: str) -> tuple[bool, str]:
     return True, f"User '{uname}' created with role '{role}'."
 
 def authenticate(username: str, password: str) -> dict | None:
-    """Verify credentials. Returns user dict on success, None on failure."""
+    """Verify credentials. Returns user dict on success, None on failure
+    (also while the username is locked -- `login_locked` says for how long)."""
+    if login_locked(username):
+        return None
     user = get_user(username)
-    if not user:
+    if not user or not _check_pw(password, user.get("password_hash", "")):
+        key, recent = _fails(username)
+        _LOGIN_FAILS[key] = recent + [_time.time()]
         return None
-    if not _check_pw(password, user.get("password_hash","")):
-        return None
+    _LOGIN_FAILS.pop(str(username or "").strip().lower(), None)
+    # An old, weak hash: store this password the strong way now.
+    if _needs_rehash(user.get("password_hash", "")):
+        try:
+            _client().table("app_users").update({"password_hash": _hash_pw(password)})                 .eq("username", user["username"]).execute()
+        except Exception as ex:
+            print(f"[db] password rehash for {user['username']}: {ex}")
     # update last_login
     try:
         _client().table("app_users").update(
