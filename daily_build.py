@@ -643,8 +643,6 @@ def write_tab(path, day: _dt.date, frame, state: dict, note: str = "", borrowed=
     "kept (edited)". `state` remembers the fingerprint of what was written,
     so an edited tab is never overwritten."""
     import openpyxl
-    from openpyxl.styles import Alignment, Font, PatternFill
-    from openpyxl.utils import get_column_letter
     path = Path(path)
     wb = openpyxl.load_workbook(path) if path.exists() else openpyxl.Workbook()
     if not path.exists():

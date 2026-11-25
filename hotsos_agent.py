@@ -1160,7 +1160,6 @@ def run_backup_build(cfg, day=None, by="backup", ssrs=None, publish=True):
     written there, and each workbook is uploaded back only if nobody saved it
     on SharePoint in the meantime."""
     import importlib
-    import io
     import daily_build
     import sharepoint
     daily_build = importlib.reload(daily_build)

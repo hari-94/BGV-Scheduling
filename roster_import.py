@@ -248,10 +248,6 @@ PAID_OFF_KINDS = (KIND_VTO,)
 #: Cell text that says a no-call/no-show outright, independent of the red fill.
 _NOCALL_RE = re.compile(r"\bn[c/\s-]*n[s/\s-]*h?\b|\bno\s*call\b|\bno\s*show\b", re.I)
 
-#: Voluntary time off, when that is the whole story for the day. A cell that
-#: leads with hours worked ("3 + VTO") is a worked day that ended early, and
-#: "VTO - KEYSTONE" is time off spent at another property.
-_VTO_ONLY_RE = re.compile(r"^\s*(vto|v\.t\.o\.?)\s*$", re.I)
 
 def classify_full(raw):
     """(kind, recognised) for one schedule cell.
@@ -292,9 +288,6 @@ def classify_full(raw):
 def classify(raw) -> str:
     return classify_full(raw)[0]
 
-def is_recognised(raw) -> bool:
-    """False for a duty we have no name for. It still counts as worked."""
-    return classify_full(raw)[1]
 
 # ── Controlled vocabulary for editing ─────────────────────────────────────────
 # One canonical option list per role, ordered by how often each value actually
@@ -430,11 +423,6 @@ def rqs_roles(raw) -> set:
     return out
 
 
-def rqs_role(raw):
-    """Return 1 or 2 when a cell names an explicit RQS role, else None."""
-    roles = rqs_roles(raw)
-    return min(roles) if roles else None
-
 # ── Sheet scanning ────────────────────────────────────────────────────────────
 def sheet_dates(ws, max_scan_rows=200):
     """Map date -> column index for one worksheet.
@@ -451,16 +439,7 @@ def sheet_dates(ws, max_scan_rows=200):
                 out.setdefault(d, c)
     return out
 
-def index_workbook(wb):
-    """Build {date: [(sheet_name, col), ...]} across the whole workbook."""
-    idx = {}
-    for ws in wb.worksheets:
-        for d, c in sheet_dates(ws).items():
-            idx.setdefault(d, []).append((ws.title, c))
-    return idx
 
-def available_dates(wb):
-    return sorted(index_workbook(wb).keys())
 
 def _walk_people_rows(ws):
     """Yield (row, name, group, building_or_label) for every person row.
@@ -1378,14 +1357,6 @@ def week_to_people(week, iso):
             rec.get("cells", {}).get(iso, ""), k, known))
     return out
 
-#: Weekly summary rows near the top of every sheet, keyed by their column-A label.
-METRIC_LABELS = OrderedDict([
-    ("hskp actual #", "HSKP on schedule"),
-    ("hskp needed",   "HSKP needed"),
-    ("daily services","Daily services"),
-    ("check outs",    "Check outs"),
-    ("rqs needed",    "RQS needed"),
-])
 
 #: The hidden rows 5-11 every sheet carries, keyed by their column-A label.
 METRIC_ROWS = {
@@ -1446,29 +1417,6 @@ def parse_metrics(ws, ws_formulas, cols):
             out[iso] = day
     return out
 
-
-def day_metrics(ws, col):
-    """Read the sheet's own headcount figures for one day.
-
-    These are the manager's numbers, not ours — showing them next to what we
-    parsed makes a miscount obvious at a glance.
-    """
-    out = OrderedDict()
-    for r in range(1, min(ws.max_row, 40) + 1):
-        label = _norm(ws.cell(r, 1).value)
-        if label in METRIC_LABELS and METRIC_LABELS[label] not in out:
-            v = ws.cell(r, col).value
-            if isinstance(v, (int, float)):
-                out[METRIC_LABELS[label]] = round(float(v), 2)
-    return out
-
-def parse_sheet_for_date(wb, sheet_name, target_date):
-    """Parse one named sheet for one date. Raises ValueError if absent."""
-    ws = wb[sheet_name]
-    col = sheet_dates(ws).get(target_date)
-    if col is None:
-        raise ValueError(f"{target_date} is not in sheet {sheet_name!r}")
-    return parse_day(ws, col)
 
 # ── Turning parsed people into scheduler state ────────────────────────────────
 def build_roster_update(people, existing_roster=None):

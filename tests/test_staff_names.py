@@ -55,5 +55,22 @@ class RenameWeeks(unittest.TestCase):
         self.assertEqual(list(out["2026-11-22"]["people"]), ["Pat Quill"])
 
 
+
+class AmongToday(unittest.TestCase):
+    """A first name spelled a little differently, among today's housekeepers
+    (25 Nov: "Jennifer" on the sheet for Jenifer Santana)."""
+
+    def test_one_fits(self):
+        import staff_names as sn
+        self.assertEqual(sn.resolve_among("Jennifer", ["Jenifer Ruiz", "Pat Quill"]), "Jenifer Ruiz")
+        self.assertEqual(sn.resolve_among("Jennyfer", ["Jenifer Ruiz"]), "Jenifer Ruiz")
+        self.assertEqual(sn.resolve_among("Jennifer R.", ["Jenifer Ruiz", "Jenifer Lake"]), "Jenifer Ruiz")
+
+    def test_two_fit_or_none_fit_no_guess(self):
+        import staff_names as sn
+        self.assertEqual(sn.resolve_among("Jennifer", ["Jenifer Ruiz", "Jennyfer Lake"]), "")
+        self.assertEqual(sn.resolve_among("Robin", ["Jenifer Ruiz"]), "")
+        self.assertEqual(sn.resolve_among("", ["Jenifer Ruiz"]), "")
+
 if __name__ == "__main__":
     unittest.main()

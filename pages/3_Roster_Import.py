@@ -6,7 +6,7 @@ last time, renders any week as an Excel-style grid, lets you correct cells in
 the app, and exports a workbook with those corrections written back in.
 """
 import streamlit as st
-import sys, os, io, re, json, datetime
+import sys, os, io, re, datetime
 import html as _html
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))

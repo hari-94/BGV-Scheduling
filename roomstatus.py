@@ -108,8 +108,6 @@ RQS_ONLY = (INSPECTED,)
 CLEANED = (ALREADY_CLEAN, DONE, OCCUPIED_CLEANED, TO_BE_INSPECTED, INSPECTED,
            SERVICE_REFUSED)
 
-#: Needs someone to look at it, whatever else is going on.
-ATTENTION = (HELP,)
 
 
 def normalise(raw) -> str:

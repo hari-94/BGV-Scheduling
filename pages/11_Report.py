@@ -650,17 +650,35 @@ def fair_tab():
                 "the 26 Nov build), so they followed the sheet's order. The check below shows how "
                 "that compared with the fair-share rule.")
 
-    # What each person actually got that day, off the day's charts.
+    # What each person actually got that day, off the day's charts -- matched
+    # by full name: the charts follow HotSOS ("Luis Urbina") while the morning's
+    # order kept the sheet's spelling ("Luis U."), and Luis, Janelly, Carolina
+    # and Erick, all on Daily Service, read as free (Hari, 25 Nov).
+    try:
+        import staff_names as _sn
+        _al, _att = _sn.aliases(), _sn.attendants()
+
+        def full(n):
+            return _sn.canon(n, _al, _att) if n else ""
+    except Exception:
+        def full(n):
+            return n or ""
     sched = db.load_full_schedule(pick) or {}
     mins, rooms = {}, {}
     for g in sched.get("groups_data") or []:
         if g.get("verify_group"):
             continue
-        h, i = g.get("housekeeper") or "", g.get("inspector") or ""
+        h, i = full(g.get("housekeeper")), full(g.get("inspector"))
         if h:
             mins[h] = mins.get(h, 0) + int(float(g.get("time") or 0))
         if i and g.get("service_type") == "Full Clean":
             rooms[i] = rooms.get(i, 0) + len(g.get("rooms") or [])
+
+    class _ByFull(dict):
+        """What someone got, found by any spelling of their name."""
+        def get(self, name, default=None):
+            return dict.get(self, full(name), default)
+    mins, rooms = _ByFull(mins), _ByFull(rooms)
 
     def none_on(r):
         gap = r.get("sched", 0) - r.get("busy", 0)
@@ -771,9 +789,6 @@ def fair_tab():
 
         # One row per person, the reason in full under the name (Hari, 25 Nov:
         # "make sure the reasons are clearly visible" -- a table cell cut them off).
-        rv = [r["rooms"] / r["busy"] for r in plain if r.get("busy")]
-        rv_avg = sum(rv) / len(rv) if rv else 0
-        what = "inspecting" if key != "hk" else "cleaning"
         st.markdown(f"Team average: **{avg:.1f} {big_label}** on the days they had rooms · "
                     f"highest {most:.1f}", unsafe_allow_html=True)
         out = ['<div class="fs-list">']
@@ -1377,8 +1392,6 @@ lo = rd.loose_for(res, start, end)
 unknown = {**(lo.get("in_unknown") or {})}
 for k, v in (lo.get("cl_unknown") or {}).items():
     unknown[k] = unknown.get(k, 0) + v
-n_out = (lo.get("in_none", 0) + sum((lo.get("in_other") or {}).values())
-         + sum(unknown.values()))
 with st.expander(f"What these numbers leave out — {period}", expanded=False):
     def _top(d, n=12):
         items = sorted(d.items(), key=lambda x: -x[1])

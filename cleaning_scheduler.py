@@ -92,9 +92,6 @@ FC_SA_ITERS = 400000        # simulated-annealing iterations
 FC_W_FLOOR = 150            # per extra floor, within one building
 FC_W_BLD = 400              # for a group holding more than one building
 FC_W_ROOMNUM = 2            # per 10 room numbers apart on the same floor
-MAX_DS = 560
-DS_OVER = 700
-LOW_FILL = 350
 
 # Daily Service: HARD cap per housekeeper. Fill up to DS_CAP, never exceed;
 # leftover rooms form new charts (blank housekeeper if none available, filled in
@@ -268,25 +265,8 @@ def default_time_for(room: str, svc: str) -> int:
         if ch.isalpha(): room_type = ch; break
     return DEFAULT_TIMES.get(svc, {}).get(room_type, 70)
 
-PALETTE = [
-    ("#5B4FE9","#EEEEFF"),("#0D9488","#ECFDF5"),("#2563EB","#EFF6FF"),
-    ("#D97706","#FFFBEB"),("#DC2626","#FFF5F5"),("#7C3AED","#F5F3FF"),
-    ("#0891B2","#ECFEFF"),("#EA580C","#FFF7ED"),("#DB2777","#FDF2F8"),
-    ("#059669","#F0FDF4"),("#65A30D","#F7FEE7"),("#4F46E5","#EEF2FF"),
-    ("#9333EA","#FAF5FF"),("#16A34A","#F0FDF4"),("#E11D48","#FFF1F2"),
-    ("#0284C7","#F0F9FF"),("#B45309","#FFFBEB"),("#6D28D9","#F5F3FF"),
-    ("#047857","#ECFDF5"),("#B91C1C","#FEF2F2"),
-]
-SVC_PALETTE = {
-    SVC_FC: ("#2563EB","#EFF6FF"),
-    SVC_IH: ("#7C3AED","#F5F3FF"),
-    SVC_DS: ("#0D9488","#ECFDF5"),
-    SVC_DV: ("#D97706","#FFFBEB"),
-}
-IC = ["#5B4FE9","#0D9488","#D97706","#DC2626","#7C3AED","#0891B2","#EA580C","#DB2777"]
 BLD_COLORS = {1:("#2563EB","#EFF6FF"), 2:("#0D9488","#ECFDF5"), 3:("#D97706","#FFFBEB")}
 
-def pal(i): return PALETTE[i % len(PALETTE)]
 
 DEFAULT_HK = {
     1: ["Maricruz","Melissa","ARACELI","Anaberta","Darling","Adrian","Leonardo","Rosibel"],
@@ -2225,25 +2205,9 @@ def parse_rooms(text: str) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════════════════════
 # GROUPING LOGIC
 # ══════════════════════════════════════════════════════════════════════════════
-def bld_ok(blds, b):
-    for x in blds:
-        if (x==2 and b==3) or (x==3 and b==2): return False
-    return True
 
 def same_bld(blds, ublds): return len(blds | ublds) == 1
 
-def proximity_score(group_rooms, unit_rooms):
-    if not group_rooms or not unit_rooms: return 999
-    total, count = 0, 0
-    for gr in group_rooms:
-        for ur in unit_rooms:
-            gb, ub = gr.get("bld",0), ur.get("bld",0)
-            gf, uf = gr.get("floor",0), ur.get("floor",0)
-            if gb != ub: total += 300
-            elif gf != uf: total += 30
-            else: total += min(abs(gr.get("num",0)-ur.get("num",0))//10, 9)
-            count += 1
-    return total // max(count,1)
 
 def mk(unit, svc):
     return {"rooms":list(unit),"time":sum(r["time"] for r in unit),
@@ -2259,58 +2223,7 @@ def absorb(g, unit):
     g["c140"] += sum(1 for r in unit if r["time"]==140)
     g["c120"] += sum(1 for r in unit if r["time"]==120)
 
-def _mix_penalty(g, unit):
-    """Steer Full-Clean charts toward the preferred shapes:
-        120+120+120 (360)
-        140+120+70 (330)
-        120+120+70+70(380)
-        70x5 (350)
-    A chart that already matches (or is a clean prefix of) one of these gets no
-    penalty; the further its room-count of each size is from the nearest target
-    shape, the higher the penalty. This is a soft preference used to break ties
-    in placement, never a hard rule — capacity/guest/building rules still win.
-    """
-    times = [r["time"] for r in g["rooms"]] + [r["time"] for r in unit]
-    if not times: return 0
-    n140 = sum(1 for t in times if t == 140)
-    n120 = sum(1 for t in times if t == 120)
-    n70 = sum(1 for t in times if t <= 70) # 70s and anything smaller
 
-    # (n140, n120, n70) signatures of the four preferred end-states
-    TARGETS = [
-        (0,3,0), # 120+120+120
-        (1,1,1), # 140+120+70
-        (0,2,2), # 120+120+70+70
-        (0,0,5), # 70 x5
-    ]
-    # Distance to the closest target = sum of size-count mismatches. A chart
-    # that is "on the way"to a target (fewer rooms than the target, matching
-    # composition so far) is treated as a clean prefix low penalty.
-    best = 99
-    for t140,t120,t70 in TARGETS:
-        # Over-shooting a size beyond its target is worse than under-shooting.
-        over = max(0,n140-t140)+max(0,n120-t120)+max(0,n70-t70)
-        under = max(0,t140-n140)+max(0,t120-n120)+max(0,t70-n70)
-        best = min(best, over*3 + under) # overshoot weighted heavier
-    return best * 25 # scale into "minutes-equivalent"tie-shaping range
-
-def best_fit_generic(groups, unit, can_add_fn, same_bld_only, same_floor_only):
-    ub = set(r["bld"] for r in unit)
-    uf = set(r.get("floor",0) for r in unit)
-    u_t = sum(r["time"] for r in unit)
-    cap = MAX_DS if (unit and unit[0].get("service")==SVC_DS) else MAX_FC
-    bi, best_score = -1, float("inf")
-    for i, g in enumerate(groups):
-        if not can_add_fn(g, unit): continue
-        if same_bld_only and not same_bld(g["blds"], ub): continue
-        if same_floor_only and not (g["floors"] & uf): continue
-        prx = proximity_score(g["rooms"], unit)
-        rem = cap - (g["time"] + u_t)
-        # mix penalty only matters for Full Clean (DS rooms are all light)
-        mix = _mix_penalty(g, unit) if (unit and unit[0].get("service")!=SVC_DS) else 0
-        score = prx * 10000 + rem + mix
-        if score < best_score: best_score, bi = score, i
-    return bi
 
 def _fc_feasible(units_list):
     """True if a set of same-guest units can share one Full-Clean chart under
@@ -2331,183 +2244,7 @@ def _fc_feasible(units_list):
         if fcpack.is_easy(t, n140, n120, n70): return False
     return True
 
-def _fc_spread(units_list):
-    """Travel cost of one chart: building span (heaviest), floor span within each
-    building, and number of distinct floor-stops. Lower = tighter / less walking."""
-    if not units_list: return 0
-    blds = set(); floors_by_bld = {}
-    for u in units_list:
-        blds |= u["blds"]
-        for r in u["rooms"]:
-            b = r.get("bld", 0)
-            floors_by_bld.setdefault(b, set()).add(r.get("floor", 0))
-    fspread = sum(max(fs) - min(fs) for fs in floors_by_bld.values())
-    nstops = sum(len(fs) for fs in floors_by_bld.values())
-    return (len(blds) - 1) * 100 + fspread * 10 + nstops * 3
 
-def _fc_optimize(units, seed=20240601, restarts=14):
-    """Two-phase optimizer for Full Clean.
-    Phase 1 — minimize the number of housekeepers: best-fit from several seed
-      orders + random restarts, each refined by a move/swap local search that
-      escapes greedy local optima (this is what matches the manual HK count).
-    Phase 2 — with the housekeeper count fixed, reduce room travel: only moves/
-      swaps that lower total building+floor spread WITHOUT increasing the chart
-      count are accepted, so charts become tight (same building / nearby floors)
-      like the manual schedule. Deterministic for a given input (fixed seed)."""
-    import random as _rnd
-    rng = _rnd.Random(seed)
-
-    def pack_bestfit(order):
-        charts = []
-        for u in order:
-            best, best_rem = None, 10**9
-            for ch in charts:
-                if _fc_feasible(ch + [u]):
-                    rem = MAX_FC - (sum(x["time"] for x in ch) + u["time"])
-                    if rem < best_rem: best_rem, best = rem, ch
-            if best is None: charts.append([u])
-            else: best.append(u)
-        return charts
-
-    # ── Phase 1: fewest charts ───────────────────────────────────────────────
-    def _spans_two_bld(chart):
-        return len(set(b for u in chart for b in u["blds"])) > 1
-    def ls_mincount(charts, iters):
-        charts = [c[:] for c in charts if c]
-        for _ in range(iters):
-            ne = [c for c in charts if c]
-            if len(ne) < 2: break
-            ne.sort(key=lambda c: sum(u["time"] for u in c))
-            src = ne[0] if rng.random() < 0.5 else rng.choice(ne)
-            if not src: continue
-            u = rng.choice(src); order = ne[:]; rng.shuffle(order); moved = False
-            for dst in order:
-                if dst is src: continue
-                if _fc_feasible(dst + [u]):
-                    src.remove(u); dst.append(u); moved = True; break
-            if not moved:
-                for dst in order:
-                    if dst is src: continue
-                    for v in dst:
-                        if _fc_feasible([x for x in src if x is not u] + [v]) and \
-                           _fc_feasible([x for x in dst if x is not v] + [u]):
-                            src.remove(u); dst.remove(v); src.append(v); dst.append(u)
-                            moved = True; break
-                    if moved: break
-            charts = [c for c in charts if c]
-        return [c for c in charts if c]
-
-    orders = [
-        sorted(units, key=lambda u: -u["time"]),
-        sorted(units, key=lambda u: (-u["n140"], -u["n120"], -u["time"])),
-        sorted(units, key=lambda u: ({3:0,1:1,2:2}.get(min(u["blds"]) if u["blds"] else 1, 9), -u["time"])),
-    ]
-    candidates = [pack_bestfit(o) for o in orders]
-    for _ in range(restarts):
-        us = units[:]; rng.shuffle(us)
-        candidates.append(pack_bestfit(us))
-
-    best_charts, best_n = None, None
-    for c in candidates:
-        refined = ls_mincount(c, 2500)
-        n = len([ch for ch in refined if ch])
-        if best_n is None or n < best_n:
-            best_n, best_charts = n, refined
-    charts = [c for c in best_charts if c]
-
-    # ── Phase 1.5: un-cross cross-building charts (same count) ────────────────
-    # Phase 1 minimizes housekeepers but may leave a chart spanning two buildings
-    # (a B1 unit packed into a B2 chart, etc.). Removing such a crossing usually
-    # needs a rotation: move the foreign unit into a same-building chart and push
-    # that chart's displaced unit onward. We try 2-way swaps first, then 3-way
-    # rotations, accepting only changes that reduce the number of crossings while
-    # keeping the chart count fixed. Deterministic.
-    def _nblds(chart):
-        return len(set(b for u in chart for b in u["blds"]))
-    def _decross(charts):
-        charts = [c[:] for c in charts if c]
-        for _ in range(40):
-            crossed = [c for c in charts if _nblds(c) > 1]
-            if not crossed: break
-            improved = False
-            for a in crossed:
-                # foreign = the units belonging to a's minority building
-                cnt = {}
-                for u in a:
-                    for bd in u["blds"]: cnt[bd] = cnt.get(bd, 0) + 1
-                minority = min(set().union(*[u["blds"] for u in a]), key=lambda bd: cnt[bd])
-                foreign = [u for u in a if minority in u["blds"]]
-                for fu in foreign:
-                    # 2-way: swap fu with a unit bu from another chart b
-                    for b in charts:
-                        if b is a: continue
-                        for bu in b:
-                            na = [x for x in a if x is not fu] + [bu]
-                            nb = [x for x in b if x is not bu] + [fu]
-                            if not (_fc_feasible(na) and _fc_feasible(nb)): continue
-                            if (_nblds(na) + _nblds(nb)) < (_nblds(a) + _nblds(b)):
-                                a.remove(fu); a.append(bu); b.remove(bu); b.append(fu)
-                                improved = True; break
-                        if improved: break
-                    if improved: break
-                    # 3-way rotation: a gives fu to b, b gives bu to c, c gives cu to a
-                    for b in charts:
-                        if b is a: continue
-                        if not _fc_feasible(b + [fu]): continue
-                        b2 = b + [fu]
-                        for bu in b:
-                            for c in charts:
-                                if c is a or c is b: continue
-                                if not _fc_feasible(c + [bu]): continue
-                                c2 = c + [bu]
-                                for cu in c:
-                                    na = [x for x in a if x is not fu] + [cu]
-                                    nb = [x for x in b2 if x is not bu]
-                                    nc = [x for x in c2 if x is not cu]
-                                    if not (_fc_feasible(na) and _fc_feasible(nb) and _fc_feasible(nc)):
-                                        continue
-                                    before = _nblds(a)+_nblds(b)+_nblds(c)
-                                    after = _nblds(na)+_nblds(nb)+_nblds(nc)
-                                    if after < before:
-                                        a.remove(fu); a.append(cu)
-                                        b.remove(bu); b.append(fu)
-                                        c.remove(cu); c.append(bu)
-                                        improved = True; break
-                                if improved: break
-                            if improved: break
-                        if improved: break
-                    if improved: break
-                if improved: break
-            if not improved: break
-        return [c for c in charts if c]
-    charts = [c for c in charts if c]
-
-    # ── Phase 2: same chart count, minimize travel ──────────────────────────
-    def ls_travel(charts, iters):
-        charts = [c[:] for c in charts if c]
-        for _ in range(iters):
-            ne = [c for c in charts if c]
-            if len(ne) < 2: break
-            a, b = rng.sample(ne, 2)
-            # move a unit a->b if it lowers combined spread and doesn't empty a
-            if len(a) > 1:
-                u = rng.choice(a)
-                if _fc_feasible(b + [u]):
-                    a2 = [x for x in a if x is not u]
-                    if a2 and _fc_spread(a2) + _fc_spread(b + [u]) < _fc_spread(a) + _fc_spread(b):
-                        a.remove(u); b.append(u); continue
-            # swap u<->v if it lowers combined spread
-            u = rng.choice(a); v = rng.choice(b)
-            na = [x for x in a if x is not u] + [v]
-            nb = [x for x in b if x is not v] + [u]
-            if _fc_feasible(na) and _fc_feasible(nb) and \
-               _fc_spread(na) + _fc_spread(nb) < _fc_spread(a) + _fc_spread(b):
-                a.remove(u); a.append(v); b.remove(v); b.append(u)
-        return [c for c in charts if c]
-
-    charts = _decross(charts) # remove gratuitous building-crossings
-    charts = ls_travel(charts, 15000)
-    return [c for c in charts if c]
 
 
 def _bld(r): return r.get("bld", 0)
@@ -5567,11 +5304,6 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
 # ══════════════════════════════════════════════════════════════════════════════
 # HTML BUILDERS
 # ══════════════════════════════════════════════════════════════════════════════
-def _rgba_a(rgba: str, a) -> str:
-    """Return the same rgba color with a different alpha. Safe on any input."""
-    m = re.match(r"rgba\((\d+),\s*(\d+),\s*(\d+)", str(rgba))
-    if not m: return rgba
-    return f"rgba({m.group(1)},{m.group(2)},{m.group(3)},{a})"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -6189,7 +5921,6 @@ with _inp_exp:
 # SNAPSHOT
 # ══════════════════════════════════════════════════════════════════════════════
 def _build_snapshot(fg, total_rooms, inspectors):
-    from datetime import date
     hk_snap = {}
     for g in fg:
         hk = g.get("housekeeper","")
@@ -7115,7 +6846,6 @@ else:
             return min(ranks) if ranks else 4
 
         # Group housekeepers under their (primary) RQS.
-        from collections import OrderedDict as _OD
         rqs_groups = {}
         for (hk, _insp), rec in by_hk.items():
             if not _keep(hk, rec): continue
@@ -8527,9 +8257,8 @@ td{{transition:background .15s ease}}
     def _build_excel(main_df, rows_for_pivot, free_staff=None):
         from io import BytesIO
         from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.styles import Font, PatternFill, Alignment
         from openpyxl.utils import get_column_letter
-        from collections import OrderedDict
 
         def _to_int(v):
             try: return int(float(v))
@@ -8538,13 +8267,8 @@ td{{transition:background .15s ease}}
         wb = Workbook(); ws = wb.active; ws.title = "Schedule"
         FONT = "Arial"
         reg = Font(name=FONT, size=10)
-        bold = Font(name=FONT, size=10, bold=True)
         hdr_f = Font(name=FONT, size=10, bold=True, color="FFFFFF")
         hdr_fl = PatternFill("solid", fgColor="2563A8")
-        sub_fl = PatternFill("solid", fgColor="EEF0F3")
-        rqs_fl = PatternFill("solid", fgColor="D9E1EC")
-        thin = Side(style="thin", color="D0D5DD")
-        border = Border(bottom=thin)
 
         # ── Main table ───────────────────────────────────────────────────────
         cols = list(main_df.columns)

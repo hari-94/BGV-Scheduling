@@ -44,12 +44,6 @@ def room_text(ssrs_xlsx: bytes):
     return text, int(n)
 
 
-def simulate(ssrs_xlsx: bytes, day: _dt.date) -> dict:
-    """{hskp, hskp_fc, hskp_ds, rqs, rqs_fc, fc_rooms, check_rooms, check_minutes}
-    for one day's Housekeeping Dashboard export."""
-    return simulate_text(*room_text(ssrs_xlsx), day)
-
-
 def pack_day(room_text: str, day: _dt.date) -> list:
     """The day's charts as the Schedule page packs them -- nobody on them yet
     (stand-ins H1, H2 ...). What simulate_text counts, and what the tests check."""

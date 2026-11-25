@@ -103,7 +103,6 @@ WELCOME_MESSAGES = {
     ],
 }
 
-import random
 def get_welcome_msg(role: str) -> str:
     msgs = WELCOME_MESSAGES.get(role, ["Have a great day! ✨"])
     # Use hour as seed so it stays consistent within a session but rotates daily
@@ -191,8 +190,6 @@ def is_housekeeper() -> bool:
     """The phone-only view: housekeepers, and housepersons, who see the same."""
     return st.session_state.get("role","") in ("housekeeper", "houseperson")
 
-def is_houseperson() -> bool:
-    return st.session_state.get("role","") == "houseperson"
 
 def my_display_name() -> str:
     return st.session_state.get("display_name","") or st.session_state.get("username","")

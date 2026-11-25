@@ -208,7 +208,6 @@ with tab_users:
     if not users:
         st.info("No users found.")
     else:
-        import html as _html
         # Theme-aware colors for the iframe table
         if _THEME.endswith("light"):
             _t_txt="#0f172a"; _t_txt2="#64748b"; _t_th_bg="#f8fafc"; _t_th_tx="#64748b"
@@ -647,9 +646,9 @@ with tab_svc:
                "workflow again under the new one (steps below) and paste its address here. "
                "Addresses are shown cut short: anyone with one can post to that chat.")
     try:
-        import teams_notes as _tn
+        import teams_notes
         fresh.latest("teams_notes")
-        import teams_notes as _tn  # noqa: F811
+        import teams_notes as _tn
         _hooks = db._load_key(_tn.WEBHOOKS_KEY) or {}
         _sent = db._load_key(_tn.SENT_KEY) or {}
     except Exception as _ex:

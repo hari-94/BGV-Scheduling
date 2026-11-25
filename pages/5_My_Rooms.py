@@ -13,7 +13,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auth, db, clock, i18n
 import assignments
 import roomstatus as _rst
-import property_map as pmap
 import daystart as _day
 import ui
 import fresh
@@ -91,11 +90,6 @@ STATUS_KEY = {NOT_STARTED: "st.not_started", IN_PROGRESS: "st.in_progress",
               _rst.RETURN_LATER: "st.return_later",
               _rst.SERVICE_REFUSED: "st.service_refused",
               _rst.TO_BE_INSPECTED: "st.to_be_inspected"}
-STATUS_ICON = {NOT_STARTED: "○", IN_PROGRESS: "◐", CLEANED: "✓",
-               ALREADY: "✓",
-               INSPECTED: "★", DND: "⏸", HELP: "!",
-               _rst.OCCUPIED_CLEANED: "✓", _rst.RETURN_LATER: "↻",
-               _rst.SERVICE_REFUSED: "✕", _rst.TO_BE_INSPECTED: "🔍"}
 
 
 def _status_words(cur):
@@ -713,7 +707,7 @@ def _day_strip(blocks, bare=False):
     def pct(m):
         return 100.0 * m / span
 
-    segs, cur = "", begin
+    segs = ""
     for b in blocks:
         if b["travel"] > 0:
             segs += f'<i class="go" style="width:{pct(b["travel"]):.3f}%"></i>'
@@ -733,7 +727,6 @@ def _day_strip(blocks, bare=False):
         segs += (f'<i class="{klass}" style="width:{pct(b["minutes"]):.3f}%" '
                  f'title="{e(b["room"])} · {b["minutes"]:.0f}m · done by '
                  f'{_day.hhmm(b["end"])}"><b>{e(b["room"])}</b></i>')
-        cur = b["end"]
 
     tgt = pct(_day._mins(_day.TARGET_END) - begin)
     chk = pct(_day._mins(_day.CHECKIN) - begin)
@@ -890,7 +883,6 @@ if done_n and done_n == total_n:
 
 
 # ── marking a room ───────────────────────────────────────────────────────────
-ALREADY_CLEAN_K = ALREADY
 
 def _mark(room, chart, new_status, who=None):
     """Record where a room has got to.

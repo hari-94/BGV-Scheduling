@@ -11,7 +11,6 @@ import re
 import streamlit as st
 
 import clock
-import db
 
 
 def norm(s) -> str:

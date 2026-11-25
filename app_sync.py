@@ -328,11 +328,19 @@ def from_sheet(rows, save=True):
     fg = out
 
     # 2. Rooms added on the sheet by hand.
+    working_today = sorted({g.get("housekeeper") for g in fg if g.get("housekeeper")}
+                           | {n for n, v in (sched.get("hk_roster") or {}).items()
+                              if (v or {}).get("present")})
     added, unplaced, unplaced_rows = [], [], []
     for room, line in sheet.items():
         if room in charted:
             continue
-        hk = staff_names.resolve(line["hskp"].split("/")[0].strip(), aliases) if line["hskp"] else ""
+        typed = line["hskp"].split("/")[0].strip() if line["hskp"] else ""
+        hk = staff_names.resolve(typed, aliases) if typed else ""
+        if typed and not hk:
+            # Not clear from the whole directory: among today's housekeepers,
+            # a first name spelled a little differently ("Jennifer").
+            hk = staff_names.resolve_among(typed, working_today)
         if not hk:
             unplaced.append(room)
             unplaced_rows.append({k: line.get(k, "") for k in

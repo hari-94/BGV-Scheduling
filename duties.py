@@ -22,7 +22,6 @@ import db
 
 ASSIGN_PREFIX = "duties_"
 DONE_PREFIX = "dutydone_"
-DUTIES = ("carpet", "stripping")
 _COLUMN = {"carpet": "Carpet", "stripping": "Stripping"}
 
 

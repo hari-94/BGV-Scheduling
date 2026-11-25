@@ -9,12 +9,7 @@ Tables (auto-created on first use):
 # cleaning_scheduler.py or auth.py at module level.
 import os, json, hashlib, secrets, time as _time
 import clock
-from datetime import datetime, date
-
-# Ensure this module is fully initialized before any function is called.
-# Streamlit sometimes partially loads modules during hot-reload; this flag
-# lets callers detect and retry if needed.
-_MODULE_READY = True
+from datetime import datetime
 
 # ── Supabase client (lazy init) ───────────────────────────────────────────────
 _sb = None
@@ -51,7 +46,7 @@ def _get_credentials():
                             key = line.split("=",1)[1].strip().strip('"\'')
                     if url:
                         break
-        except Exception as _e:
+        except Exception:
             pass
 
     # Method 3: st.secrets (Streamlit Cloud — only after set_page_config has run)

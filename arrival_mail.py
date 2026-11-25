@@ -20,7 +20,6 @@ missed one and wants turning off and on.
 Uses the browser lock in sharepoint.py: two Chromes can't share the profile.
 """
 import datetime as _dt
-import os
 import re
 import time
 from pathlib import Path

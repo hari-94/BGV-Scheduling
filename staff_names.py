@@ -146,25 +146,27 @@ def resolve(typed: str, table=None) -> str:
     return hits.pop() if len(hits) == 1 else ""
 
 
-def names_in_use(weeks=None, roster=None, since_days=28) -> dict:
-    """{name: where it appears} for the people who matter now: housekeepers
-    and RQS on the last four weeks and everything ahead, plus the standing
-    roster. Two years of past staff and one-off spellings are not worth a
-    planner's morning."""
-    weeks = db.load_staff_weeks() if weeks is None else weeks
-    roster = (db.load_roster() or {}) if roster is None else roster
-    cutoff = (clock.today() - __import__("datetime").timedelta(days=since_days)).isoformat()
-    seen = {}
-    for w in weeks.values():
-        if max(w.get("dates") or [""]) < cutoff:
-            continue
-        for n, p in (w.get("people") or {}).items():
-            if p.get("group") in ("hk", "rqs"):
-                seen.setdefault(n.partition(SUFFIX)[0], set()).add("schedule")
-    for part in ("hk_roster", "insp_roster"):
-        for n in (roster.get(part) or {}):
-            seen.setdefault(n, set()).add("roster")
-    return {n: sorted(v) for n, v in seen.items()}
+def _sound(word) -> str:
+    """A spelling key: lower case, y as i, doubled letters single --
+    "Jennifer", "Jenifer" and "Jennyfer" all read "jenifer"."""
+    w = str(word or "").lower().replace("y", "i")
+    return "".join(c for i, c in enumerate(w) if i == 0 or c != w[i - 1])
+
+
+def resolve_among(typed, candidates) -> str:
+    """The one person in `candidates` (today's housekeepers) a name typed on
+    the sheet means when `resolve` can't tell: the first name spelled a
+    little differently ("Jennifer" for Jenifer Santana, 25 Nov -- three
+    rooms the team added stayed "not assigned" on the Front Desk all day),
+    and a last initial if one was typed. '' unless exactly one fits."""
+    t = " ".join(str(typed or "").replace(".", " ").split())
+    if not t:
+        return ""
+    words = t.split()
+    first, init = _sound(words[0]), (words[1][0].lower() if len(words) > 1 else None)
+    hits = {c for c in candidates if c and _sound(c.split()[0]) == first
+            and (init is None or (len(c.split()) > 1 and c.split()[1][0].lower() == init))}
+    return hits.pop() if len(hits) == 1 else ""
 
 
 def suggest(names, attendant_list, approved=None):

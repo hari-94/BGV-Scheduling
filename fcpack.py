@@ -327,7 +327,6 @@ def _improve(charts, cap, low_min, rounds=400):
         for i in order:
             src = charts[i]
             others = [c for j, c in enumerate(charts) if j != i]
-            plan, loads = [], {id(c): c for c in others}
             trial = []
             ok = True
             for b in sorted(src.buns, key=lambda b: -b.time):

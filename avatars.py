@@ -41,20 +41,6 @@ UNIFORM = {"hk": ("#0f766e", "#0b5a54"), "rqs": ("#1e3a8a", "#172c66")}
 SETTING_KEY = "avatar_look"
 LOOKS = {"f": "Woman", "m": "Man", "n": "Neutral"}
 
-#: status -> action. Statuses HotSOS invents later fall back to "wait".
-ACTION = {
-    _rst.PENDING: "wait",
-    _rst.STARTED: "clean",
-    _rst.DONE: "cheer",
-    _rst.OCCUPIED_CLEANED: "cheer",
-    _rst.TO_BE_INSPECTED: "onway",
-    _rst.INSPECTED: "pass",
-    _rst.ALREADY_CLEAN: "shine",
-    _rst.DND: "dnd",
-    _rst.RETURN_LATER: "later",
-    _rst.SERVICE_REFUSED: "refused",
-    _rst.HELP: "help",
-}
 #: no person at all, just the sparkle of a room that needed nothing
 PERSONLESS = ("shine",)
 #: the order the legend lists them in; the last two are the whole team's
@@ -81,10 +67,6 @@ ACT_COLOUR = {
     "refused": _rst.META[_rst.SERVICE_REFUSED][2],
     "wait": _rst.META[_rst.PENDING][2], "onway": _rst.META[_rst.TO_BE_INSPECTED][2],
 }
-
-
-def action_for(status) -> str:
-    return ACTION.get(_rst.normalise(status), "wait")
 
 
 # ── where everybody is ──────────────────────────────────────────────────────
