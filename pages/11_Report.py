@@ -576,23 +576,28 @@ def timing_tab():
 
 
 _FS_CSS = """<style>
-.fs-list{display:flex;flex-direction:column;gap:8px;margin:6px 0 18px;}
-.fs-row{border:1px solid #e3e7ee;border-left:4px solid #94a3b8;border-radius:10px;padding:10px 14px;background:#fff;}
-.fs-row.work{border-left-color:#1a9e4b;} .fs-row.free{border-left-color:#2f6fd6;}
-.fs-row.odd{border-left-color:#e0730f;background:#fff8ef;} .fs-row.role{border-left-color:#7c3aed;}
-.fs-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
-.fs-name{font-weight:700;font-size:15px;color:#1f2733;}
+.fs-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin:6px 0 18px;}
+.fs-row{border:1px solid #e3e7ee;border-top:4px solid #94a3b8;border-radius:12px;padding:10px 12px;background:#fff;display:flex;flex-direction:column;gap:5px;}
+.fs-row.work{border-top-color:#1a9e4b;} .fs-row.free{border-top-color:#2f6fd6;}
+.fs-row.odd{border-top-color:#e0730f;background:#fff8ef;} .fs-row.role{border-top-color:#7c3aed;}
+.fs-top{display:flex;flex-direction:column;align-items:flex-start;gap:4px;}
+.fs-name{font-weight:700;font-size:14.5px;color:#1f2733;}
 .fs-name i{font-style:normal;font-size:11px;font-weight:700;background:#eef2f7;color:#475569;border-radius:5px;padding:1px 6px;margin-left:6px;}
-.fs-tag{font-size:12.5px;font-weight:600;border-radius:999px;padding:3px 10px;background:#eef2f7;color:#334155;white-space:nowrap;}
+.fs-tag{font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 9px;background:#eef2f7;color:#334155;}
 .work .fs-tag{background:#e3f5ea;color:#14532d;} .free .fs-tag{background:#e6eefb;color:#12447e;}
 .odd .fs-tag{background:#fde7d4;color:#8a3b05;} .role .fs-tag{background:#efe7fb;color:#4c1d95;}
-.fs-bar{display:flex;align-items:center;gap:10px;margin:7px 0 6px;}
-.fs-track{flex:0 0 180px;height:7px;border-radius:999px;background:#edf0f4;overflow:hidden;}
+.fs-bar{display:flex;flex-direction:column;gap:3px;}
+.fs-track{display:block;width:100%;height:6px;border-radius:999px;background:#edf0f4;overflow:hidden;}
 .fs-track i{display:block;height:100%;background:#64748b;border-radius:999px;}
-.fs-num{font-size:12.5px;color:#5b6675;} .fs-num b{color:#1f2733;font-size:14px;}
-.fs-rep{font-size:12.5px;color:#5b6675;margin:-2px 0 5px;} .fs-rep b{color:#1f2733;}
-.fs-why{font-size:14px;color:#1f2733;line-height:1.45;}
-@media (max-width:640px){ .fs-track{flex-basis:110px;} }
+.fs-num{font-size:12px;color:#5b6675;} .fs-num b{color:#1f2733;font-size:15px;}
+.fs-rep{font-size:11.5px;color:#5b6675;line-height:1.35;} .fs-rep b{color:#1f2733;}
+.fs-two{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px;}
+.fs-two > div{display:flex;flex-direction:column;}
+.fs-big{font-size:24px;font-weight:800;line-height:1.05;color:#1f2733;font-variant-numeric:tabular-nums;}
+.fs-big.fs-fair{font-size:18px;font-weight:700;color:#5b6675;padding-top:5px;}
+.fs-lab{font-size:10.5px;color:#7a8594;line-height:1.25;}
+.fs-why{font-size:12.5px;color:#1f2733;line-height:1.4;border-top:1px dashed #e3e7ee;padding-top:5px;}
+
 </style>"""
 
 
@@ -657,6 +662,13 @@ def fair_tab():
             mins[h] = mins.get(h, 0) + int(float(g.get("time") or 0))
         if i and g.get("service_type") == "Full Clean":
             rooms[i] = rooms.get(i, 0) + len(g.get("rooms") or [])
+
+    def rv_txt(r):
+        return f'{r["rooms"] / r["busy"]:.1f}' if r.get("busy") else "–"
+
+    def without(r):
+        gap = r.get("sched", 0) - r.get("busy", 0)
+        return f" — <b>{gap}</b> without" if gap > 0 else ""
 
     def report_line(r, key):
         """The Rooms view's own figure beside ours (Hari, 25 Nov), so the two can
@@ -748,8 +760,17 @@ def fair_tab():
 
         # One row per person, the reason in full under the name (Hari, 25 Nov:
         # "make sure the reasons are clearly visible" -- a table cell cut them off).
-        st.caption(f"Team average: **{avg:.1f} {u} on** · highest: **{most:.1f}** "
-                   "(this year, recent weeks counting more). Fewest first.")
+        rv = [r["rooms"] / r["busy"] for r in plain if r.get("busy")]
+        rv_avg = sum(rv) / len(rv) if rv else 0
+        what = "inspecting" if key != "hk" else "cleaning"
+        a1, a2 = st.columns(2)
+        a1.metric(f"Team average · Rooms view", f"{rv_avg:.1f}",
+                  help=f"Rooms per {what} day, as on the Rooms view: rooms ÷ the days they had rooms.")
+        a1.caption(f"rooms per {what} day")
+        a2.metric("Team average · Fair share", f"{avg:.1f}",
+                  help="What the order is made on: work per day free to work over the year, "
+                       "recent weeks counting more. A day they could have had rooms and didn't counts.")
+        a2.caption(f"{u} free to work · highest {most:.1f}")
         out = ['<div class="fs-list">']
         for r in sorted(rows, key=lambda r: (rate(r), r["rank"])):
             g = got.get(r["name"])
@@ -766,9 +787,14 @@ def fair_tab():
                 f'<div class="fs-row {cls}"><div class="fs-top">'
                 f'<span class="fs-name">{html.escape(r["name"])}{" <i>new</i>" if r.get("new") else ""}</span>'
                 f'<span class="fs-tag">{html.escape(tag)}</span></div>'
-                f'<div class="fs-bar"><span class="fs-track"><i style="width:{w:.0f}%"></i></span>'
-                f'<span class="fs-num"><b>{rate(r):.1f}</b> {u} · this year: {mix_txt(r, key)}</span></div>'
-                f'<div class="fs-rep">{report_line(r, key)}</div>'
+                f'<div class="fs-two">'
+                f'<div><span class="fs-big">{rv_txt(r)}</span><span class="fs-lab">Rooms view · rooms per '
+                f'{"inspecting" if key != "hk" else "cleaning"} day</span></div>'
+                f'<div><span class="fs-big fs-fair">{rate(r):.1f}</span><span class="fs-lab">Fair share · '
+                f'{u}</span></div></div>'
+                f'<span class="fs-track"><i style="width:{w:.0f}%"></i></span>'
+                f'<div class="fs-rep">This year: {mix_txt(r, key)} · had rooms on <b>{r.get("busy", 0)}</b> of '
+                f'{r.get("sched", 0)} days free to {"inspect" if key != "hk" else "clean"}{without(r)}</div>'
                 f'<div class="fs-why">{html.escape(why(r, g))}</div></div>')
         out.append("</div>")
         st.markdown("".join(out), unsafe_allow_html=True)
@@ -781,11 +807,14 @@ def fair_tab():
             "- **Housekeepers:** points = 3 a Full Clean (or deep clean) room, 1 a Daily Service — "
             "roughly the minutes each takes on the charts (≈94 and ≈28). Dust n Vac isn't counted. "
             "**RQS:** Full Clean (and deep clean) inspections only.\n"
-            "- **Why it's lower than the Rooms view's \"rooms per day\":** the Rooms view divides by "
-            "the days someone *had* rooms (how big their rounds are). Fair share divides by **every "
-            "day on the schedule**, so a day someone was left without rooms shows up — that is "
-            "the unfairness it corrects. Each row shows both.\n"
-            "- **A day** = that ÷ days on the schedule. Each day counts by how recent it "
+            "- **Days free to work:** days on the schedule for ordinary work — not other-work / "
+            "project days, and for an RQS not RQS 1 or RQS 2 days, whose rounds are set by role. "
+            "A day they had rooms always counts.\n"
+            "- **Why it can be a little lower than the Rooms view:** the Rooms view divides by the "
+            "days someone *had* rooms; fair share by the days they were **free to work**, so a day "
+            "they could have had rooms and didn't shows up — that is what it corrects. Each card "
+            "shows both.\n"
+            "- **A day** = that ÷ days free to work. Each day counts by how recent it "
             f"is: a day {fairness.HALF_LIFE_DAYS} days ago counts half, twice that a quarter. "
             "Any day with rooms counts as a day on.\n"
             "- People level on that: the one left free more often goes first.\n"

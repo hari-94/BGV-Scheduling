@@ -104,7 +104,9 @@ def ledger(end=None, window=WINDOW_DAYS):
         else:
             sched, busy, rooms = t.get("sched", 0), t.get("days_in", 0), t.get("in", 0)
             mix = {"fc": t.get("in", 0)}
-        sched = max(sched, busy)              # a day with rooms was a day on
+        # Days they could have had rooms (free_to_work): the count the rate is
+        # made on, and the "had rooms on N of M days" the page shows.
+        sched = sum(1 for iso, sl in by_day.items() if frm <= iso <= to and free_to_work(sl, role))
         people[p] = {"role": role, "sched": sched, "busy": busy,
                      "free": max(0, sched - busy), "rooms": rooms, "mix": mix,
                      "points": round(points(t, role), 1),
@@ -112,25 +114,37 @@ def ledger(end=None, window=WINDOW_DAYS):
     return {"from": frm, "to": to, "people": people}
 
 
-def _weighted_rate(by_day, frm, to, role):
-    """Rooms per day on the schedule, each day weighted by how recent it is."""
+def free_to_work(slot, role) -> bool:
+    """Was this a day they could have had rooms? On the schedule in their team
+    for ordinary work -- not a project / other-work day, and for an RQS not an
+    RQS 1 or RQS 2 day, whose rounds are set by role (Hari, 25 Nov: his 48
+    other-work and 13 RQS 1 days read as days "left without rooms", and his
+    10.6 rooms per inspecting day came out 6.9). Any day they did have rooms
+    counts too, whatever the sheet said (a first name alone on an older sheet
+    matched no row, and Janelly read as 33 rooms in one day)."""
     import report_data as rd
+    import roster_import as ri
+    if points(slot, role) > 0:
+        return True
+    mine = [e for e in slot.get("sched", ()) if e[0] == role and e[2] in rd.WORKED]
+    if not mine or not {e[2] for e in mine} & {"working", "daily_service"}:
+        return False
+    if role == "rqs" and any(ri.rqs_roles(e[3]) for e in mine):
+        return False
+    return True
+
+
+def _weighted_rate(by_day, frm, to, role):
+    """Work per day free to work (`free_to_work`), each day weighted by how
+    recent it is."""
     end = _dt.date.fromisoformat(to)
     w_rooms = w_days = 0.0
     for iso, slot in by_day.items():
         if not (frm <= iso <= to):
             continue
         w = 0.5 ** ((end - _dt.date.fromisoformat(iso)).days / HALF_LIFE_DAYS)
-        n = points(slot, role)
-        mine = [e for e in slot.get("sched", ()) if e[0] == role and e[2] in rd.WORKED]
-        kinds = {e[2] for e in mine}
-        # A day on: in the team, and not a project day alone (as the ledger's sched)
-        # -- or any day they had rooms: they were working, whatever the sheet's
-        # row said (a first name alone on an older sheet matched no row, and
-        # Janelly read as 33 rooms in one day, 25 Nov).
-        on = (bool(mine) and (role == "rqs" or bool(kinds & {"working", "daily_service"}))) or n > 0
-        w_rooms += w * n
-        w_days += w if on else 0.0
+        w_rooms += w * points(slot, role)
+        w_days += w if free_to_work(slot, role) else 0.0
     return round(w_rooms / w_days, 2) if w_days else None
 
 

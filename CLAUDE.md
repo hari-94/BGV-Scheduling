@@ -488,9 +488,12 @@ clean) room 3, a Daily Service 1, Dust n Vac not counted (`HK_POINTS`, Hari
 25 Nov) -- and Full Clean inspections for an RQS. Then the larger share of
 days left free; then fewer rooms;
 level people keep the sheet's order. Per day, not a total: a total over a
-year favours a new hire or someone back from leave for months. Any day with
-rooms counts as a day on (older sheets' first-name rows matched no schedule
-row, and Janelly read 33 rooms in one day). `assign_hk_building_aware` hands out the biggest chart first
+year favours a new hire or someone back from leave for months. The days divided
+by are days **free to work** (`free_to_work`): on the schedule for ordinary
+work -- not other-work/project days, and for an RQS not RQS 1 / RQS 2 days
+(Hari 25 Nov: his 48 other-work and 13 RQS 1 days made 10.6 rooms per
+inspecting day read 6.9). Any day with rooms counts (older sheets' first-name
+rows matched no schedule row, and Janelly read 33 rooms in one day). `assign_hk_building_aware` hands out the biggest chart first
 within each service and building (buildings keep their incoming order, so who
 borrows across a bridge is unchanged), Daily Service the biggest round first,
 and `assign_inspectors` gives the biggest round to the first inspector (which

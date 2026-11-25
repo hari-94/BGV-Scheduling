@@ -48,6 +48,18 @@ class NeedOrder(unittest.TestCase):
         by_day = {"2026-11-20": {"fc": ["a", "b", "c", "d"], "sched": []}}
         self.assertEqual(fairness._weighted_rate(by_day, "2026-11-01", "2026-11-24", "hk"), 12.0)
 
+    def test_rqs_role_and_other_work_days_are_not_days_without_rooms(self):
+        on = lambda cell, kind="working": {"sched": [("rqs", "RQS", kind, cell)]}
+        self.assertTrue(fairness.free_to_work(on("ON"), "rqs"))
+        self.assertFalse(fairness.free_to_work(on("RQS 1"), "rqs"))
+        self.assertFalse(fairness.free_to_work(on("RQS 2"), "rqs"))
+        self.assertFalse(fairness.free_to_work(on("Projects", "other_duty"), "rqs"))
+        self.assertTrue(fairness.free_to_work(dict(on("RQS 1"), **{"in": ["a"]}), "rqs"))  # had rooms
+        # 10 rooms over one ON day and one RQS 1 day: 10 a day free to inspect, not 5.
+        by_day = {"2026-11-20": dict(on("ON"), **{"in": list("abcdefghij")}),
+                  "2026-11-21": on("RQS 1")}
+        self.assertEqual(fairness._weighted_rate(by_day, "2026-11-01", "2026-11-24", "rqs"), 10.0)
+
     def test_full_clean_outweighs_daily_service_and_dust_n_vac_is_not_counted(self):
         day = {"fc": ["a"], "ds": ["b", "c"], "dvc": ["d", "e"], "in": ["x"]}
         self.assertEqual(fairness.points(day, "hk"), 3 + 2)
