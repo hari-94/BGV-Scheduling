@@ -175,6 +175,16 @@ profile) is never used. What the app can't take over is listed under "Not
 set here": the PC's Windows sign-in and OneDrive, the Power Automate flows,
 the Office Script, and the e-mails that go to one mailbox.
 
+**The Teams chats' addresses are set on the Admin page** (Hari, 25 Nov).
+Admin → Service Passwords → Teams chats: each chat's workflow, its address
+(shown cut short -- it works like a password), the last morning send, a
+"Send test card" button, a box for a new address (`teams_notes.set_webhook`,
+checked by `valid_url`; the replaced one kept in `history`, three deep, for
+"Undo last change"), and the steps to make the workflow again from the
+"Send webhook alerts to a chat" template under a new account
+(`teams_notes.RECREATE`). The cards are built by the app, so the workflow
+itself holds nothing to back up.
+
 **A role the database doesn't take yet** (`db.NEW_ROLES`). `app_users` has a
 CHECK on role (supabase_setup.sql), and the publishable key can't ALTER it.
 Until the ALTER for `frontdesk` is run in Supabase's SQL editor, such an

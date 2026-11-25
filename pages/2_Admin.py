@@ -638,6 +638,72 @@ with tab_svc:
                            "password change, press Open sign-in for that PC and have someone "
                            "there sign in.")
 
+    # ── Teams chats: the workflow addresses the morning notes go to ─────────
+    # Hari, 25 Nov: if the account that made the workflows goes, a new one
+    # makes them again from the template and pastes the addresses here.
+    st.markdown('<p class="sec" style="margin-top:1.2rem">Teams chats</p>', unsafe_allow_html=True)
+    st.caption("Where the morning notes and alerts are posted. Each chat has a Teams workflow "
+               "that belongs to the account that made it. If that account changes, make the "
+               "workflow again under the new one (steps below) and paste its address here. "
+               "Addresses are shown cut short: anyone with one can post to that chat.")
+    try:
+        import teams_notes as _tn
+        fresh.latest("teams_notes")
+        import teams_notes as _tn  # noqa: F811
+        _hooks = db._load_key(_tn.WEBHOOKS_KEY) or {}
+        _sent = db._load_key(_tn.SENT_KEY) or {}
+    except Exception as _ex:
+        st.error(f"Couldn't read the Teams settings: {_ex}")
+        _tn, _hooks, _sent = None, {}, {}
+    if _tn:
+        for _chat, (_cname, _what) in _tn.CHATS.items():
+            with st.container(border=True):
+                _last = (_sent.get("results") or {}).get(_chat)
+                _ok = str(_last) in ("200", "202")
+                _flow = (_hooks.get("flows") or {}).get(_chat, "")
+                _by = (_hooks.get("by_chat") or {}).get(_chat) or _hooks.get("set_by") or "—"
+                _at = (_hooks.get("at_chat") or {}).get(_chat) or _hooks.get("set_at")
+                st.markdown(
+                    f"**{_html.escape(_cname)}** · <span style='color:#8a93a1;font-size:.8rem'>"
+                    f"{_html.escape(_what)}</span><br>"
+                    f"<span style='font-size:.8rem;color:#5b6675'>Workflow: {_html.escape(_flow or '—')} · "
+                    f"address <code>{_html.escape(_tn.mask(_hooks.get(_chat)))}</code> · set by "
+                    f"{_html.escape(str(_by))} {_when(_at) if _at else ''}</span><br>"
+                    + (_pill(_ok, f"last morning send ({_sent.get('date')}): "
+                                  f"{'delivered' if _ok else _last}") if _last else
+                       "<span style='color:#8a93a1;font-size:.78rem'>no morning send recorded</span>"),
+                    unsafe_allow_html=True)
+                with st.form(f"tw_{_chat}", clear_on_submit=True):
+                    _new = st.text_input("New workflow address", key=f"tw_url_{_chat}",
+                                         placeholder="https://…powerplatform.com…/invoke?…")
+                    _fname = st.text_input("Workflow name (optional)", value=_flow, key=f"tw_name_{_chat}")
+                    _try = st.checkbox("Send a test card to this chat now", value=(_chat == "test"),
+                                       key=f"tw_try_{_chat}")
+                    if st.form_submit_button("Save address"):
+                        try:
+                            _tn.set_webhook(_chat, _new, cu["username"], _fname.strip())
+                            st.success("Saved. The morning notes go to the new address from now on.")
+                            if _try:
+                                _code, _body = _tn.send_test(_chat, cu.get("display_name") or cu["username"])
+                                (st.success if _code in (200, 202) else st.error)(
+                                    f"Test card: {'delivered' if _code in (200, 202) else f'HTTP {_code} {_body[:120]}'}")
+                        except Exception as _ex:
+                            st.error(f"Not saved: {_ex}")
+                _c1, _c2, _ = st.columns([1, 1, 3])
+                if _c1.button("Send test card", key=f"tw_test_{_chat}", use_container_width=True):
+                    _code, _body = _tn.send_test(_chat, cu.get("display_name") or cu["username"])
+                    (st.success if _code in (200, 202) else st.error)(
+                        "Delivered." if _code in (200, 202) else f"Not delivered: HTTP {_code} {_body[:120]}")
+                if (_hooks.get("history") or {}).get(_chat) and _c2.button(
+                        "Undo last change", key=f"tw_undo_{_chat}", use_container_width=True,
+                        help="Put back the address this chat had before the last save."):
+                    _tn.undo_webhook(_chat, cu["username"])
+                    st.rerun()
+        with st.expander("Make a chat's workflow again under a new account (about 2 minutes)"):
+            st.markdown("\n".join(f"{i}. {s}" for i, s in enumerate(_tn.RECREATE, 1)))
+            st.caption("The cards themselves are built by the app, so nothing else in the workflow "
+                       "needs setting up. Do it once for each chat above.")
+
     with st.expander("Not set here"):
         for _name, _where in _cr.NOT_HERE:
             st.markdown(f"**{_name}** — {_html.escape(_where)}")

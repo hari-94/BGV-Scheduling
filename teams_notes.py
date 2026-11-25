@@ -446,3 +446,109 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ── the chats' addresses, kept so a new account can take over fast ───────────
+# Hari, 25 Nov: "in case the id changes, we should be able to be up asap from
+# the new id". Each chat's workflow belongs to whoever made it; if that
+# account goes, the workflow stops and somebody makes a new one from the same
+# Teams template (RECREATE) and pastes its address on the Admin page, which
+# lands here. The last few addresses are kept, so a wrong paste can be undone.
+CHATS = {
+    "houseperson": ("GC8 AM Houseperson 7am -3pm", "the morning carry-up notes"),
+    "housekeeping": ("GC8 - Housekeeping", "the morning housekeeping notes, each room with its HK and RQS"),
+    "test": ("the test chat", "test cards, the agent's alerts and the GitHub watchdog"),
+}
+HISTORY_KEEP = 3
+RECREATE = [
+    "In Teams, open the chat (e.g. “GC8 - Housekeeping”) signed in as the new account.",
+    "Chat menu (…) → **Workflows** → search **“Send webhook alerts to a chat”** → choose it.",
+    "Name it as before (e.g. “BGV Teams notes - GC8 Housekeeping”), sign in when asked, "
+    "pick that same chat, **Save**.",
+    "Copy the address it shows (starts with https://…) and paste it below for that chat.",
+    "Tick “Send a test card” for the test chat to check it; the team chats get the next "
+    "morning's notes at 7:30.",
+]
+
+
+def mask(url) -> str:
+    """Enough of an address to tell two apart, never the whole of it (it
+    works as a password: anyone with it can post to the chat)."""
+    u = str(url or "")
+    if not u:
+        return "not set"
+    host = u.split("/")[2] if u.count("/") >= 2 else u[:20]
+    return f"{host[:28]}… …{u[-6:]}"
+
+
+def valid_url(url):
+    """None if it looks like a Teams/Power Automate workflow address, else why not."""
+    u = str(url or "").strip()
+    if not u.startswith("https://"):
+        return "it should start with https://"
+    host = (u.split("/")[2].lower() if u.count("/") >= 2 else "").split(":")[0]
+    if not any(host.endswith(h) for h in ("powerplatform.com", "logic.azure.com",
+                                           "powerautomate.com", "office.com")):
+        return f"that isn't a Power Automate / Teams workflow address ({host or 'no host'})"
+    if " " in u or len(u) < 60:
+        return "the address looks cut short -- copy it again in full"
+    return None
+
+
+def set_webhook(chat, url, by, flow_name=""):
+    """Store a chat's new address; the one it replaces goes into its history."""
+    if chat not in CHATS:
+        raise ValueError(f"unknown chat {chat!r}")
+    why = valid_url(url)
+    if why:
+        raise ValueError(why)
+    import clock
+    import db
+    rec = db._load_key(WEBHOOKS_KEY) or {}
+    old = rec.get(chat)
+    hist = dict(rec.get("history") or {})
+    if old and old != url.strip():
+        hist[chat] = ([{"url": old, "until": clock.stamp(),
+                        "by": (rec.get("by_chat") or {}).get(chat) or rec.get("set_by")}]
+                      + list(hist.get(chat) or []))[:HISTORY_KEEP]
+    rec[chat] = url.strip()
+    rec["history"] = hist
+    rec.setdefault("by_chat", {})[chat] = by
+    rec.setdefault("at_chat", {})[chat] = clock.stamp()
+    if flow_name:
+        rec.setdefault("flows", {})[chat] = flow_name
+    db._upsert_key(WEBHOOKS_KEY, rec)
+    return rec
+
+
+def undo_webhook(chat, by):
+    """Put back the address this chat had before the last change."""
+    import db
+    rec = db._load_key(WEBHOOKS_KEY) or {}
+    hist = list((rec.get("history") or {}).get(chat) or [])
+    if not hist:
+        raise ValueError("no earlier address kept for this chat")
+    prev = hist.pop(0)
+    rec[chat] = prev["url"]
+    rec["history"][chat] = hist
+    rec.setdefault("by_chat", {})[chat] = f"{by} (undo)"
+    import clock
+    rec.setdefault("at_chat", {})[chat] = clock.stamp()
+    db._upsert_key(WEBHOOKS_KEY, rec)
+
+
+def send_test(chat, by):
+    """A small card to the chat, to prove the address works. (HTTP status, body)."""
+    import db
+    url = (db._load_key(WEBHOOKS_KEY) or {}).get(chat)
+    if not url:
+        return 0, "no address set"
+    name = CHATS.get(chat, (chat, ""))[0]
+    card = {"$schema": "http://adaptivecards.io/schemas/adaptive-card.json", "type": "AdaptiveCard",
+            "version": "1.4", "body": [
+                {"type": "TextBlock", "text": "✅ GC8 Housekeeping app connected", "weight": "Bolder",
+                 "size": "Medium", "wrap": True},
+                {"type": "TextBlock", "wrap": True, "isSubtle": True,
+                 "text": f"This chat ({name}) will get {CHATS.get(chat, ('', 'the app'))[1]}. "
+                         f"Test sent by {by}."}]}
+    return post(url, None, card=card)
