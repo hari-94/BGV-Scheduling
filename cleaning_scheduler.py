@@ -5425,6 +5425,42 @@ def assign_inspectors(groups, present_insp, per, rqs1, rqs2):
             if moved: break
         if not moved: break
         batches=_optimize_batches(batches)
+    # Fewest inspectors (Hari, 25 Nov: "max utilization -- one RQS can do 13").
+    # Grouping by a chart's main building put FC-A (buildings 1+3) and FC-D
+    # (1+2) in one round, which rule23 then split, handing the 3-room side to a
+    # third inspector beside Mayra's 8 -- 15 rooms on three people, though FC-D
+    # fitted Mayra's building-2 round (12, buildings 1+2). So: split any round
+    # that holds both sides of the 2/3 line, then merge rounds while the result
+    # stays within the room ceiling and never mixes buildings 2 and 3, nearest
+    # buildings first. Fair share below decides who takes each round.
+    def _side3(g):
+        return 3 in set(g.get("blds") or [])
+    _split = []
+    for b in batches:
+        if rule23.mixes({x for g in b for x in g["blds"]}):
+            three = [g for g in b if _side3(g)]
+            rest = [g for g in b if not _side3(g)]
+            _split += [x for x in (rest, three) if x]
+        elif b:
+            _split.append(b)
+    batches = _split
+    while True:
+        best = None
+        for i in range(len(batches)):
+            for j in range(i + 1, len(batches)):
+                both = batches[i] + batches[j]
+                if (_brms(both) > INSP_ROOM_MAX or len(both) > INSP_CHART_MAX
+                        or rule23.mixes({x for g in both for x in g["blds"]})):
+                    continue
+                merged = _bset(batches[i]) | _bset(batches[j])
+                key = (_hops(merged), len(merged), -_brms(both))
+                if best is None or key < best[0]:
+                    best = (key, i, j)
+        if best is None:
+            break
+        _, i, j = best
+        batches[i] = batches[i] + batches[j]
+        batches.pop(j)
     # The biggest round to the first inspector: the list comes in order of need
     # (fairness.py), so the RQS with the fewest rooms inspected lately gets the
     # most, and whoever has had the most is the one left without a round
