@@ -34,15 +34,13 @@ class NeedOrder(unittest.TestCase):
         self.assertEqual(fairness.need_order(["Nina New", "Vera Old"], led, {}, []),
                          ["Vera Old", "Nina New"])
 
-    def test_recent_days_count_more(self):
-        day = lambda n: {"fc": ["x"] * n, "sched": [("hk", "B1", "working", "1")]}
-        # Busy a year ago, light lately -> a low rate; the reverse -> a high one.
-        early = {"2025-12-01": day(8), "2026-11-20": day(2)}
-        late = {"2025-12-01": day(2), "2026-11-20": day(8)}
-        r_early = fairness._weighted_rate(early, "2025-11-25", "2026-11-24", "hk")
-        r_late = fairness._weighted_rate(late, "2025-11-25", "2026-11-24", "hk")
-        self.assertLess(r_early, 3 * 3)        # mostly the 2 recent Full Cleans (6 points)
-        self.assertGreater(r_late, 3 * 7)      # mostly the 8 recent ones (24 points)
+    def test_the_figure_is_the_rooms_views_rooms_per_day_with_rooms(self):
+        # Hari, 25 Nov: rooms over the days they had rooms, every day the same.
+        on = {"sched": [("rqs", "RQS", "working", "ON")]}
+        by_day = {"2025-12-01": dict(on, **{"in": list("abcdefgh")}),     # 8, a year ago
+                  "2026-11-20": dict(on, **{"in": list("abcd")}),         # 4, last week
+                  "2026-11-21": dict(on)}                                 # ON, no rooms
+        self.assertEqual(fairness._weighted_rate(by_day, "2025-11-25", "2026-11-24", "rqs"), 6.0)
 
     def test_a_day_with_rooms_is_a_day_on_whatever_the_sheet_said(self):
         by_day = {"2026-11-20": {"fc": ["a", "b", "c", "d"], "sched": []}}

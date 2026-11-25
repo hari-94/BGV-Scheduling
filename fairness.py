@@ -26,7 +26,6 @@ No Streamlit.
 import datetime as _dt
 
 WINDOW_DAYS = 365            # the whole year (Hari, 25 Nov: "to be fair")
-HALF_LIFE_DAYS = 60          # a day this old counts half as much as yesterday
 #: A housekeeper's room is worth its work (Hari, 25 Nov): a Full Clean (or a
 #: deep clean) is ~94 min on the charts, a Daily Service ~28. Dust n Vac is
 #: left out -- housekeepers rarely have it. An RQS counts Full Clean (and deep
@@ -67,11 +66,9 @@ def ledger(end=None, window=WINDOW_DAYS):
     rooms = rooms cleaned (housekeeper) or inspected (RQS)
     mix   = {"fc", "ds"}: rooms of each kind (an RQS: {"fc": inspected})
     points= HK_POINTS over the mix (an RQS: Full Clean inspections)
-    rate  = points per day on the schedule, recent days weighted more (each
-            day counts 0.5 ** (age / HALF_LIFE_DAYS)): what decides the order.
-            A new hire, a part-timer or someone back from leave is compared
-            by their days on, not by a total they couldn't have reached;
-            None for someone with no days on yet.
+    rate  = points (an RQS: FC inspections) per day they had rooms -- the
+            Rooms view's "rooms per day", every day the same: what decides the
+            order. None for someone with no rooms yet.
     The role is the Report's: the team the schedule had them in most."""
     import db
     import report_data as rd
@@ -135,17 +132,19 @@ def free_to_work(slot, role) -> bool:
 
 
 def _weighted_rate(by_day, frm, to, role):
-    """Work per day free to work (`free_to_work`), each day weighted by how
-    recent it is."""
-    end = _dt.date.fromisoformat(to)
-    w_rooms = w_days = 0.0
+    """Work per day they had rooms -- the Rooms view's own "rooms per day"
+    (Hari, 25 Nov: "just use this value"; his 1,282 rooms over 121 days =
+    10.6). Every day counts the same. Days on with no rooms don't lower it;
+    they only break ties (need_key)."""
+    total = days = 0.0
     for iso, slot in by_day.items():
         if not (frm <= iso <= to):
             continue
-        w = 0.5 ** ((end - _dt.date.fromisoformat(iso)).days / HALF_LIFE_DAYS)
-        w_rooms += w * points(slot, role)
-        w_days += w if free_to_work(slot, role) else 0.0
-    return round(w_rooms / w_days, 2) if w_days else None
+        n = points(slot, role)
+        if n > 0:
+            total += n
+            days += 1
+    return round(total / days, 2) if days else None
 
 
 def _names():

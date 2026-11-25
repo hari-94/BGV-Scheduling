@@ -591,11 +591,10 @@ _FS_CSS = """<style>
 .fs-track i{display:block;height:100%;background:#64748b;border-radius:999px;}
 .fs-num{font-size:12px;color:#5b6675;} .fs-num b{color:#1f2733;font-size:15px;}
 .fs-rep{font-size:11.5px;color:#5b6675;line-height:1.35;} .fs-rep b{color:#1f2733;}
-.fs-two{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px;}
-.fs-two > div{display:flex;flex-direction:column;}
-.fs-big{font-size:24px;font-weight:800;line-height:1.05;color:#1f2733;font-variant-numeric:tabular-nums;}
-.fs-big.fs-fair{font-size:18px;font-weight:700;color:#5b6675;padding-top:5px;}
-.fs-lab{font-size:10.5px;color:#7a8594;line-height:1.25;}
+.fs-one{display:flex;align-items:center;gap:10px;margin-top:2px;}
+.fs-big{font-size:26px;font-weight:800;line-height:1;color:#1f2733;font-variant-numeric:tabular-nums;}
+.fs-lab{font-size:11.5px;color:#7a8594;line-height:1.3;} .fs-lab b{color:#1f2733;font-weight:600;}
+.fs-rv{color:#94a3b8;font-style:italic;}
 .fs-why{font-size:12.5px;color:#1f2733;line-height:1.4;border-top:1px dashed #e3e7ee;padding-top:5px;}
 
 </style>"""
@@ -610,11 +609,11 @@ def fair_tab():
     fresh.latest("fairness")
     st.markdown(_FS_CSS, unsafe_allow_html=True)
     st.markdown('<div class="rp-h1">⚖️ Fair share</div><div class="rp-src">'
-                '<b>The rule:</b> over the whole year, whoever has averaged the <b>least work '
-                'per day on the schedule</b> gets work first, and the last few weeks count more '
-                'than months ago. When there are more people than work, whoever has averaged the '
-                '<b>most</b> gets the day free. Per day, so a new hire, a part-timer or someone '
-                'back from leave is compared fairly.<br><b>Work</b> for a housekeeper is points: '
+                '<b>The rule:</b> over the year, whoever has averaged the <b>least work per day '
+                'they had rooms</b> — the Rooms view\'s "rooms per day" — gets work first. When there '
+                'are more people than work, whoever has averaged the <b>most</b> gets the day free. '
+                'Per day, so a new hire, a part-timer or someone back from leave is compared fairly.'
+                '<br><b>Work</b> for a housekeeper is points: '
                 'a Full Clean room <b>3</b>, a Daily Service <b>1</b>. '
                 'For an RQS it is <b>Full Clean inspections</b> only.</div>', unsafe_allow_html=True)
     rec = (db._load_key(fairness.KEY) or {}).get("days") or {}
@@ -662,6 +661,17 @@ def fair_tab():
             mins[h] = mins.get(h, 0) + int(float(g.get("time") or 0))
         if i and g.get("service_type") == "Full Clean":
             rooms[i] = rooms.get(i, 0) + len(g.get("rooms") or [])
+
+    def none_on(r):
+        gap = r.get("sched", 0) - r.get("busy", 0)
+        return f" · {gap} more days on with none" if gap > 0 else ""
+
+    def rv_note(r):
+        """Why the Rooms view's figure is higher, in the person's own numbers."""
+        if not r.get("busy") or r.get("sched", 0) <= r.get("busy", 0):
+            return ""
+        return (f'<br><span class="fs-rv">Rooms view shows {r["rooms"] / r["busy"]:.1f} — it counts '
+                f'only the {r["busy"]} days with rooms</span>')
 
     def rv_txt(r):
         return f'{r["rooms"] / r["busy"]:.1f}' if r.get("busy") else "–"
@@ -714,6 +724,7 @@ def fair_tab():
             continue
         working, free, odd, most_worked = verdict(rows, got)
         u = "points a day" if key == "hk" else "Full Clean inspections a day"
+        big_label = "points a day (FC 3 · DS 1)" if key == "hk" else "FC rooms inspected a day"
         n_free = sum(1 for r in rows if not got.get(r["name"]))
         st.markdown(f"#### {title}")
         c1, c2, c3 = st.columns(3)
@@ -763,14 +774,8 @@ def fair_tab():
         rv = [r["rooms"] / r["busy"] for r in plain if r.get("busy")]
         rv_avg = sum(rv) / len(rv) if rv else 0
         what = "inspecting" if key != "hk" else "cleaning"
-        a1, a2 = st.columns(2)
-        a1.metric(f"Team average · Rooms view", f"{rv_avg:.1f}",
-                  help=f"Rooms per {what} day, as on the Rooms view: rooms ÷ the days they had rooms.")
-        a1.caption(f"rooms per {what} day")
-        a2.metric("Team average · Fair share", f"{avg:.1f}",
-                  help="What the order is made on: work per day free to work over the year, "
-                       "recent weeks counting more. A day they could have had rooms and didn't counts.")
-        a2.caption(f"{u} free to work · highest {most:.1f}")
+        st.markdown(f"Team average: **{avg:.1f} {big_label}** on the days they had rooms · "
+                    f"highest {most:.1f}", unsafe_allow_html=True)
         out = ['<div class="fs-list">']
         for r in sorted(rows, key=lambda r: (rate(r), r["rank"])):
             g = got.get(r["name"])
@@ -787,14 +792,11 @@ def fair_tab():
                 f'<div class="fs-row {cls}"><div class="fs-top">'
                 f'<span class="fs-name">{html.escape(r["name"])}{" <i>new</i>" if r.get("new") else ""}</span>'
                 f'<span class="fs-tag">{html.escape(tag)}</span></div>'
-                f'<div class="fs-two">'
-                f'<div><span class="fs-big">{rv_txt(r)}</span><span class="fs-lab">Rooms view · rooms per '
-                f'{"inspecting" if key != "hk" else "cleaning"} day</span></div>'
-                f'<div><span class="fs-big fs-fair">{rate(r):.1f}</span><span class="fs-lab">Fair share · '
-                f'{u}</span></div></div>'
+                f'<div class="fs-one"><span class="fs-big">{rate(r):.1f}</span>'
+                f'<span class="fs-lab"><b>{big_label}</b><br>over {r.get("busy", 0)} days with rooms this year</span></div>'
                 f'<span class="fs-track"><i style="width:{w:.0f}%"></i></span>'
-                f'<div class="fs-rep">This year: {mix_txt(r, key)} · had rooms on <b>{r.get("busy", 0)}</b> of '
-                f'{r.get("sched", 0)} days free to {"inspect" if key != "hk" else "clean"}{without(r)}</div>'
+                f'<div class="fs-rep">{mix_txt(r, key)} · had rooms on <b>{r.get("busy", 0)}</b> days'
+                f'{none_on(r)}</div>'
                 f'<div class="fs-why">{html.escape(why(r, g))}</div></div>')
         out.append("</div>")
         st.markdown("".join(out), unsafe_allow_html=True)
@@ -807,17 +809,11 @@ def fair_tab():
             "- **Housekeepers:** points = 3 a Full Clean (or deep clean) room, 1 a Daily Service — "
             "roughly the minutes each takes on the charts (≈94 and ≈28). Dust n Vac isn't counted. "
             "**RQS:** Full Clean (and deep clean) inspections only.\n"
-            "- **Days free to work:** days on the schedule for ordinary work — not other-work / "
-            "project days, and for an RQS not RQS 1 or RQS 2 days, whose rounds are set by role. "
-            "A day they had rooms always counts.\n"
-            "- **Why it can be a little lower than the Rooms view:** the Rooms view divides by the "
-            "days someone *had* rooms; fair share by the days they were **free to work**, so a day "
-            "they could have had rooms and didn't shows up — that is what it corrects. Each card "
-            "shows both.\n"
-            "- **A day** = that ÷ days free to work. Each day counts by how recent it "
-            f"is: a day {fairness.HALF_LIFE_DAYS} days ago counts half, twice that a quarter. "
-            "Any day with rooms counts as a day on.\n"
-            "- People level on that: the one left free more often goes first.\n"
+            "- **A day** = that ÷ the days they had rooms — the same as the Rooms view's "
+            "\"rooms per day\". Every day counts the same.\n"
+            "- **Days on with none:** days on the schedule for ordinary work (not other-work, "
+            "and for an RQS not RQS 1 / RQS 2) with no rooms. They don't change the figure; "
+            "when two people are level, the one with more of them goes first.\n"
             "- **RQS 1 and RQS 2** keep their own rounds whatever the order; **light duty** "
             "and **new** people are shown but not judged.\n"
             "- The order is worked out at each morning's build and kept, so a past day shows "
