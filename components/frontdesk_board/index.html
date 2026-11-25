@@ -117,6 +117,43 @@ html[data-theme="dark"] .theme .moon{display:block;}
 .tile.on{border-color:var(--acc);background:var(--accbg);box-shadow:0 0 0 4px var(--glow);}
 .tile.zero{opacity:.55;}
 
+/* the desk's four cards */
+.desk{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
+.dc{position:relative;text-align:left;border:1.5px solid var(--line);background:var(--card);border-radius:14px;
+  padding:11px 14px 10px 16px;cursor:pointer;color:var(--ink);min-width:0;overflow:hidden;box-shadow:var(--shadow);
+  transition:transform .18s ease,box-shadow .2s ease,border-color .2s ease,background-color .35s ease;}
+.dc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);}
+.dc:hover{transform:translateY(-2px);}
+.dc .dl{display:block;font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dc .n{display:block;font-size:28px;font-weight:700;line-height:1.15;color:var(--c);font-variant-numeric:tabular-nums;}
+.dc .bar{display:block;height:5px;border-radius:999px;background:var(--line2);margin:5px 0 4px;overflow:hidden;}
+.dc .bar i{display:block;height:100%;background:var(--c);border-radius:999px;transition:width .7s cubic-bezier(.22,1,.36,1);}
+.dc.count .bar{visibility:hidden;}
+.dc .sub{display:block;font-size:11.5px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dc.on{border-color:var(--c);background:var(--accbg);box-shadow:0 0 0 4px var(--glow);}
+.dc.zero .n{opacity:.45;}
+/* housekeeping's stages: one slim row of filters */
+.pills{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.pl-list{display:flex;gap:6px;flex-wrap:wrap;}
+.pill{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:var(--card);color:var(--ink2);font-size:12.5px;font-weight:500;
+  transition:border-color .2s,background .2s,color .2s;}
+.pill i{width:8px;height:8px;border-radius:50%;display:inline-block;}
+.pill b{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;}
+.pill:hover{border-color:var(--acc);}
+.pill.on{border-color:var(--acc);background:var(--accbg);color:var(--ink);}
+.pill.zero{opacity:.5;}
+.done{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink2);white-space:nowrap;}
+.done b{color:var(--ink);}
+.mini{display:inline-block;width:120px;height:6px;border-radius:999px;background:var(--line2);overflow:hidden;}
+.mini i{display:block;height:100%;background:#1a9e4b;border-radius:999px;transition:width .7s cubic-bezier(.22,1,.36,1);}
+@media (max-width:760px){
+  .desk{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+  .dc .n{font-size:24px;}
+  .done{width:100%;}
+  .mini{flex:1;}
+}
+
 /* table */
 .wrap{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
   overflow:auto;position:relative;}
@@ -264,8 +301,8 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
     </div>
     <button class="btn tr" id="clear" title="Clear the search and the filter">Clear filter</button>
   </div>
-  <div class="prog tr" id="prog"></div>
-  <div class="tiles" id="tiles"></div>
+  <div class="desk" id="desk"></div>
+  <div class="pills tr" id="pills"></div>
   <div class="wrap tr" id="wrap"><table><thead id="head"></thead><tbody id="body"></tbody></table>
     <div class="empty" id="empty" style="display:none"></div></div>
 </div>
@@ -357,25 +394,34 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
     if (r.status === "pending") { return "awaiting"; }
     return "other";
   }
-  var TILES = [
-    ["all", "All rooms", null, function () { return true; }, "Every room on today&#39;s charts"],
-    // The desk's Pre-Reg tab (prereg.py): the number is the rooms on it not
-    // ready yet; a click lists every room on it, ready ones too.
+  // What the desk works to, big: each card counts what is still to come and
+  // filters the list to it (Hari, 25 Nov: the strip had eleven tiles and a
+  // progress card -- too much). [key, label, colour, on the list?, still to
+  // go? (null: a plain count), tooltip]
+  function ready(r) { return bucket(r) === "inspected"; }
+  var DESK = [
+    ["arriving", "Arrivals to go", "#2f6fd6", function (r) { return !!r.arriving; },
+     function (r) { return !!r.arriving && !ready(r); }, "A guest arrives today: rooms not inspected yet"],
     ["prereg", "Pre-reg to go", "#7c3aed", function (r) { return !!r.prereg; },
-     "On the desk&#39;s Pre-Reg list: the number is how many are not inspected yet",
-     function (r) { return !!r.prereg && bucket(r) !== "inspected"; }],
+     function (r) { return !!r.prereg && !ready(r); }, "On the desk&#39;s Pre-Reg list: rooms not inspected yet"],
+    ["late", "Late out", "#e0730f", function (r) { return !r.departed && !!(r.late_out || r.late_report); },
+     null, "Late checkout, from the Arrival Report or the desk, not departed yet"],
+    ["departed", "Departed", "#16a34a", function (r) { return !!r.departed; },
+     null, "Marked departed by the desk"]
+  ];
+  // Housekeeping's stages, small: a filter, not a headline.
+  var PILLS = [
+    ["all", "All", null, function () { return true; }, "Every room on today&#39;s charts"],
     ["awaiting", "Awaiting", "#94a3b8", function (r) { return bucket(r) === "awaiting"; }, "Awaiting service"],
     ["cleaning", "Cleaning", "#e89611", function (r) { return bucket(r) === "cleaning"; }, "Cleaning started"],
     ["toinspect", "To inspect", "#2f80ed", function (r) { return bucket(r) === "toinspect"; }, "Cleaned, waiting for the RQS"],
     ["inspected", "Inspected", "#1a9e4b", function (r) { return bucket(r) === "inspected"; }, "Inspected: ready"],
     ["other", "DND / later", "#a855f7", function (r) { return bucket(r) === "other"; }, "Do not disturb, return later, service refused, help"],
-    ["late", "Late out", "#e0730f", function (r) { return !r.departed && !!(r.late_out || r.late_report); }, "Late checkout, from the Arrival Report or the desk"],
-    ["departed", "Departed", "#16a34a", function (r) { return !!r.departed; }, "Marked departed by the desk"],
-    ["arriving", "Arriving", "#12447e", function (r) { return !!r.arriving; }, "A guest arrives today"],
     ["added", "Added", "#0e7490", function (r) { return !!r.added; }, "Added to the day&#39;s sheet after the morning build"]
   ];
   var TEST = {};
-  TILES.forEach(function (t) { TEST[t[0]] = t[3]; });
+  DESK.forEach(function (t) { TEST[t[0]] = t[3]; });
+  PILLS.forEach(function (t) { TEST[t[0]] = t[3]; });
   var ORDER = {awaiting: 0, cleaning: 1, toinspect: 2, inspected: 3, other: 4};
   var COLS = [
     ["room", "Room", "room"], ["status", "Status", "status"], ["hk", "Housekeeper", "hk"], ["rqs", "RQS", "rqs"],
@@ -432,58 +478,52 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
     requestAnimationFrame(step);
   }
 
-  function drawProgress(rows) {
-    var n = rows.length || 1, c = {awaiting: 0, cleaning: 0, toinspect: 0, inspected: 0, other: 0};
-    var arr = 0, arrReady = 0;
-    rows.forEach(function (r) {
-      c[bucket(r)] += 1;
-      if (r.arriving) { arr += 1; if (bucket(r) === "inspected") { arrReady += 1; } }
-    });
-    var parts = [["inspected", "Inspected", "#1a9e4b"], ["toinspect", "Cleaned, to inspect", "#2f80ed"],
-                 ["cleaning", "Cleaning", "#e89611"], ["awaiting", "Awaiting", "#94a3b8"], ["other", "DND / later / refused", "#a855f7"]];
-    var box = document.getElementById("prog");
-    if (!box.firstChild) {
-      box.innerHTML = '<div class="top"><span id="pk1"></span><span id="pk2"></span></div><div class="stack" id="stack">' +
-        parts.map(function (p) { return '<i data-k="' + p[0] + '" style="width:0;background:' + p[2] + '"></i>'; }).join("") +
-        '</div><div class="legend" id="legend"></div>';
-    }
-    document.getElementById("pk1").innerHTML = "<b>" + c.inspected + "</b> of " + rows.length + " rooms inspected &middot; " +
-      Math.round(100 * c.inspected / n) + "%";
-    document.getElementById("pk2").innerHTML = arr ? "Arrivals ready <b>" + arrReady + "</b> of " + arr : "";
-    Array.prototype.forEach.call(document.querySelectorAll("#stack i"), function (el) {
-      el.style.width = (100 * c[el.getAttribute("data-k")] / n) + "%";
-    });
-    document.getElementById("legend").innerHTML = parts.map(function (p) {
-      return '<span><i style="background:' + p[2] + '"></i>' + esc(p[1]) + " " + c[p[0]] + "</span>";
-    }).join("");
-  }
-
-  function drawTiles(rows, ts) {
-    var box = document.getElementById("tiles");
-    var inSearch = rows.filter(function (r) { return matches(r, ts); });
-    if (box.children.length !== TILES.length) {
-      box.innerHTML = TILES.map(function (t) {
-        return '<button class="tile tr" data-tile="' + t[0] + '" title="' + t[4] + '"><span class="n">0</span><span class="l">' +
-          (t[2] ? '<span class="d" style="background:' + t[2] + '"></span>' : "") + esc(t[1]) + '</span></button>';
+  function drawDesk(rows) {
+    var box = document.getElementById("desk"), pi = args.prereg || {};
+    if (box.children.length !== DESK.length) {
+      box.innerHTML = DESK.map(function (t) {
+        return '<button class="dc tr" data-tile="' + t[0] + '" title="' + t[5] + '" style="--c:' + t[2] + '">' +
+          '<span class="dl">' + esc(t[1]) + '</span><span class="n">0</span>' +
+          '<span class="bar"><i></i></span><span class="sub"></span></button>';
       }).join("");
     }
-    TILES.forEach(function (t, i) {
-      var el = box.children[i], n = inSearch.filter(t[5] || t[3]).length;
+    DESK.forEach(function (t, i) {
+      var el = box.children[i], on = rows.filter(t[3]), all = on.length;
+      var n = t[4] ? on.filter(t[4]).length : all, done = all - n;
       el.classList.toggle("on", state.tile === t[0]);
-      if (t[0] === "prereg") {
-        var all = inSearch.filter(t[3]).length, pi = args.prereg || {}, sub = el.querySelector(".sub");
-        if (!sub) { sub = document.createElement("span"); sub.className = "sub"; el.appendChild(sub); }
-        sub.textContent = pi.carried ? "Yesterday's list still up" : pi.error ? "Couldn't read the list" :
-          all ? "of " + all + (pi.at ? " · " + pi.at : "") :
-          pi.at ? "None on the list · read " + pi.at : "List not read yet";
-        el.classList.add("pre");
-        el.classList.toggle("zero", all === 0);
-      } else {
-        el.classList.toggle("zero", n === 0 && t[0] !== "all");
-      }
+      el.classList.toggle("zero", all === 0);
+      el.classList.toggle("count", !t[4]);
       countUp(el.querySelector(".n"), lastCounts[t[0]], n);
       lastCounts[t[0]] = n;
+      el.querySelector(".bar i").style.width = (t[4] && all ? 100 * done / all : 0) + "%";
+      var sub = t[4] ? (all ? done + " of " + all + " ready" : "none today") :
+        t[0] === "late" ? (all === 1 ? "guest still in" : "guests still in") : "marked by the desk";
+      if (t[0] === "prereg") {
+        sub = pi.carried ? "yesterday's list still up" : pi.error && !all ? "couldn't read the list" :
+          !all ? (pi.at ? "none on the list" : "list not read yet") : sub + (pi.at ? " \u00b7 " + pi.at : "");
+      }
+      el.querySelector(".sub").textContent = sub;
     });
+  }
+
+  function drawPills(rows) {
+    var box = document.getElementById("pills");
+    if (!box.firstChild) {
+      box.innerHTML = '<div class="pl-list">' + PILLS.map(function (t) {
+        return '<button class="pill tr" data-tile="' + t[0] + '" title="' + t[4] + '">' +
+          (t[2] ? '<i style="background:' + t[2] + '"></i>' : "") + esc(t[1]) + ' <b>0</b></button>';
+      }).join("") + '</div><div class="done"><span id="donet"></span><span class="mini"><i id="donei"></i></span></div>';
+    }
+    var list = box.firstChild;
+    PILLS.forEach(function (t, i) {
+      var el = list.children[i], n = rows.filter(t[3]).length;
+      el.classList.toggle("on", state.tile === t[0]);
+      el.classList.toggle("zero", n === 0 && t[0] !== "all");
+      el.querySelector("b").textContent = n;
+    });
+    var ins = rows.filter(ready).length, tot = rows.length || 1;
+    document.getElementById("donet").innerHTML = "<b>" + ins + "</b> of " + rows.length + " inspected";
+    document.getElementById("donei").style.width = (100 * ins / tot) + "%";
   }
 
   function editor(r) {
@@ -595,8 +635,9 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
   function draw() {
     var rows = args.rows || [], ts = terms(), now = Date.now();
     sbox.classList.toggle("has", !!state.q);
-    drawProgress(rows);
-    drawTiles(rows, ts);
+    var inSearch = rows.filter(function (r) { return matches(r, ts); });
+    drawDesk(inSearch);
+    drawPills(inSearch);
     var test = TEST[state.tile] || TEST.all;
     var shown = rows.filter(function (r) { return matches(r, ts) && test(r); });
     // The Pre-Reg list: rooms still to be ready first, then the ready ones.
