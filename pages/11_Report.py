@@ -590,6 +590,7 @@ _FS_CSS = """<style>
 .fs-track{flex:0 0 180px;height:7px;border-radius:999px;background:#edf0f4;overflow:hidden;}
 .fs-track i{display:block;height:100%;background:#64748b;border-radius:999px;}
 .fs-num{font-size:12.5px;color:#5b6675;} .fs-num b{color:#1f2733;font-size:14px;}
+.fs-rep{font-size:12.5px;color:#5b6675;margin:-2px 0 5px;} .fs-rep b{color:#1f2733;}
 .fs-why{font-size:14px;color:#1f2733;line-height:1.45;}
 @media (max-width:640px){ .fs-track{flex-basis:110px;} }
 </style>"""
@@ -656,6 +657,16 @@ def fair_tab():
             mins[h] = mins.get(h, 0) + int(float(g.get("time") or 0))
         if i and g.get("service_type") == "Full Clean":
             rooms[i] = rooms.get(i, 0) + len(g.get("rooms") or [])
+
+    def report_line(r, key):
+        """The Rooms view's own figure beside ours (Hari, 25 Nov), so the two can
+        be checked against each other: rooms per day they had rooms, and on how
+        many of their days on the schedule they had any."""
+        busy, sched, n = r.get("busy", 0), r.get("sched", 0), r.get("rooms", 0)
+        what = "inspecting" if key != "hk" else "cleaning"
+        per = f"<b>{n / busy:.1f}</b> rooms per {what} day" if busy else "no rooms yet"
+        return (f"Rooms view: {per} · had rooms on <b>{busy}</b> of {sched} days on the schedule"
+                + (f" — <b>{sched - busy}</b> without" if sched > busy else ""))
 
     def mix_txt(r, key):
         """This year's rooms by kind: "541 FC · 621 DS", or "926 FC inspected"."""
@@ -757,6 +768,7 @@ def fair_tab():
                 f'<span class="fs-tag">{html.escape(tag)}</span></div>'
                 f'<div class="fs-bar"><span class="fs-track"><i style="width:{w:.0f}%"></i></span>'
                 f'<span class="fs-num"><b>{rate(r):.1f}</b> {u} · this year: {mix_txt(r, key)}</span></div>'
+                f'<div class="fs-rep">{report_line(r, key)}</div>'
                 f'<div class="fs-why">{html.escape(why(r, g))}</div></div>')
         out.append("</div>")
         st.markdown("".join(out), unsafe_allow_html=True)
@@ -769,6 +781,10 @@ def fair_tab():
             "- **Housekeepers:** points = 3 a Full Clean (or deep clean) room, 1 a Daily Service — "
             "roughly the minutes each takes on the charts (≈94 and ≈28). Dust n Vac isn't counted. "
             "**RQS:** Full Clean (and deep clean) inspections only.\n"
+            "- **Why it's lower than the Rooms view's \"rooms per day\":** the Rooms view divides by "
+            "the days someone *had* rooms (how big their rounds are). Fair share divides by **every "
+            "day on the schedule**, so a day someone was left without rooms shows up — that is "
+            "the unfairness it corrects. Each row shows both.\n"
             "- **A day** = that ÷ days on the schedule. Each day counts by how recent it "
             f"is: a day {fairness.HALF_LIFE_DAYS} days ago counts half, twice that a quarter. "
             "Any day with rooms counts as a day on.\n"
