@@ -667,6 +667,31 @@ def fair_tab():
                 "or a building with no chart left, can do this.)")
 
         top = max((r["rooms"] for r in rows), default=0) or 1
+        plain = [r for r in rows if not r.get("note") and not r.get("new")]
+        most = max((r["rooms"] for r in plain), default=0)
+        avg = round(sum(r["rooms"] for r in plain) / len(plain)) if plain else 0
+        odd_names = {r["name"] for r in odd}
+
+        def why(r, g):
+            """In one sentence, why this person got what they got (Hari, 25 Nov)."""
+            if r.get("note"):
+                return "Has a set role this day, so the order doesn't apply."
+            if r.get("new"):
+                return ("New: no rooms yet in the last four weeks, so first in line." if g else
+                        "New: no rooms yet in the last four weeks — should have been first in line.")
+            n = r["rooms"]
+            if g:
+                if n < avg:
+                    return (f"Had {n} rooms, {avg - n} below the team average ({avg}) — "
+                            "behind on rooms, so they get work first.")
+                return (f"Had {n} rooms ({n - avg} above the average of {avg}) — "
+                        "there was enough work for them too.")
+            if r["name"] in odd_names:
+                return (f"Had only {n} rooms, yet someone with {most_worked} worked — "
+                        "this one wasn't decided by fair share.")
+            return (f"Had {n} rooms — more than anyone who worked (at most {most_worked}), so "
+                    "this is their turn for a lighter day.")
+
         table = []
         for r in sorted(rows, key=lambda r: (r["rooms"], r["rank"])):
             g = got.get(r["name"])
@@ -678,10 +703,14 @@ def fair_tab():
                 today_txt = "Free"
             table.append({"Person": r["name"] + (" (new)" if r.get("new") else ""),
                           "Rooms, last 4 weeks": r["rooms"],
-                          "This day": today_txt})
+                          "This day": today_txt,
+                          "Why": why(r, g)})
+        st.caption(f"Team average over the four weeks: **{avg} rooms** · busiest: **{most}**.")
         st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True,
                      column_config={"Rooms, last 4 weeks": st.column_config.ProgressColumn(
-                         "Rooms, last 4 weeks", format="%d", min_value=0, max_value=top)})
+                         "Rooms, last 4 weeks", format="%d", min_value=0, max_value=top, width="small"),
+                         "This day": st.column_config.TextColumn("This day", width="medium"),
+                         "Why": st.column_config.TextColumn("Why", width="large")})
 
     with st.expander("How it's counted, and the full numbers"):
         st.markdown(
