@@ -16,9 +16,10 @@ _component = components.declare_component(
 
 
 def board(rows, times, stamp: str, can_edit: bool, key: str, day: str = "",
-          stale: bool = False, ack: str = None, ack_err: str = None):
+          stale: bool = False, ack: str = None, ack_err: str = None, prereg: dict = None):
     """Draw the board. Returns the last thing the desk did --
     {id, action, room, value} -- or None. `ack` is the id of the last one the
-    page saved (with `ack_err` if it failed): the board's toast waits for it."""
+    page saved (with `ack_err` if it failed): the board's toast waits for it.
+    `prereg` = {"at", "carried", "error"}: when the Pre-Reg list was read."""
     return _component(rows=rows, times=times, stamp=stamp, can_edit=can_edit, day=day,
-                      stale=stale, ack=ack, ack_err=ack_err, key=key, default=None)
+                      stale=stale, ack=ack, ack_err=ack_err, prereg=prereg or {}, key=key, default=None)

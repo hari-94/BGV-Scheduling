@@ -584,6 +584,36 @@ def sync_sheet(cfg):
     return out
 
 
+PREREG_SECONDS = 300
+_PREREG_SEEN = {}
+
+
+def sync_prereg():
+    """The front desk's Pre-Reg tab (Daily Tasks Ops Departments.xlsx, GC8Team)
+    onto their board: which rooms are pre-registered today (prereg.py). Read
+    from SharePoint every PREREG_SECONDS while the mirror runs; logged only
+    when the list changes or can't be read."""
+    import prereg
+    day = clock.today_iso()
+    known = set(db.get_room_statuses(day) or {})
+    for g in (db.load_full_schedule(day) or {}).get("groups_data") or []:
+        known.update(str(r.get("room", "")).strip().upper() for r in g.get("rooms") or [])
+    rec = prereg.refresh(known)
+    if rec.get("error"):
+        if _PREREG_SEEN.get("err") != rec["error"]:
+            log(f"pre-reg: couldn't read the tab: {rec['error']}")
+        _PREREG_SEEN["err"] = rec["error"]
+        return rec
+    _PREREG_SEEN["err"] = None
+    sig = [e["unit"] for e in rec.get("entries") or []]
+    if sig != _PREREG_SEEN.get("sig"):
+        _PREREG_SEEN["sig"] = sig
+        n = sum(len(e["rooms"]) for e in rec.get("entries") or [])
+        log(f"pre-reg: {len(sig)} on the list, {n} room(s)"
+            + (" -- yesterday's, not cleared yet" if rec.get("carried") else ""))
+    return rec
+
+
 #: app_settings: {"date", "cells": {room: HSKP cell as last seen}, "moves": [...],
 #: "skipped": [...]} -- today's housekeeper cells and what follow_sheet did.
 FOLLOW_KEY = "sheet_follow"
@@ -757,6 +787,12 @@ def _mirror_loop():
                             rec["sheet"] = bool((sync_sheet(cfg) or {}).get("changed"))
                         except Exception as ex:
                             log(f"sheet -> app: {type(ex).__name__}: {ex}")
+                    if time.time() - _PREREG_SEEN.get("at", 0) > PREREG_SECONDS:
+                        _PREREG_SEEN["at"] = time.time()
+                        try:
+                            sync_prereg()
+                        except Exception as ex:
+                            log(f"pre-reg -> board: {type(ex).__name__}: {ex}")
                 except Exception as ex:
                     rec = {"at": clock.stamp(), "error": f"{type(ex).__name__}: {ex}"}
                     log(f"room status sync failed: {rec['error']}")

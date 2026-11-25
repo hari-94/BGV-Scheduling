@@ -31,7 +31,7 @@
   --shadow:0 1px 2px rgba(16,26,42,.04),0 8px 24px rgba(16,26,42,.06);
   --head:#f3f5f8;--edit:#f7f9fc;--chip-n:#eef1f5;--chip-n-ink:#4a5566;
   --late:#fde7d4;--late-ink:#8a3b05;--dep:#d6f2df;--dep-ink:#14532d;--early:#dbeafe;--early-ink:#12447e;
-  --added:#c9eef4;--added-ink:#164e63;--fd:#e7effa;--fd-ink:#1e3a5f;
+  --added:#c9eef4;--added-ink:#164e63;--pre:#ede4fb;--pre-ink:#4c1d95;--fd:#e7effa;--fd-ink:#1e3a5f;
   --glow:rgba(59,130,214,.30);--toast:#16202e;--toast-ink:#fff;
 }
 html[data-theme="dark"]{
@@ -40,7 +40,7 @@ html[data-theme="dark"]{
   --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
   --head:#151f2d;--edit:#101a27;--chip-n:#1c2736;--chip-n-ink:#b3bfcd;
   --late:#3a2410;--late-ink:#f8b77b;--dep:#12301f;--dep-ink:#86e0a8;--early:#14284a;--early-ink:#9cc3f5;
-  --added:#0f3440;--added-ink:#8adbe9;--fd:#16263d;--fd-ink:#a9c8f0;
+  --added:#0f3440;--added-ink:#8adbe9;--pre:#2a1f45;--pre-ink:#c9b2f7;--fd:#16263d;--fd-ink:#a9c8f0;
   --glow:rgba(91,156,240,.35);--toast:#e6edf5;--toast-ink:#0b1119;
 }
 *{box-sizing:border-box;}
@@ -147,6 +147,13 @@ tr.row.flash .chip{animation:pop .5s cubic-bezier(.34,1.56,.64,1);}
 .tag.late{background:var(--late);color:var(--late-ink);font-size:12px;padding:2px 8px;}
 .tag.dep{background:var(--dep);color:var(--dep-ink);font-size:12px;padding:2px 8px;}
 .tag.added{background:var(--added);color:var(--added-ink);}
+.tag.pre{background:var(--pre);color:var(--pre-ink);}
+.prc{font-size:12px;color:var(--pre-ink);background:var(--pre);border-radius:8px;padding:5px 8px;margin-top:4px;max-width:280px;}
+.prc b{font-size:10px;letter-spacing:.04em;margin-right:4px;}
+.prc .ok{font-weight:700;}
+.prc .no{opacity:.7;}
+.tile .sub{font-size:11px;color:var(--ink3);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tile.pre .n{color:var(--pre-ink);}
 .src{font-size:11px;color:var(--ink3);margin-top:3px;white-space:nowrap;}
 .t{white-space:nowrap;font-variant-numeric:tabular-nums;font-size:13px;}
 .pl{display:inline-block;min-width:64px;color:var(--ink3);font-size:11.5px;}
@@ -194,7 +201,7 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
 
 /* A computer: every tile on one line. A laptop: tighter cells, so the table
    fits without scrolling sideways. */
-@media (min-width:900px){ .tiles{grid-template-columns:repeat(10,minmax(0,1fr));} }
+@media (min-width:900px){ .tiles{grid-template-columns:repeat(11,minmax(0,1fr));} }
 @media (max-width:1340px) and (min-width:761px){
   td{padding:8px 7px;font-size:13px;}
   th{padding:9px 7px;}
@@ -352,6 +359,11 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
   }
   var TILES = [
     ["all", "All rooms", null, function () { return true; }, "Every room on today&#39;s charts"],
+    // The desk's Pre-Reg tab (prereg.py): the number is the rooms on it not
+    // ready yet; a click lists every room on it, ready ones too.
+    ["prereg", "Pre-reg to go", "#7c3aed", function (r) { return !!r.prereg; },
+     "On the desk&#39;s Pre-Reg list: the number is how many are not inspected yet",
+     function (r) { return !!r.prereg && bucket(r) !== "inspected"; }],
     ["awaiting", "Awaiting", "#94a3b8", function (r) { return bucket(r) === "awaiting"; }, "Awaiting service"],
     ["cleaning", "Cleaning", "#e89611", function (r) { return bucket(r) === "cleaning"; }, "Cleaning started"],
     ["toinspect", "To inspect", "#2f80ed", function (r) { return bucket(r) === "toinspect"; }, "Cleaned, waiting for the RQS"],
@@ -374,7 +386,7 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
   function terms() { return state.q.toLowerCase().split(/\s+/).filter(Boolean); }
   function matches(r, ts) {
     if (!ts.length) { return true; }
-    var hay = [r.room, r.hk, r.rqs, r.guest, r.arriving].join(" ").toLowerCase();
+    var hay = [r.room, r.hk, r.rqs, r.guest, r.arriving, r.prereg ? "pre-reg prereg " + r.prereg.unit : ""].join(" ").toLowerCase();
     for (var i = 0; i < ts.length; i++) { if (hay.indexOf(ts[i]) < 0) { return false; } }
     return true;
   }
@@ -456,9 +468,19 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
       }).join("");
     }
     TILES.forEach(function (t, i) {
-      var el = box.children[i], n = inSearch.filter(t[3]).length;
+      var el = box.children[i], n = inSearch.filter(t[5] || t[3]).length;
       el.classList.toggle("on", state.tile === t[0]);
-      el.classList.toggle("zero", n === 0 && t[0] !== "all");
+      if (t[0] === "prereg") {
+        var all = inSearch.filter(t[3]).length, pi = args.prereg || {}, sub = el.querySelector(".sub");
+        if (!sub) { sub = document.createElement("span"); sub.className = "sub"; el.appendChild(sub); }
+        sub.textContent = pi.carried ? "Yesterday's list still up" : pi.error ? "Couldn't read the list" :
+          all ? "of " + all + (pi.at ? " · " + pi.at : "") :
+          pi.at ? "None on the list · read " + pi.at : "List not read yet";
+        el.classList.add("pre");
+        el.classList.toggle("zero", all === 0);
+      } else {
+        el.classList.toggle("zero", n === 0 && t[0] !== "all");
+      }
       countUp(el.querySelector(".n"), lastCounts[t[0]], n);
       lastCounts[t[0]] = n;
     });
@@ -502,6 +524,21 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
     return h + '</div></div></td></tr>';
   }
 
+  // The Pre-Reg tab's own columns for a room (prereg.card).
+  function preCard(p) {
+    if (!p) { return ""; }
+    function yn(on, yes, no) { return on ? '<span class="ok">' + yes + ' &#10003;</span>' : '<span class="no">' + no + '</span>'; }
+    var bits = [];
+    if (p.checkin) { bits.push("Check-in: " + esc(p.checkin)); }
+    bits.push(yn(p.keys, "Keys made", "Keys not made"));
+    if (p.mobile) { bits.push(yn(true, "Mobile keys", "")); }
+    if (p.rushed) { bits.push('<span class="ok">Rush</span>'); }
+    bits.push(yn(p.zingle_added, "Pre-reg Zingled", "Not Zingled"));
+    bits.push(yn(p.ready_zingled, "Ready Zingled", "Ready not Zingled"));
+    return '<div class="prc"><b>PRE-REG ' + esc(p.unit) + '</b>' + bits.join(" &middot; ") +
+      (p.notes ? '<div>' + esc(p.notes) + '</div>' : "") + '</div>';
+  }
+
   function cell(c, r, ts) {
     var l = ' data-l="' + c[1] + '"';
     switch (c[0]) {
@@ -509,13 +546,15 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
         return '<td class="k"><span class="rm">' + mark(r.room, ts) + '</span><span class="svc" title="' + esc(r.service) + '">' +
           esc(r.svc) + '</span><br>' + (r.early ? '<span class="tag early">EARLY IN</span>' : "") +
           (r.held ? '<span class="tag held" title="Stayover, model or no guest yet: held off the charts">HELD</span>' : "") +
-          (r.added ? '<span class="tag added" title="Typed onto the day&#39;s GC8 Inspections tab after the morning build">ADDED</span>' : "") + '</td>';
+          (r.added ? '<span class="tag added" title="Typed onto the day&#39;s GC8 Inspections tab after the morning build">ADDED</span>' : "") +
+          (r.prereg ? '<span class="tag pre" title="On the desk&#39;s Pre-Reg list as ' + esc(r.prereg.unit) + '">PRE-REG</span>' : "") + '</td>';
       case "status":
         return '<td' + l + '><span class="chip' + (r.status === "cleaning_started" ? " live" : "") + '" style="' + chipStyle(r) +
           '"><span class="d" style="background:' + esc(r.dot) + '"></span>' + esc(r.label) + '</span></td>';
       case "hk":
         return '<td' + l + '>' + (r.hk ? mark(r.hk, ts) :
-          r.unassigned ? '<span class="unas">On the sheet, not assigned yet</span>' : '<span class="mut">&mdash;</span>') + '</td>';
+          r.unassigned ? '<span class="unas">On the sheet, not assigned yet</span>' :
+          r.off_charts ? '<span class="unas">Not on today&#39;s charts</span>' : '<span class="mut">&mdash;</span>') + '</td>';
       case "rqs": return '<td' + l + '>' + (r.rqs ? mark(r.rqs, ts) : '<span class="mut">&mdash;</span>') + '</td>';
       case "prog":
         var p = [["Started", r.started], ["Cleaned", r.cleaned], ["Inspected", r.inspected]]
@@ -536,7 +575,7 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
       case "arr":
         return '<td' + (r.arriving ? l : ' class="e"') + '>' + (r.arriving ? mark(r.arriving, ts) : '<span class="mut">&mdash;</span>') + '</td>';
       case "notes":
-        var n = (r.notes || []).map(function (x) { return '<div class="note">' + esc(x) + '</div>'; }).join("") +
+        var n = preCard(r.prereg) + (r.notes || []).map(function (x) { return '<div class="note">' + esc(x) + '</div>'; }).join("") +
           (r.fd_notes || []).map(function (x) { return '<div class="fdn"><b>FD</b>' + esc(x.text) + '</div>'; }).join("");
         return '<td' + (n ? l : ' class="e"') + '>' + (n || '<span class="mut">&mdash;</span>') + '</td>';
       case "acts":
@@ -560,7 +599,13 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
     drawTiles(rows, ts);
     var test = TEST[state.tile] || TEST.all;
     var shown = rows.filter(function (r) { return matches(r, ts) && test(r); });
+    // The Pre-Reg list: rooms still to be ready first, then the ready ones.
+    var preFirst = state.tile === "prereg";
     shown.sort(function (a, b) {
+      if (preFirst) {
+        var ra = bucket(a) === "inspected" ? 1 : 0, rb = bucket(b) === "inspected" ? 1 : 0;
+        if (ra !== rb) { return ra - rb; }
+      }
       var x = sortKey(a), y = sortKey(b);
       return (x < y ? -1 : x > y ? 1 : 0) * state.dir;
     });

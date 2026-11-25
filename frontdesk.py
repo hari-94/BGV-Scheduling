@@ -254,11 +254,13 @@ def _added(r) -> bool:
     return bool(r.get("added_on_sheet")) or         str(r.get("notes") or "").strip().lower() == "added on the sheet"
 
 
-def board(charts, statuses, marks, now=None, unplaced=()) -> list:
+def board(charts, statuses, marks, now=None, unplaced=(), prereg=None) -> list:
     """One row per room on today's charts, for the desk's table. `charts` are
     as assignments.todays_charts gives them (rooms under who holds them now),
     without the marks laid over; `statuses` is db.get_room_statuses();
-    `unplaced` are rooms on today's tab that no chart holds yet (`unplaced()`)."""
+    `unplaced` are rooms on today's tab that no chart holds yet (`unplaced()`);
+    `prereg` is {ROOM: entry} off the desk's Pre-Reg tab (prereg.for_day):
+    each such row carries it, and a pre-reg room no chart holds is listed too."""
     import daystart
     import roomstatus as rs
     now = now or clock.now()
@@ -336,6 +338,35 @@ def board(charts, statuses, marks, now=None, unplaced=()) -> list:
             "fd_notes": [{"id": n.get("id"), "text": n.get("text"), "by": n.get("by") or "",
                           "at": local_hhmm(n.get("at"))} for n in m.get("notes") or []],
         })
+    # Pre-registered: the desk's own list, on their rows; a room on it that
+    # nothing today holds still shows, so the count is the desk's count.
+    import prereg as _pr
+    for room, e in (prereg or {}).items():
+        room = str(room).strip().upper()
+        if room in seen:
+            continue
+        seen.add(room)
+        rec = statuses.get(room) or {}
+        st = rs.normalise(rec.get("status"))
+        label, short, dot, bg, ink = rs._meta(st)
+        m = marks.get(room) or {}
+        rows.append({
+            "room": room, "svc": "", "service": "", "held": False, "added": False,
+            "unassigned": False, "off_charts": True,
+            "status": st, "label": label, "short": short, "dot": dot, "bg": bg, "ink": ink,
+            "hk": _person(rec.get("housekeeper")), "rqs": _person(rec.get("inspector")),
+            "started": _past(rec.get("started_at"), now), "cleaned": _past(rec.get("cleaned_at"), now),
+            "inspected": _past(rec.get("inspected_at"), now),
+            "late_out": hhmm12(m["late_out"]) if m.get("late_out") else "",
+            "late_out_value": m.get("late_out") or "", "late_report": "", "late_report_value": "",
+            "departed": local_hhmm(m.get("departed_at")), "departed_by": m.get("departed_by") or "",
+            "arriving": "", "guest": "", "early": False, "notes": [],
+            "fd_notes": [{"id": n.get("id"), "text": n.get("text"), "by": n.get("by") or "",
+                          "at": local_hhmm(n.get("at"))} for n in m.get("notes") or []],
+        })
+    for r in rows:
+        e = (prereg or {}).get(r["room"])
+        r["prereg"] = _pr.card(e) if e else None
     rows.sort(key=lambda x: x["room"])
     return rows
 

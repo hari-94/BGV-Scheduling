@@ -149,6 +149,17 @@ reloads only what a page asks for). A change to them goes out with a
 requirements.txt touch, which does restart it; the office PC agent picks up
 its side (`reconcile_charts`, `sync_sheet`) on its next start.
 
+**The desk's Pre-Reg list** (prereg.py, Hari 25 Nov). The "Pre-Reg" tab of
+"Daily Tasks Ops Departments.xlsx" (GC8Team; no OneDrive copy on the office
+PC) is read through SharePoint by file id (`sharepoint.fetch_by_id`) every 5
+minutes in the mirror's hours (`hotsos_agent.sync_prereg`) into app_settings
+`prereg`; floor.py carries it, and the board's Pre-reg tile counts the rooms
+on it not inspected yet. The tab combines lock-offs ("3246EGHI" = E, G, H, I;
+a bare number = every room of it today) -- `prereg.split`. The guest's name
+and phone numbers are never copied. The tab has no date: a list identical to
+an earlier day's is `carried` and not counted. A failed read keeps the last
+list and records `error`.
+
 **A role the database doesn't take yet** (`db.NEW_ROLES`). `app_users` has a
 CHECK on role (supabase_setup.sql), and the publishable key can't ALTER it.
 Until the ALTER for `frontdesk` is run in Supabase's SQL editor, such an

@@ -30,7 +30,7 @@ st.set_page_config(page_title="Front Desk", page_icon="GC8", layout="wide")
 st.markdown("<style>[data-testid='stSidebarNav']{display:none!important;}</style>",
             unsafe_allow_html=True)
 auth.require_login()
-fresh.latest("i18n", "ui", "frontdesk", "floor")    # as they are on disk, not as first loaded
+fresh.latest("i18n", "ui", "prereg", "frontdesk", "floor", "frontdesk_board")    # as they are on disk, not as first loaded
 import frontdesk as fd                              # noqa: E402
 import frontdesk_board                              # noqa: E402
 ui.topnav("Front Desk")
@@ -137,9 +137,14 @@ def _board():
     hs_at = fd.local_hhmm(f.sync.get("at"))
     stamp = "Live" + (f" · HotSOS read {hs_at}" if hs_at else "") + f" · updated {fd.local_hhmm(clock.stamp())}"
     today = clock.today()
+    pr = getattr(f, "prereg", None) or {}
+    pre = {"at": fd.local_hhmm(pr.get("at")) if pr.get("date") == clock.today_iso() else "",
+           "carried": bool(pr.get("carried")) and pr.get("date") == clock.today_iso(),
+           "error": pr.get("error") or ""}
     frontdesk_board.board(rows, TIMES, stamp, CAN_EDIT, key="fdb",
                           day=f"{today:%A, %B} {today.day}", stale=_stale(f.sync),
-                          ack=st.session_state.get("_fd_done"), ack_err=st.session_state.get("_fd_err"))
+                          ack=st.session_state.get("_fd_done"), ack_err=st.session_state.get("_fd_err"),
+                          prereg=pre)
 
 
 _board()

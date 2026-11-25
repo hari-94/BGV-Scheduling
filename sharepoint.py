@@ -185,7 +185,20 @@ def _upload(file_name, data, expect_modified, timeout_ms):
     return out, None
 
 
-def _fetch(file_name, timeout_ms):
+def fetch_by_id(site, file_id, timeout_ms=60000):
+    """(bytes, info) for a file anywhere on `site` the profile can read, by its
+    unique id (the `sourcedoc` of its Excel Online link) -- e.g. the front
+    desk's Daily Tasks workbook on GC8Team (prereg.py)."""
+    if not _ONE_AT_A_TIME.acquire(timeout=150):
+        return None, {"error": "another SharePoint read is still running"}
+    try:
+        return _fetch(None, timeout_ms, site=site,
+                      url=f"{site}/_api/web/GetFileById('{file_id}')")
+    finally:
+        _ONE_AT_A_TIME.release()
+
+
+def _fetch(file_name, timeout_ms, site=SITE, url=None):
     try:
         from playwright.sync_api import sync_playwright
     except Exception as ex:
@@ -199,16 +212,17 @@ def _fetch(file_name, timeout_ms):
             except Exception:                      # otherwise its profile, hidden
                 hidden = ctx = p.chromium.launch_persistent_context(
                     PROFILE, channel="chrome", headless=True)
-            page = next((pg for pg in ctx.pages if pg.url.startswith(SITE)), None)
+            page = next((pg for pg in ctx.pages if pg.url.startswith(site)), None)
             opened = page is None
             if opened:
                 page = ctx.new_page()
-                page.goto(SITE, timeout=timeout_ms)
-                if not page.url.startswith(SITE):
+                page.goto(site, timeout=timeout_ms)
+                if not page.url.startswith(site):
                     page.close()
                     return None, {"error": "the office PC's Chrome isn't signed in to SharePoint"}
-            path = f"{FOLDER}/{file_name}".replace("'", "''")
-            url = f"{SITE}/_api/web/GetFileByServerRelativeUrl('{path}')"
+            if url is None:
+                path = f"{FOLDER}/{file_name}".replace("'", "''")
+                url = f"{SITE}/_api/web/GetFileByServerRelativeUrl('{path}')"
             out = page.evaluate(_JS, url)
             if opened:
                 page.close()

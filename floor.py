@@ -46,7 +46,7 @@ class Floor:
     """One day's floor, as every page sees it. Shared by every session: read
     it, never change it (assignments.todays_charts hands out copies)."""
 
-    def __init__(self, day, schedule, statuses, marks, unplaced, sync):
+    def __init__(self, day, schedule, statuses, marks, unplaced, sync, prereg=None):
         import frontdesk
         self.day = day
         self.fetched = time.time()
@@ -56,6 +56,7 @@ class Floor:
         self.marks = marks or {}
         self.unplaced = unplaced or []
         self.sync = sync or {}
+        self.prereg = prereg or {}          # the desk's Pre-Reg tab, as kept (prereg.py)
         # The charts the floor works to: the saved plan with the desk's late
         # checkouts, departures and notes on its rooms (frontdesk.apply).
         self.charts = frontdesk.apply(self.raw_charts, self.marks)
@@ -78,8 +79,10 @@ class Floor:
     def board(self, now=None):
         """The front desk's rows (frontdesk.board)."""
         import frontdesk
+        import prereg
         return frontdesk.board(self.raw_charts, self.statuses, self.marks, now=now,
-                               unplaced=self.unplaced)
+                               unplaced=self.unplaced,
+                               prereg=prereg.for_day(self.prereg, self.day))
 
 
 _LOCK = threading.Lock()
@@ -91,13 +94,15 @@ def _fetch(day):
     import db
     import frontdesk
     import hotsos_sync as hs
+    import prereg
     sched = db.load_full_schedule(day) or {}          # stamp-checked: downloads only on change
     statuses = db.get_room_statuses(day) or {}        # the same
     marks = frontdesk.load(day)
-    keys = db._load_keys([frontdesk.UNPLACED_KEY, hs.STATUS_SYNC_KEY])
+    keys = db._load_keys([frontdesk.UNPLACED_KEY, hs.STATUS_SYNC_KEY, prereg.KEY])
     up = keys.get(frontdesk.UNPLACED_KEY) or {}
     unplaced = (up.get("rooms") or []) if up.get("date") == day else []
-    return Floor(day, sched, statuses, marks, unplaced, keys.get(hs.STATUS_SYNC_KEY) or {})
+    return Floor(day, sched, statuses, marks, unplaced, keys.get(hs.STATUS_SYNC_KEY) or {},
+                 keys.get(prereg.KEY) or {})
 
 
 def today(fresh: bool = False, day: str = None) -> Floor:
