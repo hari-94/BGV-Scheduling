@@ -519,8 +519,11 @@ def health():
                           "The SharePoint Schedules folder isn't syncing.",
                           "Open OneDrive on the office PC and check it's signed in and syncing."))
     else:
-        waiting = _t(f.get("modified")) and _t(rs.get("at")) and \
-            (_t(f["modified"]) - _t(rs["at"])).total_seconds() > 300
+        # `checked`: the office PC read a later save and found it identical to
+        # the last import (hotsos_agent.sync_roster) -- nothing to wait for.
+        looked = max([t for t in (_t(rs.get("at")), _t(rs.get("checked"))) if t], default=None)
+        waiting = _t(f.get("modified")) and looked and \
+            (_t(f["modified"]) - looked).total_seconds() > 300
         cards.append(card("warn" if waiting else "ok", "Staff schedule sync",
                           "Saved changes not imported yet" if waiting else "Up to date",
                           f"Schedule.xlsx saved {_when(f.get('modified'))} · last import "

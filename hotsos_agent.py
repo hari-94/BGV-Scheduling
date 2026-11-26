@@ -955,6 +955,11 @@ def sync_roster(path, force=False):
     digest = hashlib.sha256(raw).hexdigest()
     st = _state()
     if not force and st.get("roster_sha") == digest:
+        # Saved again with nothing changed (26 Nov, 2:57: the Stats card said
+        # "not imported yet" for a save identical to the 2:28 import). Say it
+        # was looked at, once per save, so the card doesn't count it as waiting.
+        rec = db._load_key(hs.ROSTER_STATUS_KEY) or {}
+        db._upsert_key(hs.ROSTER_STATUS_KEY, dict(rec, checked=clock.stamp()))
         sync_roster.seen = seen
         return None
     status = {"at": clock.stamp(), "file": p.name}

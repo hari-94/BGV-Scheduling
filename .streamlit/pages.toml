@@ -4,11 +4,6 @@ name = "🧹 Schedule"
 icon = "🧹"
 
 [[pages]]
-path = "pages/1_Dashboard.py"
-name = "📊 Dashboard"
-icon = "📊"
-
-[[pages]]
 path = "pages/4_My_Home.py"
 name = "🏠 My Home"
 icon = "🏠"

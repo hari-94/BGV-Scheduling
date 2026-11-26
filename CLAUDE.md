@@ -29,7 +29,6 @@ several of them read the *real* schedule to test against a real day.
 | `cleaning_scheduler.py` | 6200 | the entry point and most of the app — see the section map below |
 | `pages/3_Roster_Import.py` | 1750 | the weekly staff sheet: upload, diff, week/month views, planning |
 | `pages/5_My_Rooms.py` | 800 | the phone page: a housekeeper's rooms, and an RQS's whole team |
-| `pages/1_Dashboard.py` | 340 | today's floor as a timeline, one bar per room |
 | `pages/2_Admin.py` | 520 | accounts, sign-in history, and Service Passwords (the agent PCs' logins, via `credentials.py`) |
 | `pages/7_Profile.py` | 90 | your own account: changing your password |
 | `pages/4_My_Home.py` | 370 | one person's own week, from the staff sheet |
@@ -59,7 +58,7 @@ several of them read the *real* schedule to test against a real day.
 | `weekend_duties.py` | 170 | the sheet's Carpet and Stripping columns from the staff schedule |
 | `clock.py` | 35 | property-local time |
 | `floor.py` | 150 | **today's floor, read once for the whole app** -- the one snapshot every page reads (charts with the front desk's marks on them, room statuses, the sheet's unplaced rooms, the mirror's last read), fetched at most every 10 s and fresh after any write. See "How the live data flows" below. No Streamlit |
-| `frontdesk.py` + `pages/14_Front_Desk.py` + `frontdesk_board.py` | 900 | (Hari, 21 Nov) the Front Desk page: every room today with HotSOS's status, housekeeper, RQS, started / cleaned / inspected, the current and arriving guest, late checkouts (the Arrival Report's by themselves, the desk's added or changed), and a search that filters as you type. The desk marks a late checkout with the time, guest departed, or a note to housekeeping (`fdmark_<date>_<ROOM>`, one row a room); they reach the housekeeper's card and route at once (`frontdesk.apply` sets `late_checkout`, which daystart reads). The board is a static component (`components/frontdesk_board`): light / dark (remembered on the device; it also dresses the page via `data-fd-theme`), count-up tiles, a glow on a room whose status just moved, toasts that wait for the page's ack of each save. The `frontdesk` role sees this page only (`auth.HOME`, `ui._visible`, the topnav guard); managers (admin) have it too |
+| `frontdesk.py` + `pages/14_Front_Desk.py` + `frontdesk_board.py` + `frontdesk_view.py` | 900 | (Hari, 21 Nov) the Front Desk page: every room today with HotSOS's status, housekeeper, RQS, started / cleaned / inspected, the current and arriving guest, late checkouts (the Arrival Report's by themselves, the desk's added or changed), and a search that filters as you type. The desk marks a late checkout with the time, guest departed, or a note to housekeeping (`fdmark_<date>_<ROOM>`, one row a room); they reach the housekeeper's card and route at once (`frontdesk.apply` sets `late_checkout`, which daystart reads). The board is a static component (`components/frontdesk_board`): light / dark (remembered on the device; it also dresses the page via `data-fd-theme`), count-up tiles, a glow on a room whose status just moved, toasts that wait for the page's ack of each save. The `frontdesk` role sees this page only (`auth.HOME`, `ui._visible`, the topnav guard); managers (admin) have it too |
 | `appmode.py` | 130 | the Android app's view (BGVSchedulingApp, a WebView, recognised by its user agent or `?app=1`): no menu, phone margins, only My Home / My Rooms / Profile -- other pages say they are on the website; hidden page links the app's bottom tabs click; language + sign out on Profile. Browsers see no change |
 
 ### Inside `cleaning_scheduler.py`
@@ -75,7 +74,7 @@ several of them read the *real* schedule to test against a real day.
 | 3222 | HTML BUILDERS — the chart cards |
 | 3486 | SIDEBAR — attendance, RQS roles, daily-service team |
 | 3854 | MAIN INPUT · 3999 SNAPSHOT · 4028 GENERATE |
-| 4223 | RESULTS, then the three tabs: `tab_sched` 4559, `tab_reassign` 4865, `tab_live` 5637 |
+| 4223 | RESULTS, then the three tabs: `tab_sched`, `tab_reassign`, `tab_fd` (the Front Desk board, since 26 Nov) |
 
 ## The data
 
@@ -159,6 +158,15 @@ a bare number = every room of it today) -- `prereg.split`. The guest's name
 and phone numbers are never copied. The tab has no date: a list identical to
 an earlier day's is `carried` and not counted. A failed read keeps the last
 list and records `error`.
+
+**The Schedule page's third tab is the Front Desk board** (Hari, 26 Nov:
+the Live tab "is redundant, front desk view gives a much better approach").
+`frontdesk_view.show(key)` is the whole board -- the save, the staleness
+check, the 30 s fragment -- drawn by the Front Desk page (`fdb`) and the
+Schedule tab (`fdb_sched`); marks save only for can_view_frontdesk (desk,
+managers), an RQS sees it read-only. The Live tab's grid and its bulk status
+panel are gone, and so is **the Dashboard page** (pages/1_Dashboard.py, same
+day: "not needed"); `can_view_dashboard` still gates Forecast.
 
 **Handing the PCs to another account** (Hari, 25 Nov). Admin → Service
 Passwords → Microsoft 365 takes an e-mail and password (a manager's, if the

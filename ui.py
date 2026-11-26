@@ -26,7 +26,6 @@ NAV_ITEMS = [
     ("pages/4_My_Home.py",       "My Home",       ":material/home:", None, "nav.my_home"),
     ("pages/5_My_Rooms.py",      "My Rooms",      ":material/bed:", "_my_rooms", "nav.my_rooms"),
     ("cleaning_scheduler.py",    "Schedule",      ":material/cleaning_services:", "can_generate", "nav.schedule"),
-    ("pages/1_Dashboard.py",     "Dashboard",     ":material/dashboard:", "can_view_dashboard", "nav.dashboard"),
     ("pages/13_Whos_Working.py", "Who's Working", ":material/groups:", "_whos_working", "nav.whos_working"),
     ("pages/14_Front_Desk.py",   "Front Desk",    ":material/room_service:", "can_view_frontdesk", "nav.front_desk"),
     ("pages/3_Roster_Import.py", "Roster Import", ":material/upload_file:", "can_manage_users", "nav.roster_import"),

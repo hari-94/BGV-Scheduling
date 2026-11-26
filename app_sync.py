@@ -218,10 +218,18 @@ def _service(raw):
     return "Full Clean"
 
 
+def _first(cell):
+    """The first person in a cell naming more than one -- the same separators
+    as hotsos_sync.team_members: "Grace/Dania", "Amalia \\ Janiris" (26 Nov:
+    3025A was never placed, the backslash kept both names), "Ana & Luz"."""
+    members = hs.team_members(str(cell or ""))
+    return members[0] if members else ""
+
+
 def _rqs_name(typed, aliases):
     """The inspector a sheet's RQS cell names: the first name in it ("Grace/Dania"
     is Grace with a trainee, as the Report reads it), or '' for a placeholder."""
-    first = str(typed or "").replace("+", "/").replace("&", "/").split("/")[0].strip()
+    first = str(typed or "").replace("+", "/").replace("&", "/").replace("\\", "/").split("/")[0].strip()
     if not first or first.lower().replace(" ", "").startswith(("rqs", "inspector", "n/a", "-")):
         return ""
     return staff_names.resolve(first, aliases)
@@ -335,7 +343,7 @@ def from_sheet(rows, save=True):
     for room, line in sheet.items():
         if room in charted:
             continue
-        typed = line["hskp"].split("/")[0].strip() if line["hskp"] else ""
+        typed = _first(line["hskp"]) if line["hskp"] else ""
         hk = staff_names.resolve(typed, aliases) if typed else ""
         if typed and not hk:
             # Not clear from the whole directory: among today's housekeepers,
