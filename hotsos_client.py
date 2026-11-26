@@ -157,7 +157,8 @@ class HotSOS:
             out[code] = {"gid": _pick(r, _ROOM_GID, "room id"),
                          "service": str(next((r[k] for k in _ROOM_SVC if r.get(k)), "")),
                          "assigned_to": str(r.get("assignedTo") or holder.get(code, "")),
-                         "status": str(r.get("serviceStatusEnum") or "")}
+                         "status": str(r.get("serviceStatusEnum") or ""),
+                         "reservation": str(r.get("reservationStatusEnum") or "")}
         return out
 
     # ── write ──────────────────────────────────────────────────────────────
@@ -170,6 +171,27 @@ class HotSOS:
     #: HotSOS's assign-status id for "Inspected" (from InspectionTypeList; the
     #: same 9 for Vacant-Clean and Occupied-Clean inspections on this property).
     INSPECTED_STATUS_ID = 9
+    #: The rest of the room-assignment status menu, from the Room Assignment
+    #: page's own _assignmentStatusMap (26 Nov; INSPECTED 9 is the same list).
+    STARTED_STATUS_ID = 5
+    VACANT_CLEANED_STATUS_ID = 11
+    OCCUPIED_CLEANED_STATUS_ID = 12
+
+    def set_status(self, room_gids, status_id):
+        """Set rooms to one status of the Room Assignment page's menu, the way
+        its status control does. Returns (http_status, ok_gids, failed_gids);
+        a room with nowhere to go comes back failed, so read the board after."""
+        import datetime as _dt
+        now = _dt.datetime.now(_dt.timezone.utc).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")
+        st, d = self.call("PATCH", "/RoomAssignment/STATUS", {
+            "roomGlobalIds": list(room_gids), "shift": self.shift,
+            "assignStatus": status_id, "actionTime": now,
+            "isServiceRefusedEntireStay": False})
+        custom = (d or {}).get("custom") if isinstance(d, dict) else {}
+        ok = list((custom or {}).get("successfulJobSiteGlobalIds") or [])
+        failed = list((custom or {}).get("failedJobSiteGlobalIds") or [])
+        return st, ok, failed
 
     def inspect(self, room_gids):
         """Sign rooms off as Inspected, exactly as the Room Assignment page's
@@ -177,19 +199,10 @@ class HotSOS:
         the room-assignment-update body (patchRoomAssignments -> assignStatus).
 
         Returns (http_status, ok_gids, failed_gids). A room already inspected
-        comes back failed -- it has nowhere to transition -- so the caller
-        confirms against a fresh read rather than trusting ok alone."""
-        import datetime as _dt
-        now = _dt.datetime.now(_dt.timezone.utc).isoformat(
-            timespec="milliseconds").replace("+00:00", "Z")
-        st, d = self.call("PATCH", "/RoomAssignment/STATUS", {
-            "roomGlobalIds": list(room_gids), "shift": self.shift,
-            "assignStatus": self.INSPECTED_STATUS_ID, "actionTime": now,
-            "isServiceRefusedEntireStay": False})
-        custom = (d or {}).get("custom") if isinstance(d, dict) else {}
-        ok = list((custom or {}).get("successfulJobSiteGlobalIds") or [])
-        failed = list((custom or {}).get("failedJobSiteGlobalIds") or [])
-        return st, ok, failed
+        comes back failed -- it has nowhere to transition -- and so does one
+        not cleaned yet (HotSOS won't go Awaiting Service -> Inspected), so
+        the caller confirms against a fresh read rather than trusting ok."""
+        return self.set_status(room_gids, self.INSPECTED_STATUS_ID)
 
     def close(self):
         for f in (getattr(self, "_browser", None) and self._browser.close,

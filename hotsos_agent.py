@@ -754,6 +754,32 @@ def follow_sheet(cfg, rows):
 
 INSPECT_MAX = 12
 
+#: HotSOS statuses an inspection can follow straight away.
+_INSPECTABLE = ("VACANT_CLEANED", "OCCUPIED_CLEANED", "TO_BE_INSPECTED", "INSPECTED")
+
+
+def _clean_first(h, room, r):
+    """Before an RQS's inspection: a room HotSOS still has as not cleaned
+    (awaiting service, started, return later, DND...) is marked cleaned --
+    started first where it hasn't been, as the floor would -- occupied cleaned
+    for a stay-over, vacant cleaned otherwise. Each step is checked on the
+    board; returns what was done, [] if nothing was needed."""
+    status = r.get("status") or ""
+    if status in _INSPECTABLE:
+        return []
+    done = []
+    if status != "CLEANING_STARTED":
+        h.set_status([r["gid"]], h.STARTED_STATUS_ID)
+        now = (h.rooms().get(room) or {}).get("status")
+        done.append(f"started ({now})")
+    stay = (r.get("reservation") or "").startswith("STAY_OVER")
+    h.set_status([r["gid"]], h.OCCUPIED_CLEANED_STATUS_ID if stay
+                 else h.VACANT_CLEANED_STATUS_ID)
+    now = (h.rooms().get(room) or {}).get("status")
+    done.append(f"cleaned ({now})")
+    log(f"inspect -> HotSOS: {room} marked cleaned first: " + ", ".join(done))
+    return done
+
 
 def push_inspections(cfg):
     """Pilot: mark in HotSOS the rooms an allowed user signed off in My Rooms.
@@ -785,6 +811,13 @@ def push_inspections(cfg):
             continue
         was = r.get("status") or "unknown"
         try:
+            # HotSOS won't inspect a room nobody marked cleaned (26 Nov: 1424F,
+            # 1424E, 1223C sat Awaiting Service, every inspect refused with 207
+            # and the mirror put them back to pending). Hari's call: the RQS's
+            # sign-off says the room is clean, so mark it cleaned first.
+            steps = _clean_first(h, room, r)
+            if steps:
+                log_lines.append(f"{clock.stamp()} inspect {room}: {was} -> " + " -> ".join(steps))
             st, ok, failed = h.inspect([r["gid"]])
         except Exception as ex:
             log_lines.append(f"{clock.stamp()} inspect {room}: {type(ex).__name__}: {ex} -- will retry")

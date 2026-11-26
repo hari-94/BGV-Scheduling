@@ -616,6 +616,17 @@ cell unassigns nothing. HotSOS's task (Departure Clean / Dust & Vac / No Task)
 is its own and does not change with the person. Record: `sheet_follow`
 (today's cells, moves, skipped); off switch: `sheet_follow_hotsos` {"on": false}.
 
+**An RQS's Inspected in My Rooms reaches HotSOS even when nobody marked
+the room cleaned** (Hari, 26 Nov). HotSOS refuses Awaiting Service ->
+Inspected (HTTP 207, the room listed failed), so 1424F, 1424E and 1223C were
+retried for hours while the mirror kept putting them back to pending.
+`hotsos_agent._clean_first` now marks such a room Cleaning Started, then
+Occupied Cleaned (stay-over) or Vacant Cleaned, then inspects it; each step
+is logged in the queue's `log`. Status ids from HotSOS's own
+`_assignmentStatusMap`: started 5, inspected 9, vacant cleaned 11, occupied
+cleaned 12 (`hotsos_client.set_status`). The Timing tab will show such rooms
+as "marked together"; that is expected.
+
 **A second PC stands in when the office PC is off.** `hotsos_agent.py backup`
 (Task Scheduler "BGV HotSOS Backup" on Hari's PC, `run_backup_agent.bat`)
 answers Preview and Push only while the office heartbeat is over three minutes
