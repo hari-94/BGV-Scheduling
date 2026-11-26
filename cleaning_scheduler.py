@@ -7916,6 +7916,18 @@ td{{transition:background .15s ease}}
         # The Front Desk board (Hari, 26 Nov): it replaced the Live tab, which
         # showed the same floor less well. The same piece as the Front Desk
         # page (frontdesk_view); marks only for the desk and managers.
+        # Room to breathe, as on the Front Desk page (Hari, 26 Nov: "cramped"):
+        # the board was 917px beside the sidebar under the page's 1200px cap.
+        # While the board is in the open tab the sidebar steps aside and the cap
+        # is the Front Desk page's. A tab once opened stays in the page, hidden;
+        # only the open one carries role="tabpanel" (Streamlit 1.5x), so the
+        # sidebar comes back on Schedule / Reassign.
+        _FDQ = ':root:has([role="tabpanel"] iframe[title="frontdesk_board.frontdesk_board"])'
+        st.markdown(f"""<style>
+{_FDQ} [data-testid="stSidebar"],{_FDQ} [data-testid="stSidebarCollapsedControl"]{{display:none!important;}}
+{_FDQ} .block-container{{max-width:min(1560px,100%)!important;padding-left:1.25rem!important;padding-right:1.25rem!important;}}
+{_FDQ} iframe[title="frontdesk_board.frontdesk_board"]{{border:0;display:block;}}
+</style>""", unsafe_allow_html=True)
         try:
             fresh.latest("prereg", "frontdesk", "floor", "frontdesk_board", "frontdesk_view")
             import frontdesk_view

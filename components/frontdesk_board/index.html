@@ -536,8 +536,10 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
   function drawSvcs(rows) {
     var box = document.getElementById("svcs"), by = {};
     rows.forEach(function (r) {
-      var k = r.svc || "?";
-      if (!by[k]) { by[k] = {name: r.service || k, n: 0, c: {}}; }
+      // A room on no chart (a Pre-Reg room nobody has, say) has no service:
+      // named for what it is rather than "?" (Hari, 26 Nov: 2134B).
+      var k = r.svc || "none";
+      if (!by[k]) { by[k] = {name: r.service || (k === "none" ? "Not on a chart" : k), n: 0, c: {}}; }
       by[k].n += 1;
       var b = bucket(r);
       by[k].c[b] = (by[k].c[b] || 0) + 1;
@@ -696,7 +698,7 @@ tr.ed td{background:var(--edit);border-bottom:1px solid var(--line);padding:0;}
     var inSearch = rows.filter(function (r) { return matches(r, ts); });
     drawDesk(inSearch);
     drawSvcs(inSearch);
-    var inSvc = state.svc ? inSearch.filter(function (r) { return (r.svc || "?") === state.svc; }) : inSearch;
+    var inSvc = state.svc ? inSearch.filter(function (r) { return (r.svc || "none") === state.svc; }) : inSearch;
     drawPills(inSvc);
     var test = TEST[state.tile] || TEST.all;
     var shown = inSvc.filter(function (r) { return test(r); });
