@@ -440,7 +440,6 @@ def sheet_dates(ws, max_scan_rows=200):
     return out
 
 
-
 def _walk_people_rows(ws):
     """Yield (row, name, group, building_or_label) for every person row.
 
@@ -516,14 +515,6 @@ def _person_record(name, group, bld, raw, kind=None, known=None):
         "daily_service": kind == KIND_DAILY,
     }
 
-def parse_day(ws, col):
-    """Read one day column and return the people found, by section.
-
-    Returns a list of dicts: name, section, building (housekeepers only),
-    raw cell text, kind, present, daily_service.
-    """
-    return [_person_record(name, group, bld, ws.cell(r, col).value)
-            for r, name, group, bld in _walk_people_rows(ws)]
 
 #: Pure red fill on a person's cell means they called off at the last minute
 #: without notice. Confirmed against the workbook: of 454 such cells, 392 are

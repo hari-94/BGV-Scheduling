@@ -66,11 +66,6 @@ def enabled_for(username: str) -> bool:
     return bool(c["on"] and username and username in c["users"])
 
 
-def set_config(on: bool, users) -> None:
-    db._upsert_key(CFG_KEY, {"on": bool(on), "users": sorted(set(users or []))})
-    _CFG.update(at=0.0, val=None)
-
-
 def scores_for(date=None) -> dict:
     return (db._load_key(_scores_key(date)) or {}).get("rooms") or {}
 

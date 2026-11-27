@@ -13,13 +13,12 @@ directory instead:
                    -- HotSOS's own list, refreshed by the office PC agent
                    every time it signs in.
 
-`suggest` proposes a full name for every name in use, using only matches
-that cannot be wrong (hotsos_sync.match_name); the RQS approves the table on
-the HotSOS page. `plan_rename` / `apply_rename` then rename what is stored:
-the staff weeks, the in-app overrides, the standing roster and today's
-schedule. After that, `rename_weeks` renames each Schedule.xlsx import on its
-way in, so the stored roster stays in full names while the sheet keeps
-whatever the team types.
+The RQS approves the table of names on the HotSOS page, and `apply_rename`
+renames what is stored: the staff weeks, the in-app overrides, the standing
+roster and today's schedule. After that, `rename_weeks` renames each
+Schedule.xlsx import on its way in, so the stored roster stays in full names
+while the sheet keeps whatever the team types. (`suggest` and `plan_rename`,
+which proposed the table, had no callers left and were removed on 26 Nov.)
 
 Past schedules and room-status history are left alone: they record what was
 written at the time.
@@ -169,24 +168,6 @@ def resolve_among(typed, candidates) -> str:
     return hits.pop() if len(hits) == 1 else ""
 
 
-def suggest(names, attendant_list, approved=None):
-    """One row per name: the approved full name if there is one, else a match
-    that cannot be wrong, else nothing (the RQS picks)."""
-    approved = approved or {}
-    labels = {a["label"] for a in attendant_list}
-    rows = []
-    for n in sorted(names, key=str.lower):
-        if n in approved:
-            rows.append({"name": n, "full": approved[n], "how": "approved"})
-        elif n in labels:
-            rows.append({"name": n, "full": n, "how": "already full"})
-        else:
-            hit = hs.match_name(n, attendant_list)
-            rows.append({"name": n, "full": hit["label"] if hit else "",
-                         "how": "suggested" if hit else "no match"})
-    return rows
-
-
 # ── renaming ─────────────────────────────────────────────────────────────────
 def _merge_person(into: dict, other: dict) -> dict:
     """Two rows for one person (the sheet had "Jenifer S." on one week and the
@@ -222,23 +203,6 @@ def rename_weeks(weeks: dict, table: dict) -> dict:
         w["people"] = people
         out[wk] = w
     return out
-
-
-def plan_rename(table: dict):
-    """What `apply_rename` would change, without changing it."""
-    weeks = db.load_staff_weeks()
-    renamed = rename_weeks(weeks, table)
-    changed_weeks = [wk for wk in weeks if weeks[wk] != renamed[wk]]
-    ov = db.load_staff_overrides()
-    ov_changed = [k for k in ov if full(k.split("|", 2)[1], table) != k.split("|", 2)[1]]
-    roster = db.load_roster() or {}
-    ro_changed = sorted({n for part in ("hk_roster", "insp_roster")
-                         for n in (roster.get(part) or {}) if full(n, table) != n})
-    sched = db.load_full_schedule() or {}
-    ch_changed = sum(1 for g in sched.get("groups_data") or []
-                     if g.get("housekeeper") in table or g.get("inspector") in table)
-    return {"weeks": changed_weeks, "overrides": ov_changed, "roster": ro_changed,
-            "charts": ch_changed, "names": sorted(table)}
 
 
 def apply_rename(table: dict):

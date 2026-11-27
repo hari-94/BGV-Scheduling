@@ -44,11 +44,6 @@ def enabled_for(username: str) -> bool:
     return bool(c["on"] and username and username in c["users"])
 
 
-def set_config(on: bool, users) -> None:
-    db._upsert_key(CFG_KEY, {"on": bool(on), "users": sorted(set(users or []))})
-    _CFG.update(at=0.0, val=None)
-
-
 def enqueue_inspection(room: str, by: str) -> None:
     """Ask the agent to mark `room` INSPECTED in HotSOS. Idempotent per room:
     a room already waiting is not queued twice."""
