@@ -202,13 +202,22 @@ class TransportTest(unittest.TestCase):
         self.assertEqual(len(fake.statements), 1)
 
 
+def rows(fake: FakeD1, sql: str) -> list[dict]:
+    return [dict(r) for r in fake.db.execute(sql).fetchall()]
+
+
 class TeeTest(unittest.TestCase):
+    """Both databases at once. Supabase is the primary in step 3 (copy_ids)."""
+
     def setUp(self):
         self.primary, self.primary_fake = make_client()
         self.mirror, self.mirror_fake = make_client()
         self.failures = []
-        self.tee = d1store.TeeClient(self.primary, self.mirror,
-                                     lambda table, ex: self.failures.append(table))
+        self.tee = self.tee_for(copy_ids=True)
+
+    def tee_for(self, copy_ids):
+        return d1store.TeeClient(self.primary, self.mirror,
+                                 lambda table, ex: self.failures.append(table), copy_ids=copy_ids)
 
     def test_reads_touch_only_the_primary(self):
         self.tee.table("app_settings").select("*").eq("key", "k").execute()
@@ -219,6 +228,43 @@ class TeeTest(unittest.TestCase):
         self.tee.table("app_settings").upsert({"key": "k", "payload": json.dumps(1)}).execute()
         for fake in (self.primary_fake, self.mirror_fake):
             self.assertEqual(fake.db.execute("SELECT count(*) FROM app_settings").fetchone()[0], 1)
+
+    def test_the_mirror_stores_exactly_what_the_primary_stored(self):
+        # an insert (its id and default time come from the primary) ...
+        self.tee.table("login_events").insert({"username": "ana"}).execute()
+        # ... an upsert stamped by the primary, and an update of it
+        rs = self.tee.table("room_status")
+        rs.upsert({"date": "2026-11-26", "room": "3240A", "status": "pending"},
+                  on_conflict="date,room").execute()
+        self.tee.table("room_status").update({"status": "inspected"}).eq("room", "3240A").execute()
+        for table in ("login_events", "room_status"):
+            sql = f"SELECT * FROM {table} ORDER BY id"
+            self.assertEqual(rows(self.mirror_fake, sql), rows(self.primary_fake, sql), table)
+
+    def test_a_delete_removes_the_same_rows_from_the_mirror(self):
+        self.tee.table("login_events").insert([
+            {"username": "old", "ts": "2026-01-01T00:00:00+00:00"},
+            {"username": "new", "ts": "2026-11-26T00:00:00+00:00"},
+        ]).execute()
+        self.tee.table("login_events").delete().lt("ts", "2026-06-01").execute()
+        self.assertEqual([r["username"] for r in rows(self.mirror_fake, "SELECT * FROM login_events")],
+                         ["new"])
+
+    def test_with_d1_primary_the_mirror_keeps_its_own_ids(self):
+        # Supabase as mirror numbers its own rows (its sequences must stay ahead)
+        self.mirror_fake.db.execute("INSERT INTO login_events (username, ts) VALUES ('seed', 'x')")
+        self.mirror_fake.db.execute(
+            "INSERT INTO room_status (id, date, room, status) VALUES (40, '2026-11-26', '3240A', 'pending')")
+        tee = self.tee_for(copy_ids=False)
+        tee.table("login_events").insert({"username": "ana"}).execute()
+        tee.table("room_status").upsert({"date": "2026-11-26", "room": "3240A", "status": "inspected"},
+                                        on_conflict="date,room").execute()
+        self.assertEqual([(r["id"], r["username"]) for r in rows(self.mirror_fake,
+                          "SELECT * FROM login_events ORDER BY id")], [(1, "seed"), (2, "ana")])
+        # matched on (date, room) though the ids differ: one row, updated
+        self.assertEqual([(r["id"], r["status"]) for r in rows(self.mirror_fake,
+                          "SELECT * FROM room_status")], [(40, "inspected")])
+        self.assertEqual(self.failures, [])
 
     def test_a_failing_mirror_is_reported_never_raised(self):
         self.mirror_fake.fail_next = [400]
@@ -259,10 +305,10 @@ class ModeTest(unittest.TestCase):
     def test_each_mode_routes_reads_and_writes(self):
         self.set_mode("both")
         c = d1store.client(lambda: self.supabase)
-        self.assertEqual((c.primary, c.mirror), (self.supabase, self.d1))
+        self.assertEqual((c.primary, c.mirror, c.copy_ids), (self.supabase, self.d1, True))
         self.set_mode("d1")
         c = d1store.client(lambda: self.supabase)
-        self.assertEqual((c.primary, c.mirror), (self.d1, self.supabase))
+        self.assertEqual((c.primary, c.mirror, c.copy_ids), (self.d1, self.supabase, False))
 
     def test_the_mode_is_read_at_most_once_a_minute(self):
         self.set_mode("both")

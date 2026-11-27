@@ -403,8 +403,28 @@ def _like_to_glob(pattern: str) -> str:
 
 # ── both databases at once, during the switch ────────────────────────────────
 
+#: What identifies a row in both databases. login_events has no such key: its
+#: rows are only ever inserted, and deleted by age.
+NATURAL_KEYS = {
+    "app_settings": ("key",),
+    "app_users": ("username",),
+    "room_status": ("date", "room"),
+    "schedule_full": ("date",),
+    "schedule_log": ("date",),
+}
+
+
 class TeeClient:
-    """Reads from `primary`. Writes go to `primary`, then are repeated on `mirror`.
+    """Reads from `primary`. Each write runs on `primary`, then the mirror
+    receives the rows the primary actually stored -- not the same command run
+    again, which would stamp its own times and number its own ids, so the two
+    would drift by milliseconds and the nightly comparison could never be exact.
+
+    `copy_ids`: while Supabase is primary, the mirror (D1) takes Supabase's ids
+    too, so the databases stay identical row for row. While D1 is primary, the
+    mirror (Supabase) assigns its own: writing ids into Postgres would leave its
+    sequences behind, and going back to Supabase would then collide on them.
+    Rows are matched on their natural key instead.
 
     A mirror failure is reported to `on_mirror_error` and never raised: the
     database being switched to must not be able to take the live app down.
@@ -412,8 +432,10 @@ class TeeClient:
     """
     WRITES = frozenset({"insert", "upsert", "update", "delete"})
 
-    def __init__(self, primary, mirror, on_mirror_error: Callable[[str, Exception], None]):
+    def __init__(self, primary, mirror, on_mirror_error: Callable[[str, Exception], None],
+                 *, copy_ids: bool):
         self.primary, self.mirror, self.on_mirror_error = primary, mirror, on_mirror_error
+        self.copy_ids = copy_ids
 
     def table(self, name: str) -> _TeeQuery:
         return _TeeQuery(self, name)
@@ -437,12 +459,31 @@ class _TeeQuery:
 
     def execute(self):
         result = self._replay(self._tee.primary)
-        if any(method in TeeClient.WRITES for method, _, _ in self._calls):
+        write = next((m for m, _, _ in self._calls if m in TeeClient.WRITES), None)
+        if write:
             try:
-                self._replay(self._tee.mirror)
+                self._mirror(write, result.data or [])
             except Exception as ex:  # reported, never raised: see TeeClient
                 self._tee.on_mirror_error(self._table, ex)
         return result
+
+    def _mirror(self, write: str, stored: list[dict]) -> None:
+        if write == "delete":
+            self._replay(self._tee.mirror)          # the same rows, by the same filter
+            return
+        if not stored:
+            return
+        mirror = self._tee.mirror.table(self._table)
+        if self._tee.copy_ids:
+            key = PRIMARY_KEYS.get(self._table, ("id",))
+            mirror.upsert(stored, on_conflict=",".join(key)).execute()
+            return
+        rows = [{c: v for c, v in row.items() if c != "id"} for row in stored]
+        natural = NATURAL_KEYS.get(self._table)
+        if natural:
+            mirror.upsert(rows, on_conflict=",".join(natural)).execute()
+        else:
+            mirror.insert(rows).execute()
 
 
 # ── which database, now ──────────────────────────────────────────────────────
@@ -524,7 +565,7 @@ def client(supabase_factory: Callable[[], Any]):
         _report_mirror_failure("(setup)", ex)
         return supabase
     if mode == "both":
-        return TeeClient(supabase, d1, _report_mirror_failure)
+        return TeeClient(supabase, d1, _report_mirror_failure, copy_ids=True)
     if mode == "d1":
-        return TeeClient(d1, supabase, _report_mirror_failure)
+        return TeeClient(d1, supabase, _report_mirror_failure, copy_ids=False)
     return d1
