@@ -1,0 +1,38 @@
+// The Cloudflare side of BGV Scheduling (web/README.md, docs/SYSTEM_REVIEW.md).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bgv",
+  "main": "src/index.ts",
+  // The newest date the pinned local runtime (wrangler 4.161.0) supports; move
+  // it forward together with wrangler, after running the tests.
+  "compatibility_date": "2026-11-10",
+  "workers_dev": true,
+  "preview_urls": false,
+
+  // Static files are served without running the Worker: free, and outside the
+  // free plan's 100,000 requests a day. Only /api/* reaches the code.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // The database (docs/DATA_MODEL.md). Free plan: 500 MB, 5M rows read and
+  // 100k rows written a day; past either, queries fail until 00:00 UTC.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bgv",
+      "database_id": "f105d97e-4c45-45c1-84f2-1d00ee819f14",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Nightly retention: 09:00 UTC is 2 AM in Breckenridge in winter, 3 AM in summer.
+  "triggers": { "crons": ["0 9 * * *"] },
+
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true }
+  }
+}

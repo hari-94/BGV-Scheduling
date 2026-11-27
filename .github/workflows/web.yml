@@ -1,0 +1,39 @@
+name: Web
+# The Cloudflare Worker (web/): lint, type-check and tests on every push and
+# pull request that touches it. Tests run inside the Workers runtime with a
+# local D1 built from web/migrations -- no Cloudflare account, no secrets.
+
+on:
+  push:
+    paths: ["web/**", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["web/**", ".github/workflows/web.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: cp .dev.vars.example .dev.vars
+      - run: npx wrangler types --check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test

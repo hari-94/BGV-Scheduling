@@ -1,0 +1,3 @@
+# Local secrets for `wrangler dev` and `wrangler types`. Copy to .dev.vars.
+# Production values are set with `wrangler secret put <NAME>`.
+CHALLENGE_SECRET=change-me
