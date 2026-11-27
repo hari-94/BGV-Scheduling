@@ -199,13 +199,30 @@ Undo: people keep using the Streamlit page.
   intact, unused, for 30 days, then deleted (after a final export kept in the
   App Archive folder).
 
-### Step 7 — Streamlit is switched off, the repo moves
+### Step 7 — Streamlit is switched off, the repo moves and goes private
 
-- When the sign-in log shows nobody on Streamlit for a week: delete the
-  Streamlit app, move the repo into `BGVgrandtimber`, deploy Cloudflare from
-  GitHub Actions with a Cloudflare token stored in the organisation.
-- Tell anyone still holding the Android app to install the new site from
-  Chrome instead.
+Cloudflare doesn't care whether the repo is private; Streamlit does (Hari:
+a private repo breaks the Streamlit app), so the repo goes private only once
+Streamlit is off. Three things must be true first:
+
+1. **The watchdog runs on Cloudflare, not GitHub Actions.** Measured: it used
+   2,449 Actions minutes from 19 to 27 Nov (~10,000 a month), free only
+   because the repo is public. A private repo gets 2,000 a month on the free
+   plan, so the watchdog would exhaust them in about six days and the alerts
+   would stop silently. Its replacement is the Worker's cron (review §7 item 6).
+2. **Deploys don't spend Actions minutes either.** Cloudflare's Workers Builds,
+   connected to the private repo through Cloudflare's GitHub app, runs
+   `npm ci && npm run check` and deploys on Cloudflare's 3,000 free build
+   minutes a month. GitHub Actions keeps only the Python tests (a few minutes a
+   push).
+3. **The PCs can still pull.** A private repo needs credentials for `git pull`:
+   each PC gets a read-only deploy key (or the suite's GitHub account), not
+   Hari's own sign-in, so it survives the hand-over.
+
+Then: when the sign-in log shows nobody on Streamlit for a week, delete the
+Streamlit app, move the repo into `BGVgrandtimber` (GitHub redirects the old
+address), make it private, switch the PCs' remotes, and tell anyone still
+holding the Android app to install the new site from Chrome instead.
 
 ## What happens to the PCs
 

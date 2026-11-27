@@ -74,7 +74,7 @@ the new Cloudflare code, which is written to standard from the first line.
 | S1 | Session token rides in the URL (`?k=`), so it lands in history, screenshots and shared links. | HttpOnly, Secure, SameSite cookie set by the Worker. |
 | S2 | Permissions are enforced in page code. | Enforced in the API for every request. |
 | S3 | Sign-in has a lockout but no bot check. | Turnstile after repeated failures (free). |
-| S4 | The repo is public. | Private once it moves (no secrets were found in code or history). |
+| S4 | The repo is public. | Private once Streamlit is off and the watchdog has moved to Cloudflare (it uses ~10,000 Actions minutes a month; a private repo gets 2,000). No secrets were found in code or history. |
 | S5 | The database key is all-powerful and shared by every process. | Per-client tokens: the Worker holds the database; agents get scoped API tokens. |
 
 ## 3. Cloudflare's free plan — what to use and what not to
