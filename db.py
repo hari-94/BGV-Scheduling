@@ -7,61 +7,30 @@ Tables (auto-created on first use):
 """
 # Guard against circular imports — this module must never import from
 # cleaning_scheduler.py or auth.py at module level.
-import os, json, hashlib, secrets, time as _time
+import json, hashlib, secrets, time as _time
+import appsecrets
 import clock
+import d1store
 from datetime import datetime
 
 # ── Supabase client (lazy init) ───────────────────────────────────────────────
 _sb = None
 
 def _get_credentials():
-    """
-    Get Supabase credentials.
-    Order: env vars → secrets.toml (multiple locations) → st.secrets (last resort).
-    Never calls any Streamlit command — safe to call before set_page_config.
-    """
-    url, key = "", ""
-
-    # Method 1: Environment variables (works everywhere)
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_KEY", "").strip()
-
-    # Method 2: Read secrets.toml directly (local dev + Streamlit Cloud)
-    if not url:
-        try:
-            import pathlib
-            candidates = [
-                pathlib.Path(__file__).parent / ".streamlit" / "secrets.toml",
-                pathlib.Path.cwd() / ".streamlit" / "secrets.toml",
-                pathlib.Path.home() / ".streamlit" / "secrets.toml",
-            ]
-            for p in candidates:
-                if p.exists():
-                    text = p.read_text(encoding="utf-8")
-                    for line in text.splitlines():
-                        line = line.strip()
-                        if line.startswith("SUPABASE_URL"):
-                            url = line.split("=",1)[1].strip().strip('"\'')
-                        elif line.startswith("SUPABASE_KEY"):
-                            key = line.split("=",1)[1].strip().strip('"\'')
-                    if url:
-                        break
-        except Exception:
-            pass
-
-    # Method 3: st.secrets (Streamlit Cloud — only after set_page_config has run)
-    if not url:
-        try:
-            import streamlit as _st
-            url = str(_st.secrets.get("SUPABASE_URL","") or "").strip()
-            key = str(_st.secrets.get("SUPABASE_KEY","") or "").strip()
-        except Exception:
-            pass
-
-    return url, key
+    """Supabase's URL and key: environment, then secrets.toml, then st.secrets
+    (appsecrets.py). Safe to call before set_page_config."""
+    return appsecrets.get("SUPABASE_URL"), appsecrets.get("SUPABASE_KEY")
 
 
 def _client():
+    """The database client for this call: Supabase, Cloudflare D1, or both while
+    the app moves between them -- d1store.client() decides by the database mode
+    (docs/CLOUDFLARE_MIGRATION.md). Until the mode is changed it is Supabase,
+    exactly as before."""
+    return d1store.client(_supabase)
+
+
+def _supabase():
     global _sb
     if _sb is None:
         from supabase import create_client
@@ -734,9 +703,14 @@ def _role_refused(ex) -> bool:
 
 
 def load_users() -> list:
-    """Return all users (without password hashes)."""
+    """Return all users (without password hashes), by username.
+
+    The order is explicit: without it Postgres returned rows in storage order,
+    which reshuffled the Admin page's list at every sign-in (each one rewrites
+    last_login), and D1 returns another order again."""
     try:
-        r = _client().table("app_users").select("id,username,role,created_at,last_login").execute()
+        r = (_client().table("app_users")
+             .select("id,username,role,created_at,last_login").order("username").execute())
         rows = r.data or []
     except Exception as ex:
         print(f"[db] load_users error: {ex}")
