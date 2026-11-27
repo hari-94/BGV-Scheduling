@@ -140,12 +140,14 @@ Undo: revert the commit.
 
 **The night it goes live**
 
-1. Hari creates the token: Cloudflare dashboard → *Manage account* →
-   *Account API tokens* → *Create token* → *Custom token*; permission
-   **Account · D1 · Edit**; this account only. (Account tokens belong to the
-   account, not a person, so they survive the hand-over.)
+1. ~~Hari creates the token~~ — done 26 Nov: an *account-owned* token
+   "BGV Scheduling - D1 (app and PCs)", permission Account · D1 · Edit,
+   verified active and answering queries; saved in this PC's
+   `.streamlit/secrets.toml`. (Account tokens belong to the account, not a
+   person, so they survive the hand-over.)
 2. The token goes in as `D1_API_TOKEN`: Streamlit Cloud → app → *Settings* →
-   *Secrets*; and `.streamlit/secrets.toml` on the office PC and this PC.
+   *Secrets*, and the office PC's `.streamlit/secrets.toml` (this PC has it).
+   Only by hand: it is not copied into any database.
 3. Merge `cloudflare` into `main` (after rebasing on the day's `main`), touch
    `requirements.txt` so Streamlit restarts; both PCs `git pull` and restart
    their agents (`schtasks /End`, `/Run`).
