@@ -284,6 +284,14 @@ October it never needs a person more than the old packer and saves one on
 small -- that person is then free for other work. Big days take 10-20 s. No
 solver, or no answer in time: the old building-first packing below.
 
+**A Daily Service round the team can't cover goes to whoever is free**
+(Hari, 26 Nov). The team is reserved for Daily Service, and a round beyond it
+got "Need Housekeeper N" for good: the 27 Nov preview had DS-D (220 min) open
+while Maricruz Peralta, ON, had no rooms -- `balance_light_charts` only deals
+to people already holding a chart. `assign_hk_building_aware` now offers such
+a round to the general pool *after* every Full Clean chart is staffed, so
+nobody comes off Full Clean for it (HP's rule above still holds).
+
 **Spare Daily Service time takes open Full Clean rooms** (`ds_take_open`).
 A Daily Service housekeeper under the cap takes the nearest open apartments
 whole, onto a Full Clean chart of their own (a chart never mixes services),

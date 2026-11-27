@@ -4076,6 +4076,25 @@ def assign_hk_building_aware(groups, present_hk, roster, ds_team=None):
             matched = f"{NO_HK_LABEL} {no_hk_n}"
         assignment[g["label"]] = matched
         if not is_unassigned_hk(matched): used.add(matched)
+    # A Daily Service round the team couldn't cover goes to whoever is still
+    # free once every other chart has its person (Hari, 26 Nov: the 27 Nov
+    # preview had DS-D, 220 min, on "Need Housekeeper 1" while Maricruz
+    # Peralta, ON, had no rooms). Nobody is taken off Full Clean for it -- this
+    # runs after it -- so HP's "fill a round before pulling anyone off Full
+    # Clean" still holds.
+    if ds_set:
+        for g in sorted(groups, key=lambda g: -(g.get("time") or 0)):
+            if (g.get("service_type") == SVC_DS and not g.get("dv_rqs2")
+                    and str(assignment.get(g["label"], "")).startswith(NEED_HK_PREFIX)):
+                matched = find_hk(g.get("blds", {1}), True)
+                if matched:
+                    assignment[g["label"]] = matched; used.add(matched)
+        # The ones still open, numbered 1, 2, ... again.
+        need_n = 0
+        for g in sorted(groups, key=lambda g: -(g.get("time") or 0)):
+            if str(assignment.get(g["label"], "")).startswith(NEED_HK_PREFIX):
+                need_n += 1
+                assignment[g["label"]] = f"{NEED_HK_PREFIX} {need_n}"
     return assignment, used
 
 
@@ -6346,10 +6365,13 @@ if run:
                     except Exception:
                         pass
                     # The order this plan was staffed in, with every person's
-                    # numbers, for the Report's Fair share view (a preview's
-                    # writes are stubbed out, so it records nothing).
+                    # numbers, for the Report's Fair share view. Not for a
+                    # preview: fairness imports db itself, past the page's
+                    # _PreviewDB, and a 27 Nov preview at 3:10 PM on 26 Nov
+                    # recorded one. (daily_build's publish=False stubs the
+                    # module itself, so the 9 PM preview never did.)
                     try:
-                        if st.session_state.get("fair_share"):
+                        if st.session_state.get("fair_share") and not _previewing():
                             import fairness as _fair
                             _fair.record(st.session_state["fair_share"])
                     except Exception as _ex:
