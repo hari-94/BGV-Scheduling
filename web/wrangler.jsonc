@@ -31,6 +31,12 @@
   // Nightly retention: 09:00 UTC is 2 AM in Breckenridge in winter, 3 AM in summer.
   "triggers": { "crons": ["0 9 * * *"] },
 
+  // No placement setting, on measurement (26 Nov, from Colorado, 3 runs each):
+  // placed beside D1 in LA ("targeted", gcp:us-west2) a three-query request
+  // was a little faster (~210 ms vs ~250-300) and a one-query request a
+  // little slower (110-190 ms vs 90-180). Screens are designed to make one
+  // query each, so the Denver edge suits them; re-measure when real pages exist.
+
   "observability": {
     "enabled": true,
     "traces": { "enabled": true }
