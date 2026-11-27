@@ -159,7 +159,11 @@ Undo: revert the commit.
 - **Live (night):** a fresh full copy (`web/tools/copy_from_supabase.py`),
   then mode `both`: the `db_mode` row in Supabase's app_settings set to
   `{"mode": "both"}`. Every write goes to Supabase and D1; every read still
-  comes from Supabase. A nightly check compares the two.
+  comes from Supabase. The mirror receives exactly the rows Supabase stored
+  (ids and times included), so the two stay identical row for row; a nightly
+  `web/tools/compare_databases.py` run (Task Scheduler on this PC) checks it.
+- Before it: the token is in Streamlit's secrets and the office PC's
+  secrets.toml, and both PCs run the new code.
 
 Done when: three days with the two identical every night.
 Undo: mode `supabase`.
