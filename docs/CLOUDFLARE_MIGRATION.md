@@ -110,7 +110,7 @@ lookup as `LIKE 'p%'` reads all 643 settings rows instead of the matching ones.
 - A **database mode** setting, re-read every minute by the app and both PCs,
   so a switch needs no restart: `supabase` (default) → `both` → `d1`.
 - D1's rows read and written are metered from Cloudflare's own analytics by
-  the Worker's cron (with the watchdog, review §6 item 6); until then the
+  the Worker's cron (with the watchdog, review §7 item 6); until then the
   Cloudflare dashboard shows them per day. `freetier.py` keeps metering
   Supabase while Supabase is in use.
 - **Live (night):** push to `main`, restart Streamlit the usual way
